@@ -172,6 +172,8 @@ def _agent_command(paths: AgentPaths, *, frozen: bool | None = None) -> list[str
         (
             "--database",
             str(paths.database),
+            "--config",
+            str(paths.config),
             "--address",
             paths.address,
             "--secret",

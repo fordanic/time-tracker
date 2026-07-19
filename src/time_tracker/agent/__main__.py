@@ -14,6 +14,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Parse resolved endpoint paths and run the agent server."""
     parser = argparse.ArgumentParser(prog="time-tracker-agent")
     parser.add_argument("--database", required=True, type=Path)
+    parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--address", required=True)
     parser.add_argument("--secret", required=True, type=Path)
     parser.add_argument("--lock", required=True, type=Path)
@@ -23,6 +24,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     serve(
         AgentPaths(
             database=arguments.database,
+            config=arguments.config,
             address=arguments.address,
             secret=arguments.secret,
             lock=arguments.lock,

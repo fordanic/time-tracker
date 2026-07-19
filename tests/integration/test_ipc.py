@@ -172,6 +172,36 @@ def test_agent_sends_reminders_after_the_tui_disconnects(tmp_path: Path) -> None
     assert not thread.is_alive()
 
 
+def test_agent_uses_reminder_intervals_from_configuration(tmp_path: Path) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    paths.config.write_text(
+        """
+[reminders]
+inactive_interval_minutes = 0.001
+active_enabled = false
+""".strip(),
+        encoding="utf-8",
+    )
+    notifier = RecordingNotifier()
+    thread = threading.Thread(
+        target=serve,
+        args=(paths,),
+        kwargs={"notifier": notifier},
+        daemon=True,
+    )
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        _wait_for_reminder(notifier, ReminderKind.INACTIVE)
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+
+
 def test_notification_failure_is_logged_without_stopping_agent(tmp_path: Path) -> None:
     paths = AgentPaths.in_directory(tmp_path)
     notifier = FailingNotifier()
