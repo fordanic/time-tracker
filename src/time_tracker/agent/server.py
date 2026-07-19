@@ -167,6 +167,8 @@ def _handle_request(
             result = service.list_projects()
         elif method == "list_activities":
             result = service.list_activities(_required_str(params, "project"))
+        elif method == "list_completed":
+            result = [_timer_dict(timer) for timer in service.list_completed()]
         elif method == "start":
             result = _timer_dict(
                 service.start(

@@ -43,6 +43,7 @@ def test_authenticated_json_ipc_persists_and_recovers_active_timer(
         assert completed is not None
         assert completed.entry_id == started.entry_id
         assert reconnected_client.get_active() is None
+        assert reconnected_client.list_completed() == [completed]
     finally:
         client.shutdown()
         thread.join(timeout=2)

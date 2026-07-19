@@ -118,6 +118,22 @@ class SQLiteTimerRepository:
             ).fetchall()
         return [str(row["name"]) for row in rows]
 
+    def list_completed(self) -> list[CompletedTimer]:
+        """List completed entries chronologically, including archived names."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT e.id, p.name AS project, a.name AS activity,
+                       e.started_at_utc, e.stopped_at_utc, e.note
+                FROM time_entries AS e
+                JOIN activities AS a ON a.id = e.activity_id
+                JOIN projects AS p ON p.id = a.project_id
+                WHERE e.stopped_at_utc IS NOT NULL
+                ORDER BY e.started_at_utc, e.id
+                """
+            ).fetchall()
+        return [self._completed_from_row(row) for row in rows]
+
     def start(
         self,
         project: str,
@@ -250,5 +266,16 @@ class SQLiteTimerRepository:
             project=str(row["project"]),
             activity=str(row["activity"]),
             started_at=micros_to_datetime(int(row["started_at_utc"])),
+            note=str(row["note"]) if row["note"] is not None else None,
+        )
+
+    @staticmethod
+    def _completed_from_row(row: sqlite3.Row) -> CompletedTimer:
+        return CompletedTimer(
+            entry_id=int(row["id"]),
+            project=str(row["project"]),
+            activity=str(row["activity"]),
+            started_at=micros_to_datetime(int(row["started_at_utc"])),
+            stopped_at=micros_to_datetime(int(row["stopped_at_utc"])),
             note=str(row["note"]) if row["note"] is not None else None,
         )

@@ -105,3 +105,24 @@ def test_existing_names_are_listed_and_reused_case_insensitively(
     with sqlite3.connect(database) as connection:
         assert connection.execute("SELECT count(*) FROM projects").fetchone()[0] == 1
         assert connection.execute("SELECT count(*) FROM activities").fetchone()[0] == 1
+
+
+def test_completed_entries_are_listed_chronologically_without_active_entry(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteTimerRepository(tmp_path / "tracker.sqlite3")
+    first_start = datetime(2026, 7, 19, 9, 0, tzinfo=UTC)
+    transition = first_start + timedelta(minutes=20)
+    stopped_at = transition + timedelta(minutes=40)
+
+    first = repository.start("Website", "Planning", first_start, "Outline, review")
+    second = repository.start("Client Ω", "Implementation", transition, None)
+
+    assert repository.list_completed() == [first.stop(transition)]
+
+    repository.stop(stopped_at)
+
+    assert repository.list_completed() == [
+        first.stop(transition),
+        second.stop(stopped_at),
+    ]
