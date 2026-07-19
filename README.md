@@ -32,11 +32,19 @@ business logic independent of the TUI and available to a future GUI.
 
 ## Status
 
-The first vertical walking skeleton is in place: the Textual TUI connects to a
-single authenticated background process, creates a project and activity by name,
-starts or stops one SQLite-backed timer, and restores an active timer when the TUI
-reconnects. Broader project/activity management, reminders, history, export, and
-packaging validation remain upcoming MVP work.
+The timer walking skeleton is in place: the Textual TUI connects to a single
+authenticated background process, creates or reuses project and activity names,
+starts, switches, and stops one SQLite-backed timer, and restores an active timer
+after TUI closure, agent restart, or forced process termination. The background
+process also owns monotonic reminder scheduling and native notification delivery
+after the TUI closes.
+
+The packaged lifecycle is exercised in CI on Linux, Windows, and macOS. A local
+macOS arm64 app-bundle lifecycle and Notification Center dispatch were validated
+on July 19, 2026; the corresponding Linux and Windows packaged results remain
+pending until the updated CI workflow runs on those hosts. Configuration,
+history, export, archive management, and the rest of reminder interaction remain
+upcoming MVP work.
 
 ## Development
 
@@ -56,8 +64,10 @@ make check
 make build
 ```
 
-`make build` creates a native executable for the current operating system in
-`dist/`. Use `make clean` to remove repository-local build and check artifacts.
+`make build` creates a native package for the current operating system in
+`dist/`. Linux and Windows use one-file executables. macOS uses an ad-hoc-signed
+`.app` bundle and its built-in notification command. Use
+`make clean` to remove repository-local build and check artifacts.
 To permanently remove the current user's Time Tracker database, IPC secret, and
 runtime files, first stop any work you want to preserve and run
 `make clear-local CONFIRM=1`.
@@ -78,4 +88,13 @@ the TUI leaves the background process and any active timer running. Run
 `uv run time-tracker --stop-agent` to stop only the process; the persisted timer
 remains active and is recovered the next time the application starts.
 
-The checks run on Python 3.14 across Linux, Windows, and macOS in GitHub Actions.
+After building, run the complete isolated package lifecycle check with
+`make smoke-packaged`. It opens a headless TUI, starts a timer, closes the TUI,
+reopens it, verifies recovery, stops the timer, and shuts down the packaged agent.
+On an interactive desktop, `make smoke-notification` dispatches one real native
+notification without opening the TUI; the operating system may request permission
+the first time.
+
+The checks, native build, and packaged lifecycle smoke run on Python 3.14 across
+Linux, Windows, and macOS in GitHub Actions. Native notification delivery still
+requires an interactive desktop session and is therefore a manual platform smoke.
