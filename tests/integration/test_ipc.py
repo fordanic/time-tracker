@@ -44,6 +44,11 @@ def test_authenticated_json_ipc_persists_and_recovers_active_timer(
         assert completed.entry_id == started.entry_id
         assert reconnected_client.get_active() is None
         assert reconnected_client.list_completed() == [completed]
+        destination = tmp_path / "ipc-export.csv"
+        assert reconnected_client.export_completed(destination) == 1
+        assert destination.read_text(encoding="utf-8").startswith(
+            "project,activity,start_time,stop_time,duration_seconds,note"
+        )
     finally:
         client.shutdown()
         thread.join(timeout=2)

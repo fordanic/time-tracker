@@ -103,6 +103,10 @@ TimeEntry(id, activity_id, started_at_utc, stopped_at_utc?, note?, created_at)
 - Derive duration from timestamps; do not store an independently mutable duration.
 - Use a monotonic clock for in-process scheduling and persisted UTC instants for
   recovery.
+- CSV export is an agent application use case: it reads completed entries through
+  the repository port and writes through a CSV output port. The TUI resolves the
+  destination path and sends an explicit overwrite-confirmation flag over IPC;
+  active entries are excluded by the completed-entry query.
 
 SQLite and the background process remain authoritative even when notification
 delivery fails or the TUI disconnects.
