@@ -88,6 +88,36 @@ class SQLiteTimerRepository:
             ).fetchone()
         return self._active_from_row(row) if row is not None else None
 
+    def list_projects(self) -> list[str]:
+        """List non-archived projects using their canonical stored names."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT name
+                FROM projects
+                WHERE archived_at_utc IS NULL
+                ORDER BY name COLLATE NOCASE, id
+                """
+            ).fetchall()
+        return [str(row["name"]) for row in rows]
+
+    def list_activities(self, project: str) -> list[str]:
+        """List non-archived activities for a case-insensitive project match."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT a.name
+                FROM activities AS a
+                JOIN projects AS p ON p.id = a.project_id
+                WHERE p.name = ? COLLATE NOCASE
+                  AND p.archived_at_utc IS NULL
+                  AND a.archived_at_utc IS NULL
+                ORDER BY a.name COLLATE NOCASE, a.id
+                """,
+                (project,),
+            ).fetchall()
+        return [str(row["name"]) for row in rows]
+
     def start(
         self,
         project: str,
@@ -116,34 +146,59 @@ class SQLiteTimerRepository:
                     (started_micros, int(current["id"])),
                 )
 
-            connection.execute(
+            project_row = connection.execute(
                 """
-                INSERT INTO projects(name, created_at_utc)
-                VALUES (?, ?)
-                ON CONFLICT(name) DO NOTHING
+                SELECT id, name
+                FROM projects
+                WHERE name = ? COLLATE NOCASE AND archived_at_utc IS NULL
+                ORDER BY id
+                LIMIT 1
                 """,
-                (project, started_micros),
-            )
-            project_id = int(
-                connection.execute(
-                    "SELECT id FROM projects WHERE name = ?", (project,)
-                ).fetchone()["id"]
-            )
-            connection.execute(
+                (project,),
+            ).fetchone()
+            if project_row is None:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO projects(name, created_at_utc)
+                    VALUES (?, ?)
+                    """,
+                    (project, started_micros),
+                )
+                if cursor.lastrowid is None:
+                    raise RuntimeError("SQLite did not return the inserted project ID")
+                project_id = cursor.lastrowid
+                canonical_project = project
+            else:
+                project_id = int(project_row["id"])
+                canonical_project = str(project_row["name"])
+
+            activity_row = connection.execute(
                 """
-                INSERT INTO activities(project_id, name, created_at_utc)
-                VALUES (?, ?, ?)
-                ON CONFLICT(project_id, name) DO NOTHING
+                SELECT id, name
+                FROM activities
+                WHERE project_id = ?
+                  AND name = ? COLLATE NOCASE
+                  AND archived_at_utc IS NULL
+                ORDER BY id
+                LIMIT 1
                 """,
-                (project_id, activity, started_micros),
-            )
-            activity_id = int(
-                connection.execute(
-                    """SELECT id FROM activities
-                       WHERE project_id = ? AND name = ?""",
-                    (project_id, activity),
-                ).fetchone()["id"]
-            )
+                (project_id, activity),
+            ).fetchone()
+            if activity_row is None:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO activities(project_id, name, created_at_utc)
+                    VALUES (?, ?, ?)
+                    """,
+                    (project_id, activity, started_micros),
+                )
+                if cursor.lastrowid is None:
+                    raise RuntimeError("SQLite did not return the inserted activity ID")
+                activity_id = cursor.lastrowid
+                canonical_activity = activity
+            else:
+                activity_id = int(activity_row["id"])
+                canonical_activity = str(activity_row["name"])
             cursor = connection.execute(
                 """
                 INSERT INTO time_entries(
@@ -158,8 +213,8 @@ class SQLiteTimerRepository:
 
         return ActiveTimer(
             entry_id=entry_id,
-            project=project,
-            activity=activity,
+            project=canonical_project,
+            activity=canonical_activity,
             started_at=require_utc(started_at),
             note=note,
         )

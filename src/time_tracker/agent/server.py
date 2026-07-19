@@ -82,6 +82,10 @@ def _handle_request(
             result: object = {"version": PROTOCOL_VERSION}
         elif method == "get_active":
             result = _timer_dict(service.get_active())
+        elif method == "list_projects":
+            result = service.list_projects()
+        elif method == "list_activities":
+            result = service.list_activities(_required_str(params, "project"))
         elif method == "start":
             result = _timer_dict(
                 service.start(

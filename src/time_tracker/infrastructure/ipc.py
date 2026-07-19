@@ -42,6 +42,14 @@ class AgentClient:
         result = self._request("get_active", {})
         return None if result is None else _active_from_object(result)
 
+    def list_projects(self) -> list[str]:
+        """Return selectable project names from authoritative storage."""
+        return _string_list(self._request("list_projects", {}))
+
+    def list_activities(self, project: str) -> list[str]:
+        """Return selectable activities for one project."""
+        return _string_list(self._request("list_activities", {"project": project}))
+
     def start(
         self,
         project: str,
@@ -218,3 +226,9 @@ def _object_int(value: object) -> int:
     if not isinstance(value, int):
         raise AgentRequestError("the agent returned malformed numeric data")
     return value
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise AgentRequestError("the agent returned a malformed list")
+    return cast(list[str], value)

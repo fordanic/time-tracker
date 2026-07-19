@@ -81,3 +81,27 @@ def test_database_boundary_rejects_a_second_active_entry(tmp_path: Path) -> None
                     datetime_to_micros(started_at),
                 ),
             )
+
+
+def test_existing_names_are_listed_and_reused_case_insensitively(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "tracker.sqlite3"
+    repository = SQLiteTimerRepository(database)
+    started_at = datetime(2026, 7, 19, 9, 0, tzinfo=UTC)
+    repository.start("Website", "Implementation", started_at, None)
+
+    restarted = repository.start(
+        "website",
+        "implementation",
+        started_at + timedelta(minutes=5),
+        None,
+    )
+
+    assert restarted.project == "Website"
+    assert restarted.activity == "Implementation"
+    assert repository.list_projects() == ["Website"]
+    assert repository.list_activities("WEBSITE") == ["Implementation"]
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("SELECT count(*) FROM projects").fetchone()[0] == 1
+        assert connection.execute("SELECT count(*) FROM activities").fetchone()[0] == 1

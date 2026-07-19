@@ -45,6 +45,16 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
             )
             assert "Website / Implementation" in recovered_text
 
+            await pilot.click("#project")
+            await pilot.press("w", "e", "b", "right")
+            await pilot.pause()
+            assert recovered_app.query_one("#project", Input).value == "Website"
+
+            await pilot.click("#activity")
+            await pilot.press("i", "m", "p", "right")
+            await pilot.pause()
+            assert recovered_app.query_one("#activity", Input).value == "Implementation"
+
             await pilot.click("#stop-button")
             await pilot.pause()
 

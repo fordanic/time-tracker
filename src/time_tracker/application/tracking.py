@@ -23,6 +23,14 @@ class TimerRepository(Protocol):
         """Return the current active timer, if one exists."""
         ...
 
+    def list_projects(self) -> list[str]:
+        """Return selectable project names in display order."""
+        ...
+
+    def list_activities(self, project: str) -> list[str]:
+        """Return selectable activity names for one project."""
+        ...
+
     def start(
         self,
         project: str,
@@ -56,6 +64,15 @@ class TrackingService:
     def get_active(self) -> ActiveTimer | None:
         """Recover the current active timer from authoritative storage."""
         return self._repository.get_active()
+
+    def list_projects(self) -> list[str]:
+        """List projects available for a new timer."""
+        return self._repository.list_projects()
+
+    def list_activities(self, project: str) -> list[str]:
+        """List activities belonging to the selected project."""
+        project = project.strip()
+        return self._repository.list_activities(project) if project else []
 
     def start(
         self,

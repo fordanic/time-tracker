@@ -31,6 +31,9 @@ def test_authenticated_json_ipc_persists_and_recovers_active_timer(
     try:
         started = client.start("Website", "Implementation", "Through IPC")
 
+        assert client.list_projects() == ["Website"]
+        assert client.list_activities("website") == ["Implementation"]
+
         reconnected_client = AgentClient(paths)
         assert reconnected_client.get_active() == started
         completed = reconnected_client.stop()

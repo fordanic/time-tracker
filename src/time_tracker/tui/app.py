@@ -10,6 +10,7 @@ from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.suggester import SuggestFromList
 from textual.widgets import Button, Footer, Header, Input, Static
 
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
@@ -20,6 +21,14 @@ class TrackerGateway(Protocol):
 
     def get_active(self) -> ActiveTimer | None:
         """Return the recovered active timer."""
+        ...
+
+    def list_projects(self) -> list[str]:
+        """Return project names available for autocomplete."""
+        ...
+
+    def list_activities(self, project: str) -> list[str]:
+        """Return activity names available for the selected project."""
         ...
 
     def start(
@@ -98,8 +107,8 @@ class TimeTrackerApp(App[None]):
         yield Header()
         with Vertical(id="tracker"):
             yield Static("No timer running", id="active-timer")
-            yield Input(placeholder="Project", id="project")
-            yield Input(placeholder="Activity", id="activity")
+            yield Input(placeholder="Project (type to reuse existing)", id="project")
+            yield Input(placeholder="Activity (type to reuse existing)", id="activity")
             yield Input(placeholder="Optional note", id="note")
             with Horizontal(id="actions"):
                 yield Button("Start / switch  F5", id="start-button", variant="success")
@@ -111,10 +120,37 @@ class TimeTrackerApp(App[None]):
         """Recover any persisted active timer when the TUI reconnects."""
         self.set_interval(1.0, self._render_active)
         try:
-            self.active_timer = await asyncio.to_thread(self.client.get_active)
+            self.active_timer, projects = await asyncio.gather(
+                asyncio.to_thread(self.client.get_active),
+                asyncio.to_thread(self.client.list_projects),
+            )
         except Exception as error:
             self._show_message(str(error), error=True)
+        else:
+            self.query_one("#project", Input).suggester = SuggestFromList(
+                projects,
+                case_sensitive=False,
+            )
         self._render_active()
+
+    @on(Input.Changed, "#project")
+    async def handle_project_changed(self, event: Input.Changed) -> None:
+        """Refresh activity completions when the selected project changes."""
+        project = event.value.strip()
+        try:
+            activities = await asyncio.to_thread(
+                self.client.list_activities,
+                project,
+            )
+        except Exception as error:
+            self._show_message(str(error), error=True)
+            return
+        if self.query_one("#project", Input).value.strip() != project:
+            return
+        self.query_one("#activity", Input).suggester = SuggestFromList(
+            activities,
+            case_sensitive=False,
+        )
 
     @on(Button.Pressed, "#start-button")
     async def handle_start_button(self) -> None:
@@ -149,7 +185,17 @@ class TimeTrackerApp(App[None]):
             self._show_message(str(error), error=True)
             return
         self._show_message("Timer persisted and running.")
+        self.query_one("#project", Input).value = self.active_timer.project
+        self.query_one("#activity", Input).value = self.active_timer.activity
+        await self._refresh_project_suggestions()
         self._render_active()
+
+    async def _refresh_project_suggestions(self) -> None:
+        projects = await asyncio.to_thread(self.client.list_projects)
+        self.query_one("#project", Input).suggester = SuggestFromList(
+            projects,
+            case_sensitive=False,
+        )
 
     async def _stop_timer(self) -> None:
         try:

@@ -72,9 +72,10 @@ uv run pytest
 ```
 
 Run `uv run time-tracker` to open the TUI. Enter a project and activity, then use
-the buttons or `F5`/`F6` to start and stop. Closing the TUI leaves the background
-process and any active timer running. Run `uv run time-tracker --stop-agent` to
-stop only the process; the persisted timer remains active and is recovered the
-next time the application starts.
+the buttons or `F5`/`F6` to start and stop. Existing project and activity names
+are suggested as you type; press the right arrow to accept a completion. Closing
+the TUI leaves the background process and any active timer running. Run
+`uv run time-tracker --stop-agent` to stop only the process; the persisted timer
+remains active and is recovered the next time the application starts.
 
 The checks run on Python 3.14 across Linux, Windows, and macOS in GitHub Actions.
