@@ -97,6 +97,9 @@ TimeEntry(id, activity_id, started_at_utc, stopped_at_utc?, note?, created_at)
 - Track applied numbered SQL migrations in `schema_migrations`.
 - Use transactions for timer transitions. Switching stops the current entry and
   starts the next with one captured timestamp.
+- Archive projects and activities through agent-owned application use cases.
+  Selection queries exclude archived rows, while archived names remain reserved;
+  an archive transition does not mutate the active timer or historical entries.
 - Enforce at most one entry with no stop time using a partial unique index.
 - Store UTC instants as integer microseconds since the Unix epoch. Convert them to
   local, offset-aware ISO 8601 values at presentation and export boundaries.

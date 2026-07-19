@@ -15,6 +15,7 @@ from time_tracker.infrastructure.instance_lock import (
 )
 from time_tracker.infrastructure.ipc import (
     AgentClient,
+    AgentRequestError,
     AgentUnavailableError,
     _agent_command,
     ensure_agent_running,
@@ -49,6 +50,16 @@ def test_authenticated_json_ipc_persists_and_recovers_active_timer(
         assert destination.read_text(encoding="utf-8").startswith(
             "project,activity,start_time,stop_time,duration_seconds,note"
         )
+        assert reconnected_client.archive_activity("website", "implementation") == (
+            "Website",
+            "Implementation",
+        )
+        assert reconnected_client.list_activities("Website") == []
+        with pytest.raises(AgentRequestError, match="activity is archived"):
+            reconnected_client.start("Website", "Implementation", None)
+        assert reconnected_client.list_completed() == [completed]
+        assert reconnected_client.archive_project("website") == "Website"
+        assert reconnected_client.list_projects() == []
     finally:
         client.shutdown()
         thread.join(timeout=2)

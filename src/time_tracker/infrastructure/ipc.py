@@ -63,6 +63,24 @@ class AgentClient:
             raise AgentRequestError("the agent returned malformed history data")
         return [_completed_from_object(item) for item in result]
 
+    def archive_project(self, project: str) -> str:
+        """Archive a project and return its canonical stored name."""
+        result = _object_dict(self._request("archive_project", {"project": project}))
+        return _object_str(result.get("project"))
+
+    def archive_activity(self, project: str, activity: str) -> tuple[str, str]:
+        """Archive an activity and return its canonical stored names."""
+        result = _object_dict(
+            self._request(
+                "archive_activity",
+                {"project": project, "activity": activity},
+            )
+        )
+        return (
+            _object_str(result.get("project")),
+            _object_str(result.get("activity")),
+        )
+
     def export_completed(self, destination: Path, *, overwrite: bool = False) -> int:
         """Export completed entries without silently replacing a file."""
         try:

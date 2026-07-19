@@ -37,6 +37,14 @@ class TrackerGateway(Protocol):
         """Return completed entries in chronological order."""
         ...
 
+    def archive_project(self, project: str) -> str:
+        """Archive a project and return its canonical stored name."""
+        ...
+
+    def archive_activity(self, project: str, activity: str) -> tuple[str, str]:
+        """Archive an activity and return its canonical stored names."""
+        ...
+
     def export_completed(self, destination: Path, *, overwrite: bool = False) -> int:
         """Export completed entries to a confirmed destination."""
         ...
@@ -64,6 +72,8 @@ class TimeTrackerApp(App[None]):
         Binding("f5", "start_timer", "Start / switch"),
         Binding("f6", "stop_timer", "Stop"),
         Binding("f7", "export_completed", "Export CSV"),
+        Binding("f8", "archive_project", "Archive project"),
+        Binding("f9", "archive_activity", "Archive activity"),
         Binding("ctrl+q", "quit", "Quit"),
     ]
     CSS = """
@@ -89,6 +99,19 @@ class TimeTrackerApp(App[None]):
 
     Input {
         margin-bottom: 0;
+    }
+
+    #project-actions, #activity-actions {
+        height: auto;
+    }
+
+    #project, #activity {
+        width: 1fr;
+    }
+
+    #archive-project-button, #archive-activity-button {
+        width: 26;
+        margin-left: 1;
     }
 
     #actions {
@@ -143,8 +166,18 @@ class TimeTrackerApp(App[None]):
         yield Header()
         with Vertical(id="tracker"):
             yield Static("No timer running", id="active-timer")
-            yield Input(placeholder="Project (type to reuse existing)", id="project")
-            yield Input(placeholder="Activity (type to reuse existing)", id="activity")
+            with Horizontal(id="project-actions"):
+                yield Input(
+                    placeholder="Project (type to reuse existing)",
+                    id="project",
+                )
+                yield Button("Archive project  F8", id="archive-project-button")
+            with Horizontal(id="activity-actions"):
+                yield Input(
+                    placeholder="Activity (type to reuse existing)",
+                    id="activity",
+                )
+                yield Button("Archive activity  F9", id="archive-activity-button")
             yield Input(placeholder="Optional note", id="note")
             with Horizontal(id="actions"):
                 yield Button("Start / switch  F5", id="start-button", variant="success")
@@ -213,6 +246,16 @@ class TimeTrackerApp(App[None]):
         """Handle pointer activation of the export action."""
         await self._export_completed()
 
+    @on(Button.Pressed, "#archive-project-button")
+    async def handle_archive_project_button(self) -> None:
+        """Handle pointer activation of project archiving."""
+        await self._archive_project()
+
+    @on(Button.Pressed, "#archive-activity-button")
+    async def handle_archive_activity_button(self) -> None:
+        """Handle pointer activation of activity archiving."""
+        await self._archive_activity()
+
     @on(Input.Changed, "#export-path")
     def handle_export_path_changed(self) -> None:
         """Cancel overwrite confirmation when the destination is edited."""
@@ -230,6 +273,14 @@ class TimeTrackerApp(App[None]):
     async def action_export_completed(self) -> None:
         """Export completed entries from the F7 binding."""
         await self._export_completed()
+
+    async def action_archive_project(self) -> None:
+        """Archive the entered project from the F8 binding."""
+        await self._archive_project()
+
+    async def action_archive_activity(self) -> None:
+        """Archive the entered activity from the F9 binding."""
+        await self._archive_activity()
 
     async def _start_timer(self) -> None:
         project = self.query_one("#project", Input).value
@@ -257,6 +308,49 @@ class TimeTrackerApp(App[None]):
         self.query_one("#project", Input).suggester = SuggestFromList(
             projects,
             case_sensitive=False,
+        )
+
+    async def _refresh_activity_suggestions(self, project: str) -> None:
+        activities = await asyncio.to_thread(self.client.list_activities, project)
+        self.query_one("#activity", Input).suggester = SuggestFromList(
+            activities,
+            case_sensitive=False,
+        )
+
+    async def _archive_project(self) -> None:
+        project_input = self.query_one("#project", Input)
+        project = project_input.value
+        try:
+            archived_project = await asyncio.to_thread(
+                self.client.archive_project,
+                project,
+            )
+        except Exception as error:
+            self._show_message(str(error), error=True)
+            return
+        project_input.value = ""
+        self.query_one("#activity", Input).value = ""
+        await self._refresh_project_suggestions()
+        await self._refresh_activity_suggestions("")
+        self._show_message(f"Archived project {archived_project}.")
+
+    async def _archive_activity(self) -> None:
+        project = self.query_one("#project", Input).value
+        activity_input = self.query_one("#activity", Input)
+        activity = activity_input.value
+        try:
+            archived_project, archived_activity = await asyncio.to_thread(
+                self.client.archive_activity,
+                project,
+                activity,
+            )
+        except Exception as error:
+            self._show_message(str(error), error=True)
+            return
+        activity_input.value = ""
+        await self._refresh_activity_suggestions(archived_project)
+        self._show_message(
+            f"Archived activity {archived_project} / {archived_activity}."
         )
 
     async def _stop_timer(self) -> None:

@@ -40,13 +40,14 @@ process also owns monotonic reminder scheduling, TOML-configured reminder
 intervals, and native notification delivery after the TUI closes. The TUI lists
 completed entries chronologically with their local start and stop times, derived
 duration, and note, and exports completed entries to UTF-8 CSV with explicit
-overwrite confirmation.
+overwrite confirmation. Projects and activities can be archived from the TUI;
+archived names disappear from new-timer suggestions and remain intact in history.
 
 The packaged lifecycle is exercised in CI on Linux, Windows, and macOS. A local
 macOS arm64 app-bundle lifecycle and Notification Center dispatch were validated
 on July 19, 2026; the corresponding Linux and Windows packaged results remain
-pending until the updated CI workflow runs on those hosts. Archive management and
-the rest of reminder interaction remain upcoming MVP work.
+pending until the updated CI workflow runs on those hosts. The remaining reminder
+interaction is upcoming MVP work.
 
 ## Development
 
@@ -94,6 +95,10 @@ Enter a destination in the CSV export path field and press its button or `F7` to
 export completed entries. Relative paths are resolved from the directory where
 the TUI was launched, and `~` expands to the current user's home directory. If the
 destination exists, the TUI requires a second export action before overwriting it.
+
+Enter an existing project or activity and use its archive button or `F8`/`F9`.
+Archiving leaves any running timer active, removes the name from future timer
+suggestions, and preserves completed history. Archived names cannot be reused.
 
 ## Configuration
 

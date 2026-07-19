@@ -23,6 +23,8 @@ leaving a clean path to a later GUI.
 - Create and list projects and their activities.
 - Archive projects and activities. Archived items remain visible in history but
   cannot be selected for new timers.
+- Archiving does not stop an active entry. Archived names remain reserved and
+  cannot be recreated by typing the same name again.
 - Projects and activities already used by entries are archived rather than
   permanently deleted.
 

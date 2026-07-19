@@ -126,3 +126,60 @@ def test_completed_entries_are_listed_chronologically_without_active_entry(
         first.stop(transition),
         second.stop(stopped_at),
     ]
+
+
+def test_archived_activity_remains_in_history_and_cannot_be_reused(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "tracker.sqlite3"
+    repository = SQLiteTimerRepository(database)
+    started_at = datetime(2026, 7, 19, 9, 0, tzinfo=UTC)
+    stopped_at = started_at + timedelta(minutes=30)
+    archived_at = stopped_at + timedelta(minutes=1)
+    active = repository.start("Website", "Implementation", started_at, None)
+    completed = repository.stop(stopped_at)
+
+    archived = repository.archive_activity("website", "implementation", archived_at)
+
+    assert archived == ("Website", "Implementation")
+    assert repository.list_projects() == ["Website"]
+    assert repository.list_activities("Website") == []
+    assert repository.list_completed() == [completed]
+    with pytest.raises(ValueError, match="activity is archived: Implementation"):
+        repository.start(
+            "WEBSITE",
+            "IMPLEMENTATION",
+            archived_at + timedelta(minutes=1),
+            None,
+        )
+    assert repository.get_active() is None
+    with sqlite3.connect(database) as connection:
+        row = connection.execute("SELECT archived_at_utc FROM activities").fetchone()
+        assert row == (datetime_to_micros(archived_at),)
+        assert connection.execute("SELECT count(*) FROM activities").fetchone()[0] == 1
+    assert completed == active.stop(stopped_at)
+
+
+def test_archived_project_is_not_selectable_and_rejected_start_is_atomic(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteTimerRepository(tmp_path / "tracker.sqlite3")
+    started_at = datetime(2026, 7, 19, 9, 0, tzinfo=UTC)
+    archived_at = started_at + timedelta(minutes=5)
+    active = repository.start("Website", "Planning", started_at, None)
+
+    assert repository.archive_project("website", archived_at) == "Website"
+    assert repository.list_projects() == []
+    assert repository.list_activities("Website") == []
+    assert repository.get_active() == active
+
+    with pytest.raises(ValueError, match="project is archived: Website"):
+        repository.start(
+            "WEBSITE",
+            "Other",
+            archived_at + timedelta(minutes=1),
+            None,
+        )
+
+    assert repository.get_active() == active
+    assert repository.list_completed() == []
