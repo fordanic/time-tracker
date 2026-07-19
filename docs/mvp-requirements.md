@@ -1,0 +1,119 @@
+# MVP Requirements
+
+## Purpose
+
+Time Tracker helps one user reliably record time against named activities within
+projects. It is local-first, keyboard-first, and works without an account or
+internet connection. The MVP validates the full workflow through a TUI while
+leaving a clean path to a later GUI.
+
+## Product model
+
+- A project contains activities.
+- Every activity belongs to exactly one project.
+- A time entry contains an activity, start time, optional stop time, and optional
+  note. Its project comes from the activity.
+- An entry without a stop time is the active timer. There can be at most one.
+- Duration is always derived from timestamps; it is never edited independently.
+
+## Required behavior
+
+### Projects and activities
+
+- Create and list projects and their activities.
+- Archive projects and activities. Archived items remain visible in history but
+  cannot be selected for new timers.
+- Projects and activities already used by entries are archived rather than
+  permanently deleted.
+
+### Tracking
+
+- Start and stop an activity from the TUI.
+- Starting a new activity automatically stops the active one and starts the new
+  one at the same transition timestamp, without overlap.
+- Show the active project, activity, start time, and elapsed duration prominently.
+- Allow an optional plain-text note on the active entry.
+- List completed entries chronologically.
+- Persist each timer transition before reporting success.
+- Restore an active timer with its original start time after a restart, crash, or
+  forced termination. Recovery must not invent a stop time.
+- Do not support manual creation or editing of completed entries in the MVP.
+
+### Reminders and process lifecycle
+
+- A single background process owns timer state, database access, and reminders.
+- Closing the TUI leaves that process and its reminders running. Explicitly
+  stopping the process stops reminders but leaves any active entry open.
+- With no active timer, send a native desktop notification every five minutes by
+  default.
+- With an active timer, ask every 30 minutes by default whether it is still active.
+- Both reminder intervals are configurable and independently disableable.
+- Ignoring an active reminder leaves the timer running; confirming it restarts the
+  interval.
+- Reminders require no internet connection. A connected TUI may also show them.
+
+### Storage, configuration, and export
+
+- Store application data in SQLite and configuration in a human-readable TOML
+  file at platform-appropriate per-user locations.
+- Work with built-in defaults when no configuration file exists. Report invalid
+  configuration without overwriting it.
+- Store timestamps in UTC and display them in the user's local time zone.
+- Permit entries to cross midnight and reject a stop time before its start time.
+- Export completed entries, ordered by start time, to UTF-8 CSV with these columns:
+
+  ```text
+  project,activity,start_time,stop_time,duration_seconds,note
+  ```
+
+- Export timestamps as ISO 8601 with a UTC offset and apply standard CSV quoting.
+  Require confirmation before overwriting a file. Do not export an active entry.
+
+## Quality constraints
+
+- Support Linux, Windows, and macOS; develop primarily on Linux and test all three.
+- Keep common tracking actions fast and keyboard-driven.
+- Do not require telemetry, a remote service, or an account.
+- Use explicit database migrations and prevent more than one active entry at the
+  database boundary.
+- Make timer, recovery, switching, and reminder behavior testable with a controlled
+  clock.
+- Share domain and application logic between the TUI and future GUI.
+
+## Acceptance criteria
+
+The MVP is complete when automated tests and platform smoke tests demonstrate that:
+
+1. A user can create a project and activity, track it, stop it, and see the correct
+   derived duration.
+2. Switching activities produces adjacent, non-overlapping entries.
+3. An active timer survives both a normal restart and a simulated crash.
+4. Reminders work according to configuration after the TUI closes, and ignoring
+   an active reminder does not stop the timer.
+5. Archived items remain readable in history but cannot start new timers.
+6. Two active entries cannot be created.
+7. CSV export preserves timestamps, Unicode, and notes containing commas, quotes,
+   and newlines.
+8. Missing configuration uses defaults; invalid configuration is reported without
+   destroying the file.
+
+## Outside the MVP
+
+- GUI, web, and mobile interfaces.
+- Manual creation or editing of completed entries.
+- Concurrent timers, users, or foreground clients.
+- Accounts, synchronization, collaboration, telemetry, and remote services.
+- Automatic idle/activity detection and third-party integrations.
+- Billing, invoicing, advanced reporting, plugins, imports, and public automation
+  APIs.
+- Prebuilt downloads, installers, package-manager publishing, and automatic
+  updates; binaries are built locally.
+
+## Open decisions
+
+- Minimum OS versions and CPU architectures.
+- Behavior during computer sleep, system-clock changes, and time-zone changes.
+- Whether the background process starts at login.
+- Future GUI toolkit.
+- Date/project/activity filters for CSV export.
+- Whether to add a stable, non-interactive automation CLI after the MVP.
