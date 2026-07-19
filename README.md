@@ -36,3 +36,23 @@ The Python package scaffold and cross-platform checks are in place. The first
 implementation milestone is a walking skeleton that starts the background
 process, creates a project and activity, tracks and persists one entry, and
 restores it after restart.
+
+## Development
+
+Install [uv](https://docs.astral.sh/uv/) and sync the locked development
+environment:
+
+```shell
+uv sync --all-groups --locked
+```
+
+Run the same checks used in CI:
+
+```shell
+uv run ruff format --check .
+uv run ruff check .
+uv run mypy
+uv run pytest
+```
+
+The checks run on Python 3.14 across Linux, Windows, and macOS in GitHub Actions.
