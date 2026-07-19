@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 
 import pytest
-from textual.widgets import DataTable, Input, Static
+from textual.widgets import Button, DataTable, Input, Static
 
 from time_tracker.agent.server import serve
 from time_tracker.infrastructure.ipc import AgentClient, AgentUnavailableError
@@ -67,6 +67,25 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
             assert row[0] == "Website"
             assert row[1] == "Implementation"
             assert row[5] == "Walking skeleton"
+
+            destination = tmp_path / "tui-export.csv"
+            destination.write_text("existing content", encoding="utf-8")
+            recovered_app.query_one("#export-path", Input).value = str(destination)
+            assert await pilot.click("#export-button")
+            await pilot.pause()
+
+            export_button = recovered_app.query_one("#export-button", Button)
+            assert "Overwrite CSV" in str(export_button.label)
+            assert destination.read_text(encoding="utf-8") == "existing content"
+
+            await pilot.press("f7")
+            await pilot.pause()
+
+            assert "Export CSV" in str(export_button.label)
+            assert "Exported 1 entry" in str(
+                recovered_app.query_one("#message", Static).render()
+            )
+            assert "Website,Implementation" in destination.read_text(encoding="utf-8")
 
         assert SQLiteTimerRepository(paths.database).get_active() is None
     finally:

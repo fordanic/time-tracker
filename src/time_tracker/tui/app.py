@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Protocol
 
 from textual import on
@@ -13,6 +14,7 @@ from textual.containers import Horizontal, Vertical
 from textual.suggester import SuggestFromList
 from textual.widgets import Button, DataTable, Footer, Header, Input, Static
 
+from time_tracker.application.exporting import ExportDestinationExistsError
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
 
 
@@ -33,6 +35,10 @@ class TrackerGateway(Protocol):
 
     def list_completed(self) -> list[CompletedTimer]:
         """Return completed entries in chronological order."""
+        ...
+
+    def export_completed(self, destination: Path, *, overwrite: bool = False) -> int:
+        """Export completed entries to a confirmed destination."""
         ...
 
     def start(
@@ -57,6 +63,7 @@ class TimeTrackerApp(App[None]):
     BINDINGS = [
         Binding("f5", "start_timer", "Start / switch"),
         Binding("f6", "stop_timer", "Stop"),
+        Binding("f7", "export_completed", "Export CSV"),
         Binding("ctrl+q", "quit", "Quit"),
     ]
     CSS = """
@@ -94,6 +101,20 @@ class TimeTrackerApp(App[None]):
         margin-right: 1;
     }
 
+    #export-actions {
+        height: auto;
+        margin-top: 1;
+    }
+
+    #export-path {
+        width: 1fr;
+    }
+
+    #export-button {
+        width: 24;
+        margin-left: 1;
+    }
+
     #message {
         height: 2;
         margin-top: 1;
@@ -115,6 +136,7 @@ class TimeTrackerApp(App[None]):
         super().__init__()
         self.client = client
         self.active_timer: ActiveTimer | None = None
+        self._pending_export_path: Path | None = None
 
     def compose(self) -> ComposeResult:
         """Compose the single-screen timer workflow."""
@@ -127,6 +149,12 @@ class TimeTrackerApp(App[None]):
             with Horizontal(id="actions"):
                 yield Button("Start / switch  F5", id="start-button", variant="success")
                 yield Button("Stop  F6", id="stop-button", variant="warning")
+            with Horizontal(id="export-actions"):
+                yield Input(
+                    placeholder="CSV export path (for example ~/times.csv)",
+                    id="export-path",
+                )
+                yield Button("Export CSV  F7", id="export-button")
             yield Static("", id="message")
             yield Static("Completed entries", id="history-title")
             yield DataTable(id="history", cursor_type="row", zebra_stripes=True)
@@ -180,6 +208,17 @@ class TimeTrackerApp(App[None]):
         """Handle pointer activation of the stop action."""
         await self._stop_timer()
 
+    @on(Button.Pressed, "#export-button")
+    async def handle_export_button(self) -> None:
+        """Handle pointer activation of the export action."""
+        await self._export_completed()
+
+    @on(Input.Changed, "#export-path")
+    def handle_export_path_changed(self) -> None:
+        """Cancel overwrite confirmation when the destination is edited."""
+        if self._pending_export_path is not None:
+            self._clear_export_confirmation()
+
     async def action_start_timer(self) -> None:
         """Start or switch the timer from the F5 binding."""
         await self._start_timer()
@@ -187,6 +226,10 @@ class TimeTrackerApp(App[None]):
     async def action_stop_timer(self) -> None:
         """Stop the timer from the F6 binding."""
         await self._stop_timer()
+
+    async def action_export_completed(self) -> None:
+        """Export completed entries from the F7 binding."""
+        await self._export_completed()
 
     async def _start_timer(self) -> None:
         project = self.query_one("#project", Input).value
@@ -240,6 +283,44 @@ class TimeTrackerApp(App[None]):
             self._show_message(str(error), error=True)
             return
         self._render_history(completed)
+
+    async def _export_completed(self) -> None:
+        raw_destination = self.query_one("#export-path", Input).value.strip()
+        if not raw_destination:
+            self._show_message("CSV export path is required.", error=True)
+            return
+        destination = Path(raw_destination).expanduser().resolve()
+        overwrite = self._pending_export_path == destination
+        try:
+            entry_count = await asyncio.to_thread(
+                self.client.export_completed,
+                destination,
+                overwrite=overwrite,
+            )
+        except ExportDestinationExistsError:
+            self._pending_export_path = destination
+            button = self.query_one("#export-button", Button)
+            button.label = "Overwrite CSV  F7"
+            button.variant = "warning"
+            self._show_message(
+                f"{destination} exists. Press Overwrite CSV again to confirm.",
+                error=True,
+            )
+            return
+        except Exception as error:
+            self._clear_export_confirmation()
+            self._show_message(str(error), error=True)
+            return
+
+        self._clear_export_confirmation()
+        noun = "entry" if entry_count == 1 else "entries"
+        self._show_message(f"Exported {entry_count} {noun} to {destination}.")
+
+    def _clear_export_confirmation(self) -> None:
+        self._pending_export_path = None
+        button = self.query_one("#export-button", Button)
+        button.label = "Export CSV  F7"
+        button.variant = "default"
 
     def _render_history(self, entries: list[CompletedTimer]) -> None:
         table = self.query_one("#history", DataTable)
