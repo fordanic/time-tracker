@@ -50,6 +50,13 @@ class AgentClient:
         """Return selectable activities for one project."""
         return _string_list(self._request("list_activities", {"project": project}))
 
+    def list_completed(self) -> list[CompletedTimer]:
+        """Return completed entries in chronological order."""
+        result = self._request("list_completed", {})
+        if not isinstance(result, list):
+            raise AgentRequestError("the agent returned malformed history data")
+        return [_completed_from_object(item) for item in result]
+
     def start(
         self,
         project: str,

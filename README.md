@@ -37,14 +37,15 @@ authenticated background process, creates or reuses project and activity names,
 starts, switches, and stops one SQLite-backed timer, and restores an active timer
 after TUI closure, agent restart, or forced process termination. The background
 process also owns monotonic reminder scheduling, TOML-configured reminder
-intervals, and native notification delivery after the TUI closes.
+intervals, and native notification delivery after the TUI closes. The TUI lists
+completed entries chronologically with their local start and stop times, derived
+duration, and note.
 
 The packaged lifecycle is exercised in CI on Linux, Windows, and macOS. A local
 macOS arm64 app-bundle lifecycle and Notification Center dispatch were validated
 on July 19, 2026; the corresponding Linux and Windows packaged results remain
-pending until the updated CI workflow runs on those hosts. History, export,
-archive management, and the rest of reminder interaction remain upcoming MVP
-work.
+pending until the updated CI workflow runs on those hosts. Export, archive
+management, and the rest of reminder interaction remain upcoming MVP work.
 
 ## Development
 

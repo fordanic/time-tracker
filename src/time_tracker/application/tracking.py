@@ -31,6 +31,10 @@ class TimerRepository(Protocol):
         """Return selectable activity names for one project."""
         ...
 
+    def list_completed(self) -> list[CompletedTimer]:
+        """Return completed entries in chronological order."""
+        ...
+
     def start(
         self,
         project: str,
@@ -73,6 +77,10 @@ class TrackingService:
         """List activities belonging to the selected project."""
         project = project.strip()
         return self._repository.list_activities(project) if project else []
+
+    def list_completed(self) -> list[CompletedTimer]:
+        """List completed entries in chronological order."""
+        return self._repository.list_completed()
 
     def start(
         self,
