@@ -51,6 +51,9 @@ async def run_packaged_lifecycle(directory: Path) -> None:
             await _wait_for_active(second_app)
             if second_app.active_timer is not None:
                 raise RuntimeError("the packaged TUI did not stop the recovered timer")
+            # The model becomes inactive before the handler's awaited history refresh.
+            # Keep the screen mounted until Textual has finished that message.
+            await pilot.pause()
     finally:
         try:
             client.shutdown()
