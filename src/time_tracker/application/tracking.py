@@ -35,6 +35,19 @@ class TimerRepository(Protocol):
         """Return completed entries in chronological order."""
         ...
 
+    def archive_project(self, project: str, archived_at: datetime) -> str:
+        """Archive a project and return its canonical stored name."""
+        ...
+
+    def archive_activity(
+        self,
+        project: str,
+        activity: str,
+        archived_at: datetime,
+    ) -> tuple[str, str]:
+        """Archive an activity and return its canonical project and activity."""
+        ...
+
     def start(
         self,
         project: str,
@@ -81,6 +94,27 @@ class TrackingService:
     def list_completed(self) -> list[CompletedTimer]:
         """List completed entries in chronological order."""
         return self._repository.list_completed()
+
+    def archive_project(self, project: str) -> str:
+        """Archive a project so it cannot be used for future timers."""
+        project = project.strip()
+        if not project:
+            raise ValueError("project name is required")
+        return self._repository.archive_project(project, self._clock.now())
+
+    def archive_activity(self, project: str, activity: str) -> tuple[str, str]:
+        """Archive one activity so it cannot be used for future timers."""
+        project = project.strip()
+        activity = activity.strip()
+        if not project:
+            raise ValueError("project name is required")
+        if not activity:
+            raise ValueError("activity name is required")
+        return self._repository.archive_activity(
+            project,
+            activity,
+            self._clock.now(),
+        )
 
     def start(
         self,

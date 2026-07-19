@@ -180,6 +180,16 @@ def _handle_request(
             result = service.list_activities(_required_str(params, "project"))
         elif method == "list_completed":
             result = [_timer_dict(timer) for timer in service.list_completed()]
+        elif method == "archive_project":
+            result = {
+                "project": service.archive_project(_required_str(params, "project"))
+            }
+        elif method == "archive_activity":
+            project, activity = service.archive_activity(
+                _required_str(params, "project"),
+                _required_str(params, "activity"),
+            )
+            result = {"project": project, "activity": activity}
         elif method == "export_completed":
             result = {
                 "entry_count": export_service.export_completed(

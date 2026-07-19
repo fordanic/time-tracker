@@ -134,6 +134,75 @@ class SQLiteTimerRepository:
             ).fetchall()
         return [self._completed_from_row(row) for row in rows]
 
+    def archive_project(self, project: str, archived_at: datetime) -> str:
+        """Archive a project without changing its activities or history."""
+        archived_micros = datetime_to_micros(archived_at)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT id, name, archived_at_utc
+                FROM projects
+                WHERE name = ? COLLATE NOCASE
+                ORDER BY id
+                LIMIT 1
+                """,
+                (project,),
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"unknown project: {project}")
+            canonical_project = str(row["name"])
+            if row["archived_at_utc"] is not None:
+                raise ValueError(f"project is already archived: {canonical_project}")
+            connection.execute(
+                "UPDATE projects SET archived_at_utc = ? WHERE id = ?",
+                (archived_micros, int(row["id"])),
+            )
+        return canonical_project
+
+    def archive_activity(
+        self,
+        project: str,
+        activity: str,
+        archived_at: datetime,
+    ) -> tuple[str, str]:
+        """Archive one activity while retaining it for historical joins."""
+        archived_micros = datetime_to_micros(archived_at)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            project_row = connection.execute(
+                """
+                SELECT id, name
+                FROM projects
+                WHERE name = ? COLLATE NOCASE
+                ORDER BY id
+                LIMIT 1
+                """,
+                (project,),
+            ).fetchone()
+            if project_row is None:
+                raise ValueError(f"unknown project: {project}")
+            activity_row = connection.execute(
+                """
+                SELECT id, name, archived_at_utc
+                FROM activities
+                WHERE project_id = ? AND name = ? COLLATE NOCASE
+                ORDER BY id
+                LIMIT 1
+                """,
+                (int(project_row["id"]), activity),
+            ).fetchone()
+            if activity_row is None:
+                raise ValueError(f"unknown activity: {activity}")
+            canonical_activity = str(activity_row["name"])
+            if activity_row["archived_at_utc"] is not None:
+                raise ValueError(f"activity is already archived: {canonical_activity}")
+            connection.execute(
+                "UPDATE activities SET archived_at_utc = ? WHERE id = ?",
+                (archived_micros, int(activity_row["id"])),
+            )
+        return str(project_row["name"]), canonical_activity
+
     def start(
         self,
         project: str,
@@ -145,28 +214,11 @@ class SQLiteTimerRepository:
         started_micros = datetime_to_micros(started_at)
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            current = connection.execute(
-                """
-                SELECT e.id, p.name AS project, a.name AS activity,
-                       e.started_at_utc, e.note
-                FROM time_entries AS e
-                JOIN activities AS a ON a.id = e.activity_id
-                JOIN projects AS p ON p.id = a.project_id
-                WHERE e.stopped_at_utc IS NULL
-                """
-            ).fetchone()
-            if current is not None:
-                self._active_from_row(current).stop(started_at)
-                connection.execute(
-                    "UPDATE time_entries SET stopped_at_utc = ? WHERE id = ?",
-                    (started_micros, int(current["id"])),
-                )
-
             project_row = connection.execute(
                 """
-                SELECT id, name
+                SELECT id, name, archived_at_utc
                 FROM projects
-                WHERE name = ? COLLATE NOCASE AND archived_at_utc IS NULL
+                WHERE name = ? COLLATE NOCASE
                 ORDER BY id
                 LIMIT 1
                 """,
@@ -185,16 +237,17 @@ class SQLiteTimerRepository:
                 project_id = cursor.lastrowid
                 canonical_project = project
             else:
+                if project_row["archived_at_utc"] is not None:
+                    raise ValueError(f"project is archived: {project_row['name']}")
                 project_id = int(project_row["id"])
                 canonical_project = str(project_row["name"])
 
             activity_row = connection.execute(
                 """
-                SELECT id, name
+                SELECT id, name, archived_at_utc
                 FROM activities
                 WHERE project_id = ?
                   AND name = ? COLLATE NOCASE
-                  AND archived_at_utc IS NULL
                 ORDER BY id
                 LIMIT 1
                 """,
@@ -213,8 +266,27 @@ class SQLiteTimerRepository:
                 activity_id = cursor.lastrowid
                 canonical_activity = activity
             else:
+                if activity_row["archived_at_utc"] is not None:
+                    raise ValueError(f"activity is archived: {activity_row['name']}")
                 activity_id = int(activity_row["id"])
                 canonical_activity = str(activity_row["name"])
+
+            current = connection.execute(
+                """
+                SELECT e.id, p.name AS project, a.name AS activity,
+                       e.started_at_utc, e.note
+                FROM time_entries AS e
+                JOIN activities AS a ON a.id = e.activity_id
+                JOIN projects AS p ON p.id = a.project_id
+                WHERE e.stopped_at_utc IS NULL
+                """
+            ).fetchone()
+            if current is not None:
+                self._active_from_row(current).stop(started_at)
+                connection.execute(
+                    "UPDATE time_entries SET stopped_at_utc = ? WHERE id = ?",
+                    (started_micros, int(current["id"])),
+                )
             cursor = connection.execute(
                 """
                 INSERT INTO time_entries(
