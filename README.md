@@ -47,6 +47,21 @@ environment:
 uv sync --all-groups --locked
 ```
 
+The common workflows are available through `make`:
+
+```shell
+make help
+make run
+make check
+make build
+```
+
+`make build` creates a native executable for the current operating system in
+`dist/`. Use `make clean` to remove repository-local build and check artifacts.
+To permanently remove the current user's Time Tracker database, IPC secret, and
+runtime files, first stop any work you want to preserve and run
+`make clear-local CONFIRM=1`.
+
 Run the same checks used in CI:
 
 ```shell

@@ -118,21 +118,7 @@ def ensure_agent_running(
         pass
 
     paths.prepare()
-    command = [
-        sys.executable,
-        "-m",
-        "time_tracker.agent",
-        "--database",
-        str(paths.database),
-        "--address",
-        paths.address,
-        "--secret",
-        str(paths.secret),
-        "--lock",
-        str(paths.lock),
-        "--family",
-        paths.family,
-    ]
+    command = _agent_command(paths)
     if os.name == "nt":
         subprocess.Popen(  # noqa: S603
             command,
@@ -160,6 +146,31 @@ def ensure_agent_running(
         except AgentUnavailableError:
             time.sleep(0.05)
     raise AgentUnavailableError("the Time Tracker agent did not start")
+
+
+def _agent_command(paths: AgentPaths, *, frozen: bool | None = None) -> list[str]:
+    """Build the background command for source and frozen executables."""
+    is_frozen = bool(getattr(sys, "frozen", False)) if frozen is None else frozen
+    command = [sys.executable]
+    if is_frozen:
+        command.append("--agent")
+    else:
+        command.extend(("-m", "time_tracker.agent"))
+    command.extend(
+        (
+            "--database",
+            str(paths.database),
+            "--address",
+            paths.address,
+            "--secret",
+            str(paths.secret),
+            "--lock",
+            str(paths.lock),
+            "--family",
+            paths.family,
+        )
+    )
+    return command
 
 
 def _active_from_object(value: object) -> ActiveTimer:
