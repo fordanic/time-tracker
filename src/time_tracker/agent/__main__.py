@@ -17,6 +17,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--address", required=True)
     parser.add_argument("--secret", required=True, type=Path)
     parser.add_argument("--lock", required=True, type=Path)
+    parser.add_argument("--log", required=True, type=Path)
     parser.add_argument("--family", required=True, choices=("AF_UNIX", "AF_PIPE"))
     arguments = parser.parse_args(argv)
     serve(
@@ -25,6 +26,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             address=arguments.address,
             secret=arguments.secret,
             lock=arguments.lock,
+            log=arguments.log,
             family=arguments.family,
         )
     )

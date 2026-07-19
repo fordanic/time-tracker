@@ -72,6 +72,10 @@ class AgentClient:
         """Ask the background process to stop without closing an active entry."""
         self._request("shutdown", {})
 
+    def send_test_notification(self) -> None:
+        """Ask the agent to dispatch a native smoke-test notification."""
+        self._request("notification_smoke", {})
+
     def _request(self, method: str, params: dict[str, object]) -> object:
         request_id = str(uuid.uuid4())
         request = {
@@ -174,6 +178,8 @@ def _agent_command(paths: AgentPaths, *, frozen: bool | None = None) -> list[str
             str(paths.secret),
             "--lock",
             str(paths.lock),
+            "--log",
+            str(paths.log),
             "--family",
             paths.family,
         )

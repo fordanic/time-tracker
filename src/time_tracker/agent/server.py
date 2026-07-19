@@ -1,8 +1,10 @@
-"""Single-writer background process for the walking skeleton."""
+"""Single-writer background process for tracking and reminders."""
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import sqlite3
 from dataclasses import asdict
 from multiprocessing import AuthenticationError
@@ -10,57 +12,130 @@ from multiprocessing.connection import Listener
 from pathlib import Path
 from typing import cast
 
+from time_tracker.agent.reminders import ReminderCoordinator
+from time_tracker.application.reminders import Reminder, ReminderIntervals, ReminderKind
 from time_tracker.application.tracking import TrackingService
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
 from time_tracker.infrastructure.instance_lock import instance_lock
 from time_tracker.infrastructure.ipc import PROTOCOL_VERSION
+from time_tracker.infrastructure.notifications import (
+    NativeNotificationService,
+    NotificationService,
+)
 from time_tracker.infrastructure.paths import AgentPaths
 from time_tracker.infrastructure.sqlite_repository import SQLiteTimerRepository
 
 
-def serve(paths: AgentPaths) -> None:
+def serve(
+    paths: AgentPaths,
+    *,
+    notifier: NotificationService | None = None,
+    reminder_intervals: ReminderIntervals | None = None,
+) -> None:
     """Serve one authenticated foreground connection at a time."""
     paths.prepare()
     with instance_lock(paths.lock):
-        _serve_locked(paths)
+        _serve_locked(paths, notifier, reminder_intervals)
 
 
-def _serve_locked(paths: AgentPaths) -> None:
+def _serve_locked(
+    paths: AgentPaths,
+    notifier: NotificationService | None,
+    reminder_intervals: ReminderIntervals | None,
+) -> None:
     """Own the endpoint and database while the instance lock is held."""
     if paths.family == "AF_UNIX":
         Path(paths.address).unlink(missing_ok=True)
 
+    log_handler = logging.FileHandler(paths.log, encoding="utf-8")
+    log_handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    )
+    application_logger = logging.getLogger("time_tracker")
+    application_logger.addHandler(log_handler)
+    application_logger.setLevel(logging.INFO)
     service = TrackingService(SQLiteTimerRepository(paths.database))
+    notification_service = notifier or NativeNotificationService()
     listener = Listener(
         paths.address,
         family=paths.family,
         authkey=paths.authkey(),
     )
+    try:
+        asyncio.run(
+            _serve_connections(
+                listener,
+                service,
+                notification_service,
+                reminder_intervals,
+            )
+        )
+    finally:
+        listener.close()
+        application_logger.removeHandler(log_handler)
+        log_handler.close()
+        if paths.family == "AF_UNIX":
+            Path(paths.address).unlink(missing_ok=True)
+
+
+async def _serve_connections(
+    listener: Listener,
+    service: TrackingService,
+    notifier: NotificationService,
+    reminder_intervals: ReminderIntervals | None,
+) -> None:
+    """Keep reminder scheduling responsive while IPC and SQLite block in threads."""
+    coordinator = ReminderCoordinator(service, notifier, reminder_intervals)
+    reminder_task = asyncio.create_task(coordinator.run())
     running = True
     try:
         while running:
             try:
-                connection = listener.accept()
+                connection = await asyncio.to_thread(listener.accept)
             except AuthenticationError:
                 continue
             try:
-                request_bytes = connection.recv_bytes()
-                response, running = _handle_request(request_bytes, service)
-                connection.send_bytes(json.dumps(response).encode("utf-8"))
+                request_bytes = await asyncio.to_thread(connection.recv_bytes)
+                (
+                    response,
+                    running,
+                    timer_changed,
+                    notification_smoke,
+                ) = await asyncio.to_thread(
+                    _handle_request,
+                    request_bytes,
+                    service,
+                )
+                if notification_smoke:
+                    try:
+                        await notifier.send(Reminder(ReminderKind.INACTIVE))
+                    except Exception as error:
+                        response = {
+                            "request_id": response.get("request_id"),
+                            "error": {
+                                "code": "notification_failed",
+                                "message": str(error),
+                            },
+                        }
+                await asyncio.to_thread(
+                    connection.send_bytes,
+                    json.dumps(response).encode("utf-8"),
+                )
+                if timer_changed:
+                    coordinator.timer_changed()
             except EOFError:
                 continue
             finally:
                 connection.close()
     finally:
-        listener.close()
-        if paths.family == "AF_UNIX":
-            Path(paths.address).unlink(missing_ok=True)
+        coordinator.stop()
+        await reminder_task
 
 
 def _handle_request(
     payload: bytes,
     service: TrackingService,
-) -> tuple[dict[str, object], bool]:
+) -> tuple[dict[str, object], bool, bool, bool]:
     request_id: object = None
     try:
         decoded: object = json.loads(payload.decode("utf-8"))
@@ -96,17 +171,32 @@ def _handle_request(
             )
         elif method == "stop":
             result = _timer_dict(service.stop())
+        elif method == "notification_smoke":
+            result = None
         elif method == "shutdown":
             result = None
-            return {"request_id": request_id, "result": result}, False
+            return {"request_id": request_id, "result": result}, False, False, False
         else:
             raise ValueError(f"unknown method: {method}")
-        return {"request_id": request_id, "result": result}, True
+        return (
+            {
+                "request_id": request_id,
+                "result": result,
+            },
+            True,
+            method in {"start", "stop"},
+            method == "notification_smoke",
+        )
     except (RuntimeError, sqlite3.Error, TypeError, ValueError) as error:
-        return {
-            "request_id": request_id,
-            "error": {"code": "invalid_request", "message": str(error)},
-        }, True
+        return (
+            {
+                "request_id": request_id,
+                "error": {"code": "invalid_request", "message": str(error)},
+            },
+            True,
+            False,
+            False,
+        )
 
 
 def _timer_dict(timer: ActiveTimer | CompletedTimer | None) -> object:

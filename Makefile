@@ -4,7 +4,8 @@ APP_NAME := time-tracker
 .DEFAULT_GOAL := help
 
 .PHONY: help sync run stop-agent format format-check lint typecheck test \
-	test-unit test-integration test-e2e check ci build clean clear-local
+	test-unit test-integration test-e2e check ci build smoke-packaged \
+	smoke-notification clean clear-local
 
 help:
 	@printf '%s\n' \
@@ -17,6 +18,8 @@ help:
 		'  make check             Run formatting, lint, types, and tests' \
 		'  make ci                Sync and run the complete CI check set' \
 		'  make build             Build a native executable in dist/' \
+		'  make smoke-packaged    Test the complete packaged timer lifecycle' \
+		'  make smoke-notification Dispatch a native notification from the package' \
 		'  make clean             Remove repository build and check artifacts' \
 		'  make clear-local CONFIRM=1' \
 		'                         Stop the agent and delete local app data'
@@ -59,10 +62,13 @@ check: format-check lint typecheck test
 ci: sync check
 
 build: sync
-	$(UV) run pyinstaller --noconfirm --clean --onefile \
-		--name $(APP_NAME) --paths src --specpath build \
-		--collect-data time_tracker.infrastructure.migrations \
-		src/time_tracker/cli.py
+	$(UV) run python scripts/build.py
+
+smoke-packaged:
+	$(UV) run python scripts/run_packaged_smoke.py
+
+smoke-notification:
+	$(UV) run python scripts/run_notification_smoke.py
 
 clean:
 	rm -rf build dist .mypy_cache .pytest_cache .ruff_cache \

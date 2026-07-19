@@ -120,10 +120,8 @@ class TimeTrackerApp(App[None]):
         """Recover any persisted active timer when the TUI reconnects."""
         self.set_interval(1.0, self._render_active)
         try:
-            self.active_timer, projects = await asyncio.gather(
-                asyncio.to_thread(self.client.get_active),
-                asyncio.to_thread(self.client.list_projects),
-            )
+            self.active_timer = await asyncio.to_thread(self.client.get_active)
+            projects = await asyncio.to_thread(self.client.list_projects)
         except Exception as error:
             self._show_message(str(error), error=True)
         else:

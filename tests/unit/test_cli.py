@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from time_tracker import __version__
@@ -28,3 +30,19 @@ def test_no_arguments_launches_the_tui(
 
     assert main([]) == 0
     assert launched
+
+
+def test_packaged_smoke_flag_runs_the_lifecycle(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    received: Path | None = None
+
+    async def fake_smoke(directory: Path) -> None:
+        nonlocal received
+        received = directory
+
+    monkeypatch.setattr("time_tracker.cli.run_packaged_lifecycle", fake_smoke)
+
+    assert main(["--packaged-smoke", str(tmp_path)]) == 0
+    assert received == tmp_path

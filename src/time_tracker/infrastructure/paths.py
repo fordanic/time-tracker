@@ -20,6 +20,7 @@ class AgentPaths:
     address: str
     secret: Path
     lock: Path
+    log: Path
     family: str
 
     @classmethod
@@ -41,6 +42,7 @@ class AgentPaths:
             address=address,
             secret=Path(dirs.user_state_path) / "agent.secret",
             lock=Path(dirs.user_state_path) / "agent.lock",
+            log=Path(dirs.user_log_path) / "agent.log",
             family=family,
         )
 
@@ -62,6 +64,7 @@ class AgentPaths:
             address=address,
             secret=directory / "agent.secret",
             lock=directory / "agent.lock",
+            log=directory / "agent.log",
             family=family,
         )
 
@@ -70,6 +73,7 @@ class AgentPaths:
         self.database.parent.mkdir(parents=True, exist_ok=True)
         self.secret.parent.mkdir(parents=True, exist_ok=True)
         self.lock.parent.mkdir(parents=True, exist_ok=True)
+        self.log.parent.mkdir(parents=True, exist_ok=True)
         if self.family == "AF_UNIX":
             Path(self.address).parent.mkdir(parents=True, exist_ok=True)
 

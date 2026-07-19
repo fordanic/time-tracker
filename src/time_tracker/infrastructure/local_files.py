@@ -20,6 +20,7 @@ def local_files(paths: AgentPaths) -> tuple[Path, ...]:
         Path(f"{paths.database}-wal"),
         paths.secret,
         paths.lock,
+        paths.log,
     ]
     if paths.family == "AF_UNIX":
         files.append(Path(paths.address))
