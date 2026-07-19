@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 
 import pytest
-from textual.widgets import Input, Static
+from textual.widgets import DataTable, Input, Static
 
 from time_tracker.agent.server import serve
 from time_tracker.infrastructure.ipc import AgentClient, AgentUnavailableError
@@ -61,6 +61,12 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
             assert "No timer running" in str(
                 recovered_app.query_one("#active-timer", Static).render()
             )
+            history = recovered_app.query_one("#history", DataTable)
+            assert history.row_count == 1
+            row = history.get_row_at(0)
+            assert row[0] == "Website"
+            assert row[1] == "Implementation"
+            assert row[5] == "Walking skeleton"
 
         assert SQLiteTimerRepository(paths.database).get_active() is None
     finally:

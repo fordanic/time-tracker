@@ -11,7 +11,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.suggester import SuggestFromList
-from textual.widgets import Button, Footer, Header, Input, Static
+from textual.widgets import Button, DataTable, Footer, Header, Input, Static
 
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
 
@@ -29,6 +29,10 @@ class TrackerGateway(Protocol):
 
     def list_activities(self, project: str) -> list[str]:
         """Return activity names available for the selected project."""
+        ...
+
+    def list_completed(self) -> list[CompletedTimer]:
+        """Return completed entries in chronological order."""
         ...
 
     def start(
@@ -61,28 +65,28 @@ class TimeTrackerApp(App[None]):
     }
 
     #tracker {
-        width: 72;
-        height: auto;
-        padding: 1 2;
+        width: 100%;
+        max-width: 120;
+        height: 1fr;
+        padding: 0 2;
         border: round $accent;
     }
 
     #active-timer {
-        height: 5;
-        margin-bottom: 1;
-        padding: 1;
+        height: 4;
+        padding: 0 1;
         text-align: center;
         background: $panel;
         content-align: center middle;
     }
 
     Input {
-        margin-bottom: 1;
+        margin-bottom: 0;
     }
 
     #actions {
         height: auto;
-        margin-top: 1;
+        margin-top: 0;
     }
 
     #actions Button {
@@ -94,6 +98,16 @@ class TimeTrackerApp(App[None]):
         height: 2;
         margin-top: 1;
         color: $text-muted;
+    }
+
+    #history-title {
+        margin-top: 1;
+        text-style: bold;
+    }
+
+    #history {
+        height: 1fr;
+        min-height: 8;
     }
     """
 
@@ -114,14 +128,19 @@ class TimeTrackerApp(App[None]):
                 yield Button("Start / switch  F5", id="start-button", variant="success")
                 yield Button("Stop  F6", id="stop-button", variant="warning")
             yield Static("", id="message")
+            yield Static("Completed entries", id="history-title")
+            yield DataTable(id="history", cursor_type="row", zebra_stripes=True)
         yield Footer()
 
     async def on_mount(self) -> None:
         """Recover any persisted active timer when the TUI reconnects."""
         self.set_interval(1.0, self._render_active)
+        history = self.query_one("#history", DataTable)
+        history.add_columns("Project", "Activity", "Start", "Stop", "Duration", "Note")
         try:
             self.active_timer = await asyncio.to_thread(self.client.get_active)
             projects = await asyncio.to_thread(self.client.list_projects)
+            completed = await asyncio.to_thread(self.client.list_completed)
         except Exception as error:
             self._show_message(str(error), error=True)
         else:
@@ -129,6 +148,7 @@ class TimeTrackerApp(App[None]):
                 projects,
                 case_sensitive=False,
             )
+            self._render_history(completed)
         self._render_active()
 
     @on(Input.Changed, "#project")
@@ -186,6 +206,7 @@ class TimeTrackerApp(App[None]):
         self.query_one("#project", Input).value = self.active_timer.project
         self.query_one("#activity", Input).value = self.active_timer.activity
         await self._refresh_project_suggestions()
+        await self._refresh_history()
         self._render_active()
 
     async def _refresh_project_suggestions(self) -> None:
@@ -209,7 +230,30 @@ class TimeTrackerApp(App[None]):
                 f"Stopped {completed.project} / {completed.activity} "
                 f"after {_format_duration(completed.duration)}."
             )
+            await self._refresh_history()
         self._render_active()
+
+    async def _refresh_history(self) -> None:
+        try:
+            completed = await asyncio.to_thread(self.client.list_completed)
+        except Exception as error:
+            self._show_message(str(error), error=True)
+            return
+        self._render_history(completed)
+
+    def _render_history(self, entries: list[CompletedTimer]) -> None:
+        table = self.query_one("#history", DataTable)
+        table.clear()
+        for entry in entries:
+            table.add_row(
+                entry.project,
+                entry.activity,
+                entry.started_at.astimezone().isoformat(timespec="seconds"),
+                entry.stopped_at.astimezone().isoformat(timespec="seconds"),
+                _format_duration(entry.duration),
+                entry.note or "",
+                key=str(entry.entry_id),
+            )
 
     def _render_active(self) -> None:
         active_widget = self.query_one("#active-timer", Static)
