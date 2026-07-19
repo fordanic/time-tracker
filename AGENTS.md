@@ -10,8 +10,31 @@ relevant document when a decision changes; do not create a second source of trut
 
 ## Current phase
 
-The repository is ready for initial scaffolding. Canonical development commands
-do not exist yet; add only commands that have been implemented and verified.
+The repository has its initial package and test scaffold. The next milestone is
+the cross-platform walking skeleton described in `README.md` and
+`docs/architecture.md`.
+
+## Canonical development commands
+
+Sync the locked environment before running checks:
+
+```shell
+uv sync --all-groups --locked
+```
+
+Run every check before committing:
+
+```shell
+uv run ruff format --check .
+uv run ruff check .
+uv run mypy
+uv run pytest
+```
+
+When a tier contains tests, use `uv run pytest tests/unit`,
+`tests/integration`, or `tests/e2e` while iterating on it, but finish with the
+complete suite. Apply formatting with `uv run ruff format .`; do not substitute
+a different formatter or package manager.
 
 ## Working rules
 
