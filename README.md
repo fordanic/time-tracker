@@ -32,9 +32,7 @@ business logic independent of the TUI and available to a future GUI.
 
 ## Status
 
-Requirements and architecture are ready for scaffolding. The first implementation
-milestone is a cross-platform walking skeleton that starts the background process,
-creates a project and activity, tracks and persists one entry, and restores it
-after restart.
-
-Development commands will be added after the scaffold exists.
+The Python package scaffold and cross-platform checks are in place. The first
+implementation milestone is a walking skeleton that starts the background
+process, creates a project and activity, tracks and persists one entry, and
+restores it after restart.

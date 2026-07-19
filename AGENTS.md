@@ -10,8 +10,9 @@ relevant document when a decision changes; do not create a second source of trut
 
 ## Current phase
 
-The repository is ready for initial scaffolding. Canonical development commands
-do not exist yet; add only commands that have been implemented and verified.
+The repository has its initial package and test scaffold. The next milestone is
+the cross-platform walking skeleton described in `README.md` and
+`docs/architecture.md`.
 
 ## Working rules
 
