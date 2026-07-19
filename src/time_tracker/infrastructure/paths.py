@@ -17,6 +17,7 @@ class AgentPaths:
     """Resolved paths shared by the foreground and background processes."""
 
     database: Path
+    config: Path
     address: str
     secret: Path
     lock: Path
@@ -39,6 +40,7 @@ class AgentPaths:
             family = "AF_UNIX"
         return cls(
             database=Path(dirs.user_data_path) / "time-tracker.sqlite3",
+            config=Path(dirs.user_config_path) / "config.toml",
             address=address,
             secret=Path(dirs.user_state_path) / "agent.secret",
             lock=Path(dirs.user_state_path) / "agent.lock",
@@ -61,6 +63,7 @@ class AgentPaths:
             family = "AF_UNIX"
         return cls(
             database=directory / "time-tracker.sqlite3",
+            config=directory / "config.toml",
             address=address,
             secret=directory / "agent.secret",
             lock=directory / "agent.lock",
@@ -71,6 +74,7 @@ class AgentPaths:
     def prepare(self) -> None:
         """Create private parent directories without touching stored data."""
         self.database.parent.mkdir(parents=True, exist_ok=True)
+        self.config.parent.mkdir(parents=True, exist_ok=True)
         self.secret.parent.mkdir(parents=True, exist_ok=True)
         self.lock.parent.mkdir(parents=True, exist_ok=True)
         self.log.parent.mkdir(parents=True, exist_ok=True)

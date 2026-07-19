@@ -36,15 +36,15 @@ The timer walking skeleton is in place: the Textual TUI connects to a single
 authenticated background process, creates or reuses project and activity names,
 starts, switches, and stops one SQLite-backed timer, and restores an active timer
 after TUI closure, agent restart, or forced process termination. The background
-process also owns monotonic reminder scheduling and native notification delivery
-after the TUI closes.
+process also owns monotonic reminder scheduling, TOML-configured reminder
+intervals, and native notification delivery after the TUI closes.
 
 The packaged lifecycle is exercised in CI on Linux, Windows, and macOS. A local
 macOS arm64 app-bundle lifecycle and Notification Center dispatch were validated
 on July 19, 2026; the corresponding Linux and Windows packaged results remain
-pending until the updated CI workflow runs on those hosts. Configuration,
-history, export, archive management, and the rest of reminder interaction remain
-upcoming MVP work.
+pending until the updated CI workflow runs on those hosts. History, export,
+archive management, and the rest of reminder interaction remain upcoming MVP
+work.
 
 ## Development
 
@@ -68,8 +68,8 @@ make build
 `dist/`. Linux and Windows use one-file executables. macOS uses an ad-hoc-signed
 `.app` bundle and its built-in notification command. Use
 `make clean` to remove repository-local build and check artifacts.
-To permanently remove the current user's Time Tracker database, IPC secret, and
-runtime files, first stop any work you want to preserve and run
+To permanently remove the current user's Time Tracker database, configuration,
+IPC secret, and runtime files, first stop any work you want to preserve and run
 `make clear-local CONFIRM=1`.
 
 Run the same checks used in CI:
@@ -87,6 +87,25 @@ are suggested as you type; press the right arrow to accept a completion. Closing
 the TUI leaves the background process and any active timer running. Run
 `uv run time-tracker --stop-agent` to stop only the process; the persisted timer
 remains active and is recovered the next time the application starts.
+
+## Configuration
+
+Run `uv run time-tracker --config-path` to locate the optional user-edited TOML
+file. When the file does not exist, both reminders use their built-in defaults.
+The complete supported configuration is:
+
+```toml
+[reminders]
+inactive_enabled = true
+inactive_interval_minutes = 5
+active_enabled = true
+active_interval_minutes = 30
+```
+
+Each reminder can be disabled independently. Intervals must be positive numbers.
+Restart the background process after editing the file by running
+`uv run time-tracker --stop-agent`, then reopen the TUI. Invalid TOML, unknown
+keys, and invalid values are reported without changing the file.
 
 After building, run the complete isolated package lifecycle check with
 `make smoke-packaged`. It opens a headless TUI, starts a timer, closes the TUI,

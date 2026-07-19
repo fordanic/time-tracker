@@ -111,6 +111,10 @@ delivery fails or the TUI disconnects.
 
 - Read user-edited TOML with `tomllib`; defaults live in typed application
   configuration. Invalid input is reported without rewriting the file.
+- The optional TOML file has one `[reminders]` table with independent
+  `inactive_enabled`/`active_enabled` booleans and positive
+  `inactive_interval_minutes`/`active_interval_minutes` numbers. Configuration
+  is loaded when the background process starts; restart it to apply edits.
 - Use `platformdirs` for per-user configuration, data, state, runtime, and log
   locations.
 - Use simple native notifications. Interactive notification actions are deferred;

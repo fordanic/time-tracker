@@ -11,6 +11,7 @@ def test_frozen_agent_command_reuses_the_packaged_executable(tmp_path: Path) -> 
 
     assert command[1] == "--agent"
     assert "-m" not in command
+    assert command[command.index("--config") + 1] == str(paths.config)
 
 
 def test_source_agent_command_launches_the_agent_module(tmp_path: Path) -> None:
@@ -19,3 +20,4 @@ def test_source_agent_command_launches_the_agent_module(tmp_path: Path) -> None:
     command = _agent_command(paths, frozen=False)
 
     assert command[1:3] == ["-m", "time_tracker.agent"]
+    assert command[command.index("--config") + 1] == str(paths.config)

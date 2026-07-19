@@ -16,6 +16,7 @@ from time_tracker.agent.reminders import ReminderCoordinator
 from time_tracker.application.reminders import Reminder, ReminderIntervals, ReminderKind
 from time_tracker.application.tracking import TrackingService
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
+from time_tracker.infrastructure.configuration import load_config
 from time_tracker.infrastructure.instance_lock import instance_lock
 from time_tracker.infrastructure.ipc import PROTOCOL_VERSION
 from time_tracker.infrastructure.notifications import (
@@ -44,6 +45,11 @@ def _serve_locked(
     reminder_intervals: ReminderIntervals | None,
 ) -> None:
     """Own the endpoint and database while the instance lock is held."""
+    intervals = (
+        reminder_intervals
+        if reminder_intervals is not None
+        else load_config(paths.config).reminder_intervals
+    )
     if paths.family == "AF_UNIX":
         Path(paths.address).unlink(missing_ok=True)
 
@@ -67,7 +73,7 @@ def _serve_locked(
                 listener,
                 service,
                 notification_service,
-                reminder_intervals,
+                intervals,
             )
         )
     finally:

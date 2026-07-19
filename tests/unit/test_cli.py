@@ -4,6 +4,8 @@ import pytest
 
 from time_tracker import __version__
 from time_tracker.cli import main
+from time_tracker.infrastructure.configuration import ConfigurationError
+from time_tracker.infrastructure.paths import AgentPaths
 
 
 def test_version_flag_reports_package_version(
@@ -30,6 +32,30 @@ def test_no_arguments_launches_the_tui(
 
     assert main([]) == 0
     assert launched
+
+
+def test_config_path_flag_reports_platform_path(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(["--config-path"]) == 0
+
+    assert capsys.readouterr().out == f"{AgentPaths.defaults().config}\n"
+
+
+def test_invalid_configuration_is_reported_without_launching(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def reject_config() -> None:
+        raise ConfigurationError("invalid configuration at config.toml")
+
+    monkeypatch.setattr("time_tracker.cli.launch_tui", reject_config)
+
+    with pytest.raises(SystemExit) as exit_info:
+        main([])
+
+    assert exit_info.value.code == 2
+    assert "invalid configuration at config.toml" in capsys.readouterr().err
 
 
 def test_packaged_smoke_flag_runs_the_lifecycle(

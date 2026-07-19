@@ -18,6 +18,7 @@ def local_files(paths: AgentPaths) -> tuple[Path, ...]:
         Path(f"{paths.database}-journal"),
         Path(f"{paths.database}-shm"),
         Path(f"{paths.database}-wal"),
+        paths.config,
         paths.secret,
         paths.lock,
         paths.log,

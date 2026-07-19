@@ -9,6 +9,7 @@ from pathlib import Path
 
 from time_tracker import __version__
 from time_tracker.agent.server import serve
+from time_tracker.infrastructure.configuration import ConfigurationError, load_config
 from time_tracker.infrastructure.ipc import (
     AgentClient,
     AgentUnavailableError,
@@ -32,6 +33,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="stop the background process without closing an active timer",
     )
+    parser.add_argument(
+        "--config-path",
+        action="store_true",
+        help="print the user configuration file path and exit",
+    )
     parser.add_argument("--agent", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--packaged-smoke", type=Path, help=argparse.SUPPRESS)
     parser.add_argument(
@@ -40,6 +46,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         help=argparse.SUPPRESS,
     )
     parser.add_argument("--database", type=Path, help=argparse.SUPPRESS)
+    parser.add_argument("--config", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--address", help=argparse.SUPPRESS)
     parser.add_argument("--secret", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--lock", type=Path, help=argparse.SUPPRESS)
@@ -53,6 +60,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if arguments.agent:
         internal_values = (
             arguments.database,
+            arguments.config,
             arguments.address,
             arguments.secret,
             arguments.lock,
@@ -64,6 +72,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         serve(
             AgentPaths(
                 database=arguments.database,
+                config=arguments.config,
                 address=arguments.address,
                 secret=arguments.secret,
                 lock=arguments.lock,
@@ -71,6 +80,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 family=arguments.family,
             )
         )
+        return 0
+    if arguments.config_path:
+        print(AgentPaths.defaults().config)
         return 0
     if arguments.stop_agent:
         try:
@@ -86,13 +98,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         asyncio.run(_send_notification_smoke(arguments.notification_smoke))
         print("native notification smoke dispatched")
         return 0
-    launch_tui()
+    try:
+        launch_tui()
+    except ConfigurationError as error:
+        parser.error(str(error))
     return 0
 
 
 def launch_tui() -> None:
     """Start or reconnect to the background process, then run Textual."""
-    client = ensure_agent_running(AgentPaths.defaults())
+    paths = AgentPaths.defaults()
+    load_config(paths.config)
+    client = ensure_agent_running(paths)
     TimeTrackerApp(client).run()
 
 
