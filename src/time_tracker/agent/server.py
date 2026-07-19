@@ -13,10 +13,15 @@ from pathlib import Path
 from typing import cast
 
 from time_tracker.agent.reminders import ReminderCoordinator
+from time_tracker.application.exporting import (
+    ExportDestinationExistsError,
+    ExportService,
+)
 from time_tracker.application.reminders import Reminder, ReminderIntervals, ReminderKind
 from time_tracker.application.tracking import TrackingService
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
 from time_tracker.infrastructure.configuration import load_config
+from time_tracker.infrastructure.csv_export import CsvCompletedEntryWriter
 from time_tracker.infrastructure.instance_lock import instance_lock
 from time_tracker.infrastructure.ipc import PROTOCOL_VERSION
 from time_tracker.infrastructure.notifications import (
@@ -60,7 +65,9 @@ def _serve_locked(
     application_logger = logging.getLogger("time_tracker")
     application_logger.addHandler(log_handler)
     application_logger.setLevel(logging.INFO)
-    service = TrackingService(SQLiteTimerRepository(paths.database))
+    repository = SQLiteTimerRepository(paths.database)
+    service = TrackingService(repository)
+    export_service = ExportService(repository, CsvCompletedEntryWriter())
     notification_service = notifier or NativeNotificationService()
     listener = Listener(
         paths.address,
@@ -72,6 +79,7 @@ def _serve_locked(
             _serve_connections(
                 listener,
                 service,
+                export_service,
                 notification_service,
                 intervals,
             )
@@ -87,6 +95,7 @@ def _serve_locked(
 async def _serve_connections(
     listener: Listener,
     service: TrackingService,
+    export_service: ExportService,
     notifier: NotificationService,
     reminder_intervals: ReminderIntervals | None,
 ) -> None:
@@ -111,6 +120,7 @@ async def _serve_connections(
                     _handle_request,
                     request_bytes,
                     service,
+                    export_service,
                 )
                 if notification_smoke:
                     try:
@@ -141,6 +151,7 @@ async def _serve_connections(
 def _handle_request(
     payload: bytes,
     service: TrackingService,
+    export_service: ExportService,
 ) -> tuple[dict[str, object], bool, bool, bool]:
     request_id: object = None
     try:
@@ -169,6 +180,13 @@ def _handle_request(
             result = service.list_activities(_required_str(params, "project"))
         elif method == "list_completed":
             result = [_timer_dict(timer) for timer in service.list_completed()]
+        elif method == "export_completed":
+            result = {
+                "entry_count": export_service.export_completed(
+                    Path(_required_str(params, "destination")),
+                    overwrite=_required_bool(params, "overwrite"),
+                )
+            }
         elif method == "start":
             result = _timer_dict(
                 service.start(
@@ -195,7 +213,17 @@ def _handle_request(
             method in {"start", "stop"},
             method == "notification_smoke",
         )
-    except (RuntimeError, sqlite3.Error, TypeError, ValueError) as error:
+    except ExportDestinationExistsError as error:
+        return (
+            {
+                "request_id": request_id,
+                "error": {"code": "destination_exists", "message": str(error)},
+            },
+            True,
+            False,
+            False,
+        )
+    except (OSError, RuntimeError, sqlite3.Error, TypeError, ValueError) as error:
         return (
             {
                 "request_id": request_id,
@@ -230,4 +258,11 @@ def _optional_str(params: dict[str, object], name: str) -> str | None:
         return None
     if not isinstance(value, str):
         raise ValueError(f"{name} must be a string or null")
+    return value
+
+
+def _required_bool(params: dict[str, object], name: str) -> bool:
+    value = params.get(name)
+    if not isinstance(value, bool):
+        raise ValueError(f"{name} must be a boolean")
     return value

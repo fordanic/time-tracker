@@ -39,13 +39,14 @@ after TUI closure, agent restart, or forced process termination. The background
 process also owns monotonic reminder scheduling, TOML-configured reminder
 intervals, and native notification delivery after the TUI closes. The TUI lists
 completed entries chronologically with their local start and stop times, derived
-duration, and note.
+duration, and note, and exports completed entries to UTF-8 CSV with explicit
+overwrite confirmation.
 
 The packaged lifecycle is exercised in CI on Linux, Windows, and macOS. A local
 macOS arm64 app-bundle lifecycle and Notification Center dispatch were validated
 on July 19, 2026; the corresponding Linux and Windows packaged results remain
-pending until the updated CI workflow runs on those hosts. Export, archive
-management, and the rest of reminder interaction remain upcoming MVP work.
+pending until the updated CI workflow runs on those hosts. Archive management and
+the rest of reminder interaction remain upcoming MVP work.
 
 ## Development
 
@@ -88,6 +89,11 @@ are suggested as you type; press the right arrow to accept a completion. Closing
 the TUI leaves the background process and any active timer running. Run
 `uv run time-tracker --stop-agent` to stop only the process; the persisted timer
 remains active and is recovered the next time the application starts.
+
+Enter a destination in the CSV export path field and press its button or `F7` to
+export completed entries. Relative paths are resolved from the directory where
+the TUI was launched, and `~` expands to the current user's home directory. If the
+destination exists, the TUI requires a second export action before overwriting it.
 
 ## Configuration
 

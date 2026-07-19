@@ -10,8 +10,10 @@ import time
 import uuid
 from datetime import datetime
 from multiprocessing.connection import Client
+from pathlib import Path
 from typing import cast
 
+from time_tracker.application.exporting import ExportDestinationExistsError
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
 from time_tracker.infrastructure.paths import AgentPaths
 
@@ -25,6 +27,10 @@ class AgentUnavailableError(RuntimeError):
 
 class AgentRequestError(RuntimeError):
     """The agent rejected a well-formed application request."""
+
+    def __init__(self, message: str, *, code: str = "request_failed") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class AgentClient:
@@ -56,6 +62,20 @@ class AgentClient:
         if not isinstance(result, list):
             raise AgentRequestError("the agent returned malformed history data")
         return [_completed_from_object(item) for item in result]
+
+    def export_completed(self, destination: Path, *, overwrite: bool = False) -> int:
+        """Export completed entries without silently replacing a file."""
+        try:
+            result = self._request(
+                "export_completed",
+                {"destination": str(destination), "overwrite": overwrite},
+            )
+        except AgentRequestError as error:
+            if error.code == "destination_exists":
+                raise ExportDestinationExistsError(str(error)) from error
+            raise
+        data = _object_dict(result)
+        return _object_int(data.get("entry_count"))
 
     def start(
         self,
@@ -116,9 +136,14 @@ class AgentClient:
         response_error = response.get("error")
         if response_error is not None:
             if isinstance(response_error, dict):
-                message = cast(dict[str, object], response_error).get("message")
+                error_data = cast(dict[str, object], response_error)
+                message = error_data.get("message")
+                code = error_data.get("code")
                 if isinstance(message, str):
-                    raise AgentRequestError(message)
+                    raise AgentRequestError(
+                        message,
+                        code=code if isinstance(code, str) else "request_failed",
+                    )
             raise AgentRequestError("the agent rejected the request")
         return response.get("result")
 
