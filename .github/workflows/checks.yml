@@ -27,3 +27,5 @@ jobs:
       - run: uv run ruff check .
       - run: uv run mypy
       - run: uv run pytest
+      - run: uv run python scripts/build.py
+      - run: uv run python scripts/run_packaged_smoke.py

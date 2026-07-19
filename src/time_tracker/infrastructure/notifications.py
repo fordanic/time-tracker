@@ -1,0 +1,94 @@
+"""Native desktop notification adapter."""
+
+from __future__ import annotations
+
+import asyncio
+import sys
+from typing import Protocol
+
+from desktop_notifier import DesktopNotifier
+
+from time_tracker.application.reminders import Reminder, ReminderKind
+
+
+class NotificationService(Protocol):
+    """Asynchronous boundary used by the background reminder scheduler."""
+
+    async def send(self, reminder: Reminder) -> None:
+        """Deliver one reminder, or raise when the platform rejects it."""
+        ...
+
+
+class NativeNotificationService:
+    """Deliver simple notifications through the host desktop service."""
+
+    def __init__(self) -> None:
+        self._notifier = (
+            None
+            if sys.platform == "darwin"
+            else DesktopNotifier(app_name="Time Tracker", app_icon=None)
+        )
+
+    async def send(self, reminder: Reminder) -> None:
+        """Deliver an active or inactive timer reminder."""
+        if reminder.kind is ReminderKind.ACTIVE:
+            target = " / ".join(
+                part for part in (reminder.project, reminder.activity) if part
+            )
+            title = f"Still tracking {target}?" if target else "Still tracking time?"
+            message = "The timer is still running. Open Time Tracker to stop or switch."
+        else:
+            title = "No timer is running"
+            message = "Start a timer when you begin working."
+        if sys.platform == "darwin":
+            await _send_macos_notification(title, message)
+            return
+        if self._notifier is None:
+            raise RuntimeError("native notification service was not initialized")
+        backend = self._notifier._backend  # noqa: SLF001
+        if type(backend).__module__ == "desktop_notifier.backends.dummy":
+            raise RuntimeError("native notifications are unavailable on this platform")
+        if not await self._notifier.request_authorisation():
+            raise RuntimeError("native notification permission was not granted")
+        dispatched = False
+
+        def mark_dispatched() -> None:
+            nonlocal dispatched
+            dispatched = True
+
+        await self._notifier.send(
+            title=title,
+            message=message,
+            on_dispatched=mark_dispatched,
+        )
+        if not dispatched:
+            raise RuntimeError("the desktop notification service rejected delivery")
+
+
+async def _send_macos_notification(title: str, message: str) -> None:
+    """Dispatch safely through macOS's built-in AppleScript notification command."""
+    process = await asyncio.create_subprocess_exec(
+        *_macos_notification_command(title, message),
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await process.communicate()
+    if process.returncode != 0:
+        detail = stderr.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(detail or "macOS rejected the native notification")
+
+
+def _macos_notification_command(title: str, message: str) -> tuple[str, ...]:
+    """Keep user-controlled reminder text out of executable AppleScript source."""
+    return (
+        "/usr/bin/osascript",
+        "-e",
+        "on run argv",
+        "-e",
+        "display notification (item 2 of argv) with title (item 1 of argv)",
+        "-e",
+        "end run",
+        "--",
+        title,
+        message,
+    )

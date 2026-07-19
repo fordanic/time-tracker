@@ -33,7 +33,7 @@ The same boundary will allow a future GUI to reuse the application core.
 | Persistence | Standard-library `sqlite3` and numbered SQL migrations |
 | Configuration | TOML via `tomllib` |
 | Platform paths | `platformdirs` |
-| Notifications | `desktop-notifier` behind an internal interface |
+| Notifications | Narrow native adapter: `desktop-notifier` on Linux/Windows, `osascript` on macOS |
 | Local binaries | PyInstaller, run separately on each target OS |
 | Quality tools | pytest, pytest-asyncio, Ruff, and mypy |
 
@@ -54,7 +54,9 @@ framework are intentionally unnecessary for the MVP.
 - The MVP supports one foreground client. Multiple concurrent clients are not a
   protocol guarantee.
 
-Blocking IPC and SQLite work must not stall reminder scheduling.
+The agent runs reminder scheduling on its asyncio loop and moves blocking IPC and
+SQLite calls to worker threads. Requests are still handled serially, so the agent
+remains the single database writer while notification deadlines are not stalled.
 
 ## Code boundaries
 
@@ -113,11 +115,20 @@ delivery fails or the TUI disconnects.
   locations.
 - Use simple native notifications. Interactive notification actions are deferred;
   users act through the TUI.
-- `desktop-notifier` uses desktop services on Linux, Notification Center on macOS,
-  and WinRT on Windows. Delivery failures are logged and shown in a connected TUI.
+- `desktop-notifier` uses desktop services on Linux and WinRT on Windows. macOS
+  uses its built-in `osascript` notification command: on the current macOS 26
+  validation host, `UNUserNotificationCenter` rejected an otherwise valid
+  ad-hoc-signed local bundle. Reminder text is passed as command arguments rather
+  than interpolated into AppleScript source. Delivery failures do not affect
+  authoritative timer state and are written to the platform-appropriate agent
+  log. Surfacing those failures in the TUI belongs with the remaining reminder UI
+  work.
+- Reminder deadlines use a monotonic schedule. A persisted start, switch, or stop
+  resets the relevant deadline; closing the TUI does not affect it. The default
+  schedule is five minutes without a timer and 30 minutes with one.
 - Build with PyInstaller on the target OS; it is not used for cross-compilation.
-- macOS notification delivery requires a signed executable or app bundle, so local
-  builds may require an ad-hoc signing step.
+- Linux and Windows builds are one-file executables. macOS builds are ad-hoc-signed
+  `.app` bundles, with the TUI executable inside the bundle.
 
 ## Testing and first validation
 
@@ -137,6 +148,19 @@ platforms:
 
 If an IPC or notification choice fails, replace that adapter without changing the
 domain or application boundary.
+
+The automated packaged smoke runs two real Textual app sessions from the frozen
+artifact using an isolated data directory: start a timer, close the first TUI,
+confirm the agent remains available, reconnect and recover the original timer,
+stop it, and shut down the agent. GitHub Actions builds and executes this lifecycle
+on Linux, Windows, and macOS. Native delivery is checked separately on an
+interactive desktop with `make smoke-notification`, since hosted CI runners do not
+provide a reliable signed-in notification session.
+
+As of July 19, 2026, the full packaged lifecycle and native Notification Center
+dispatch have passed locally on macOS arm64. Linux and Windows packaged lifecycle
+results are intentionally not marked complete until the updated matrix workflow
+has run on those operating systems.
 
 ## References
 
