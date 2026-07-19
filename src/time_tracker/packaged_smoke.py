@@ -32,6 +32,9 @@ async def run_packaged_lifecycle(directory: Path) -> None:
             started = first_app.active_timer
             if started is None:
                 raise RuntimeError("the packaged TUI did not start a timer")
+            # The model becomes active before the handler's awaited suggestion refresh.
+            # Keep the screen mounted until Textual has finished that message.
+            await pilot.pause()
 
         # The first TUI is closed, but its background process must remain alive.
         AgentClient(paths).ping()
