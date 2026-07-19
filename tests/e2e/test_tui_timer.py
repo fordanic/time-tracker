@@ -87,6 +87,35 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
             )
             assert "Website,Implementation" in destination.read_text(encoding="utf-8")
 
+            await pilot.click("#archive-activity-button")
+            await pilot.pause()
+
+            assert recovered_app.query_one("#activity", Input).value == ""
+            assert "Archived activity Website / Implementation" in str(
+                recovered_app.query_one("#message", Static).render()
+            )
+            recovered_app.query_one("#activity", Input).value = "Implementation"
+            await pilot.click("#start-button")
+            await pilot.pause()
+
+            assert "activity is archived: Implementation" in str(
+                recovered_app.query_one("#message", Static).render()
+            )
+            assert "No timer running" in str(
+                recovered_app.query_one("#active-timer", Static).render()
+            )
+            assert history.row_count == 1
+
+            await pilot.click("#archive-project-button")
+            await pilot.pause()
+
+            assert recovered_app.query_one("#project", Input).value == ""
+            assert recovered_app.query_one("#activity", Input).value == ""
+            assert "Archived project Website" in str(
+                recovered_app.query_one("#message", Static).render()
+            )
+            assert client.list_projects() == []
+
         assert SQLiteTimerRepository(paths.database).get_active() is None
     finally:
         client.shutdown()
