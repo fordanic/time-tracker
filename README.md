@@ -32,10 +32,11 @@ business logic independent of the TUI and available to a future GUI.
 
 ## Status
 
-The Python package scaffold and cross-platform checks are in place. The first
-implementation milestone is a walking skeleton that starts the background
-process, creates a project and activity, tracks and persists one entry, and
-restores it after restart.
+The first vertical walking skeleton is in place: the Textual TUI connects to a
+single authenticated background process, creates a project and activity by name,
+starts or stops one SQLite-backed timer, and restores an active timer when the TUI
+reconnects. Broader project/activity management, reminders, history, export, and
+packaging validation remain upcoming MVP work.
 
 ## Development
 
@@ -54,5 +55,11 @@ uv run ruff check .
 uv run mypy
 uv run pytest
 ```
+
+Run `uv run time-tracker` to open the TUI. Enter a project and activity, then use
+the buttons or `F5`/`F6` to start and stop. Closing the TUI leaves the background
+process and any active timer running. Run `uv run time-tracker --stop-agent` to
+stop only the process; the persisted timer remains active and is recovered the
+next time the application starts.
 
 The checks run on Python 3.14 across Linux, Windows, and macOS in GitHub Actions.
