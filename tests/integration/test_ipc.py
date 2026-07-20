@@ -152,7 +152,7 @@ def test_instance_lock_rejects_a_second_agent(tmp_path: Path) -> None:
 
 def test_agent_can_start_as_a_separate_process(tmp_path: Path) -> None:
     paths = AgentPaths.in_directory(tmp_path)
-    client = ensure_agent_running(paths)
+    client = ensure_agent_running(paths, timeout_seconds=15.0)
 
     try:
         started = client.start("Process test", "Persist", None)
