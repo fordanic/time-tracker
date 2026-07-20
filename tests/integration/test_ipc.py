@@ -50,6 +50,11 @@ def test_authenticated_json_ipc_persists_and_recovers_active_timer(
         assert destination.read_text(encoding="utf-8").startswith(
             "project,activity,start_time,stop_time,duration_seconds,note"
         )
+        summary_destination = tmp_path / "ipc-daily-summary.csv"
+        assert reconnected_client.export_daily_summaries(summary_destination) == 1
+        assert summary_destination.read_text(encoding="utf-8").startswith(
+            "date,project,activity,duration_seconds"
+        )
         assert reconnected_client.archive_activity("website", "implementation") == (
             "Website",
             "Implementation",

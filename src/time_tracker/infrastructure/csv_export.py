@@ -1,11 +1,13 @@
-"""UTF-8 CSV output for completed time entries."""
+"""UTF-8 CSV output for completed entries and daily summaries."""
 
 from __future__ import annotations
 
 import csv
+from datetime import timedelta
 from pathlib import Path
 
 from time_tracker.application.exporting import ExportDestinationExistsError
+from time_tracker.application.reporting import DailySummary
 from time_tracker.domain.models import CompletedTimer
 
 CSV_COLUMNS = (
@@ -16,6 +18,7 @@ CSV_COLUMNS = (
     "duration_seconds",
     "note",
 )
+DAILY_SUMMARY_COLUMNS = ("date", "project", "activity", "duration_seconds")
 
 
 class CsvCompletedEntryWriter:
@@ -41,7 +44,7 @@ class CsvCompletedEntryWriter:
                             entry.activity,
                             entry.started_at.astimezone().isoformat(),
                             entry.stopped_at.astimezone().isoformat(),
-                            _duration_seconds(entry),
+                            _duration_seconds(entry.duration),
                             entry.note or "",
                         )
                     )
@@ -51,12 +54,43 @@ class CsvCompletedEntryWriter:
             ) from error
 
 
-def _duration_seconds(entry: CompletedTimer) -> str:
+class CsvDailySummaryWriter:
+    """Write one row per local day, project, and activity."""
+
+    def write(
+        self,
+        destination: Path,
+        summaries: list[DailySummary],
+        *,
+        overwrite: bool,
+    ) -> None:
+        """Write summaries without overwriting unless explicitly confirmed."""
+        mode = "w" if overwrite else "x"
+        try:
+            with destination.open(mode, encoding="utf-8", newline="") as output:
+                writer = csv.writer(output)
+                writer.writerow(DAILY_SUMMARY_COLUMNS)
+                for summary in summaries:
+                    writer.writerow(
+                        (
+                            summary.day.isoformat(),
+                            summary.project,
+                            summary.activity,
+                            _duration_seconds(summary.duration),
+                        )
+                    )
+        except FileExistsError as error:
+            raise ExportDestinationExistsError(
+                f"export destination already exists: {destination}"
+            ) from error
+
+
+def _duration_seconds(duration: timedelta) -> str:
     """Preserve microsecond precision while keeping whole seconds concise."""
     microseconds = (
-        entry.duration.days * 86_400_000_000
-        + entry.duration.seconds * 1_000_000
-        + entry.duration.microseconds
+        duration.days * 86_400_000_000
+        + duration.seconds * 1_000_000
+        + duration.microseconds
     )
     seconds, remainder = divmod(microseconds, 1_000_000)
     if remainder == 0:

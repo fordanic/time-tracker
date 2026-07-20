@@ -21,7 +21,10 @@ from time_tracker.application.reminders import Reminder, ReminderIntervals, Remi
 from time_tracker.application.tracking import TrackingService
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
 from time_tracker.infrastructure.configuration import load_config
-from time_tracker.infrastructure.csv_export import CsvCompletedEntryWriter
+from time_tracker.infrastructure.csv_export import (
+    CsvCompletedEntryWriter,
+    CsvDailySummaryWriter,
+)
 from time_tracker.infrastructure.instance_lock import instance_lock
 from time_tracker.infrastructure.ipc import PROTOCOL_VERSION
 from time_tracker.infrastructure.notifications import (
@@ -67,7 +70,11 @@ def _serve_locked(
     application_logger.setLevel(logging.INFO)
     repository = SQLiteTimerRepository(paths.database)
     service = TrackingService(repository)
-    export_service = ExportService(repository, CsvCompletedEntryWriter())
+    export_service = ExportService(
+        repository,
+        CsvCompletedEntryWriter(),
+        CsvDailySummaryWriter(),
+    )
     notification_service = notifier or NativeNotificationService()
     listener = Listener(
         paths.address,
@@ -205,6 +212,13 @@ def _handle_request(
         elif method == "export_completed":
             result = {
                 "entry_count": export_service.export_completed(
+                    Path(_required_str(params, "destination")),
+                    overwrite=_required_bool(params, "overwrite"),
+                )
+            }
+        elif method == "export_daily_summaries":
+            result = {
+                "summary_count": export_service.export_daily_summaries(
                     Path(_required_str(params, "destination")),
                     overwrite=_required_bool(params, "overwrite"),
                 )
