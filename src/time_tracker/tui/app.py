@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 
@@ -29,7 +29,7 @@ from textual.widgets.option_list import Option
 
 from time_tracker.application.exporting import ExportDestinationExistsError
 from time_tracker.application.reminders import Reminder, ReminderKind
-from time_tracker.application.reporting import build_daily_summaries
+from time_tracker.application.reporting import build_daily_review, build_daily_summaries
 from time_tracker.application.tracking import (
     ArchivedActivity,
     RecentActivity,
@@ -318,6 +318,19 @@ class TimeTrackerApp(App[None]):
         color: $text-muted;
     }
 
+    #track-context {
+        height: 1;
+    }
+
+    #today-total {
+        width: 34;
+        color: $text-muted;
+    }
+
+    #recent-activities, #recent-empty {
+        width: 1fr;
+    }
+
     #export-actions {
         height: auto;
         margin-top: 0;
@@ -407,6 +420,8 @@ class TimeTrackerApp(App[None]):
         self.pending_reminder: Reminder | None = None
         self._pending_export_path: Path | None = None
         self._completed_entries: list[CompletedTimer] = []
+        self._history_row_entry_ids: list[int | None] = []
+        self._today_total_day: date | None = None
         self._recent_activities: list[RecentActivity] = []
         self._archived_projects: list[str] = []
         self._archived_activities: list[ArchivedActivity] = []
@@ -447,8 +462,13 @@ class TimeTrackerApp(App[None]):
                         id="activity",
                     )
                     yield Input(placeholder="Optional note", id="note")
-                    yield OptionList(id="recent-activities", compact=True)
-                    yield Static("No recent activities yet.", id="recent-empty")
+                    with Horizontal(id="track-context"):
+                        yield Static(
+                            "Today's completed time: 00:00:00",
+                            id="today-total",
+                        )
+                        yield OptionList(id="recent-activities", compact=True)
+                        yield Static("No recent activities yet.", id="recent-empty")
                     with Horizontal(id="actions"):
                         yield Button(
                             "Start  F5",
@@ -1151,12 +1171,22 @@ class TimeTrackerApp(App[None]):
             )
             return
         table = self.query_one("#history", DataTable)
-        if not self._completed_entries or table.cursor_row >= len(
-            self._completed_entries
-        ):
-            self._show_message("Select a completed entry to correct.", error=True)
+        if table.cursor_row >= len(self._history_row_entry_ids):
+            self._show_message("Select a completed entry row to correct.", error=True)
             return
-        entry = self._completed_entries[table.cursor_row]
+        entry_id = self._history_row_entry_ids[table.cursor_row]
+        if entry_id is None:
+            self._show_message("Select a completed entry row to correct.", error=True)
+            return
+        entry = next(
+            (item for item in self._completed_entries if item.entry_id == entry_id),
+            None,
+        )
+        if entry is None:
+            self._show_message(
+                "The selected completed entry is unavailable.", error=True
+            )
+            return
         self._populate_correction(entry)
         self.query_one("#correction-project", Input).focus()
 
@@ -1380,8 +1410,10 @@ class TimeTrackerApp(App[None]):
         preferred_entry_id: int | None = None,
     ) -> None:
         self._completed_entries = entries
+        self._render_today_total(entries)
         table = self.query_one("#history", DataTable)
         table.clear(columns=True)
+        self._history_row_entry_ids = []
         summary_mode = self.query_one("#summary-mode", Switch).value
         title = self.query_one("#history-title", Static)
         load_button = self.query_one("#load-correction-button", Button)
@@ -1411,23 +1443,63 @@ class TimeTrackerApp(App[None]):
                 )
             return
 
-        title.update("Completed entries")
-        table.add_columns("Project", "Activity", "Start", "Stop", "Duration", "Note")
-        for entry in entries:
+        title.update("Completed entries by day")
+        table.add_columns(
+            "Date",
+            "Project",
+            "Activity",
+            "Start",
+            "Stop",
+            "Duration",
+            "Note",
+        )
+        for group_index, group in enumerate(build_daily_review(entries)):
+            for segment_index, segment in enumerate(group.segments):
+                table.add_row(
+                    group.day.isoformat() if segment_index == 0 else "",
+                    segment.project,
+                    segment.activity,
+                    segment.started_at.astimezone().strftime("%H:%M"),
+                    segment.stopped_at.astimezone().strftime("%H:%M"),
+                    _format_duration(segment.duration),
+                    segment.note or "",
+                    key=(f"entry-{segment.entry_id}-{group_index}-{segment_index}"),
+                )
+                self._history_row_entry_ids.append(segment.entry_id)
             table.add_row(
-                entry.project,
-                entry.activity,
-                entry.started_at.astimezone().isoformat(timespec="seconds"),
-                entry.stopped_at.astimezone().isoformat(timespec="seconds"),
-                _format_duration(entry.duration),
-                entry.note or "",
-                key=str(entry.entry_id),
+                "",
+                "Day total",
+                "",
+                "",
+                "",
+                _format_duration(group.duration),
+                "",
+                key=f"day-total-{group.day.isoformat()}",
             )
+            self._history_row_entry_ids.append(None)
         if preferred_entry_id is not None:
-            for index, entry in enumerate(entries):
-                if entry.entry_id == preferred_entry_id:
+            for index, entry_id in enumerate(self._history_row_entry_ids):
+                if entry_id == preferred_entry_id:
                     table.move_cursor(row=index)
                     break
+
+    def _render_today_total(self, entries: list[CompletedTimer]) -> None:
+        widgets = self.query("#today-total")
+        if not widgets:
+            return
+        today = datetime.now().astimezone().date()
+        duration = next(
+            (
+                group.duration
+                for group in build_daily_review(entries)
+                if group.day == today
+            ),
+            timedelta(),
+        )
+        widgets.first(Static).update(
+            f"Today's completed time: {_format_duration(duration)}"
+        )
+        self._today_total_day = today
 
     def _render_recent_activities(self, recent: list[RecentActivity]) -> None:
         self._recent_activities = recent
@@ -1481,6 +1553,8 @@ class TimeTrackerApp(App[None]):
         edit_buttons = self.query("#edit-active-button")
         if not active_widgets or not stop_buttons or not edit_buttons:
             return
+        if self._today_total_day != datetime.now().astimezone().date():
+            self._render_today_total(self._completed_entries)
         active_widget = active_widgets.first(Static)
         stop_button = stop_buttons.first(Button)
         edit_button = edit_buttons.first(Button)

@@ -50,16 +50,19 @@ disabled instead of fragmenting the active entry. Changing only the note restart
 the same pair with adjacent entries at one transactional timestamp.
 The background process also owns monotonic reminder scheduling, TOML-configured
 intervals, and native notification delivery after the TUI closes. The TUI lists
-completed entries chronologically with their local start and stop times, derived
-duration, and note. A toggle changes both the history view and CSV export to daily
-totals per project and activity; entries crossing local midnight are divided
-between their corresponding days. Both CSV formats require explicit overwrite
-confirmation. Projects and activities can be archived from the TUI after a second
-explicit confirmation naming the canonical target and warning that a running
-timer continues. Archived names disappear from new-timer suggestions, remain
-intact in history, are listed in Manage, and can be restored there. Restoring a
-project preserves each activity's independent archive state, and an activity can
-be restored only after its parent project.
+completed time chronologically in local-date groups with compact local start and
+stop times, derived segment durations, notes, and a total after each day. Entries
+crossing local midnight are divided into display segments while retaining one
+editable entry identity and full offset-aware timestamps in the editor. Track
+shows the current local day's completed total from the same projection and
+excludes a running timer until it is stopped. A toggle changes both the history
+view and CSV export to daily totals per project and activity. Both CSV formats
+require explicit overwrite confirmation. Projects and activities can be archived
+from the TUI after a second explicit confirmation naming the canonical target and
+warning that a running timer continues. Archived names disappear from new-timer
+suggestions, remain intact in history, are listed in Manage, and can be restored
+there. Restoring a project preserves each activity's independent archive state,
+and an activity can be restored only after its parent project.
 The Track workflow shows up to five unique recently completed project/activity
 pairs, newest first; selecting one prepares it for another timer without copying
 its historical note. Archived targets are excluded from this recent-work list.
@@ -142,7 +145,8 @@ remains active and is recovered the next time the application starts.
 While a timer is running, change its Track fields and use Update active details or
 `F11` to persist those values without restarting it. Start/Switch/Restart via `F5`
 remains the separate timer-transition choice. The update action is disabled when
-the normalized fields already match the running entry.
+the normalized fields already match the running entry. Track's completed-today
+total does not include the running portion until Stop persists it.
 
 Use `F1` through `F4` to switch between Track, Review, Manage, and Settings. The
 same views can be selected from the tab row. Track owns timer capture and recent
@@ -152,13 +156,16 @@ reminder configuration. The active timer and any pending reminder stay visible
 while moving between them. `F5` through `F11` retain their documented actions
 from every view.
 
-In Review (`F2`), use the Daily summaries toggle to switch the history table and
-export between completed entries and local-day totals per project and activity.
-Enter a destination in the CSV export path field and press its button or `F7` to
-export the selected representation. Relative paths are resolved from the
-directory where the TUI was launched, and `~` expands to the current user's home
-directory. If the destination exists, the TUI requires a second export action
-before overwriting it.
+In Review (`F2`), completed time is grouped by local date with compact `HH:MM`
+times and a total after each day. An entry crossing midnight has one display
+segment in each affected day. Loading either segment for correction opens the
+single full entry with offset-aware timestamps; total rows are not editable. Use
+the Daily summaries toggle to switch the history table and export to local-day
+totals per project and activity. Enter a destination in the CSV export path field
+and press its button or `F7` to export the selected representation. Relative paths
+are resolved from the directory where the TUI was launched, and `~` expands to the
+current user's home directory. If the destination exists, the TUI requires a
+second export action before overwriting it.
 
 To correct completed work, turn off Daily summaries, select its history row, and
 choose Load selected entry. Edit the project, activity, note, start, or stop and
