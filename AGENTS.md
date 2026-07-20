@@ -1,18 +1,24 @@
 # Agent Guidance
 
 Before changing the repository, read `README.md`,
-`docs/mvp-requirements.md`, and `docs/architecture.md`. Before committing, follow
-`docs/commits.md`.
+`docs/top-level-requirements.md`, `docs/feature-requirements.md`, and
+`docs/architecture.md`. Before committing, follow `docs/commits.md`.
 
-The MVP document is authoritative for product behavior and scope. The architecture
-document is authoritative for technical choices and boundaries. Update the
-relevant document when a decision changes; do not create a second source of truth.
+The top-level requirements document is authoritative for durable product behavior
+and scope. The architecture document is authoritative for technical choices and
+boundaries. Feature requirements record approved additional feature behavior and
+must conform to both authoritative documents. Update the relevant document when a
+decision changes; do not create a second source of truth.
 
 ## Current phase
 
-The repository has its initial package and test scaffold. The next milestone is
-the cross-platform walking skeleton described in `README.md` and
-`docs/architecture.md`.
+Use the `README.md` Status section as the source of truth for current
+implementation and validation status. Close the recorded validation gaps while
+beginning the TUI work described in `docs/competitive-assessment.md`. Before
+implementing a selected roadmap slice, define its behavior and acceptance
+criteria in `docs/feature-requirements.md`. Update
+`docs/top-level-requirements.md` when a top-level product rule or boundary changes
+and `docs/architecture.md` when a technical choice or boundary changes.
 
 ## Canonical development commands
 
@@ -38,11 +44,13 @@ a different formatter or package manager.
 
 ## Working rules
 
-- Keep business logic independent of the TUI and future GUI.
+- Keep business logic independent of the TUI.
 - Treat the background process as the single database writer.
 - Persist timer transitions before reporting success.
 - Inject clocks and external services so core behavior is deterministic in tests.
 - Isolate operating-system-specific behavior behind narrow adapters.
-- Do not add deferred features to the MVP without changing its requirements.
+- Do not add feature behavior without updating the feature requirements, and do
+  not let feature requirements conflict with the top-level requirements or
+  architecture.
 - Add tests with implementation changes and run the relevant checks.
 - Preserve user data across crashes, restarts, and migrations.
