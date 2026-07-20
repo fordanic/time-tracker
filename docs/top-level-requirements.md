@@ -61,6 +61,12 @@ internet connection. The current product interface is a TUI.
 - Start and stop an activity from the TUI.
 - Starting a different activity automatically stops the active one and starts the
   new one at the same transition timestamp, without overlap.
+- Starting the active project/activity with a different normalized note closes
+  and restarts it at one transition timestamp; its new entry begins at that
+  timestamp with the new note.
+- Starting with the same project/activity and normalized note is a rejected
+  no-op: it does not create an entry, reset the active start time, or reset timer
+  reminders.
 - Show the active project, activity, start time, and elapsed duration prominently.
 - Allow an optional plain-text note on the active entry.
 - Persist each timer transition before reporting success.
@@ -182,7 +188,6 @@ feature changes a top-level requirement.
 - Minimum supported OS versions and CPU architectures.
 - Behavior during computer sleep, system-clock changes, and time-zone changes.
 - Whether the background process starts at login.
-- Exact behavior for recent activities and Start/Switch/Restart actions.
 - Correction and manual-entry rules, including whether completed entries may
   overlap.
 - Archive restoration and hierarchy behavior.

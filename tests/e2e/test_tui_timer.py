@@ -57,16 +57,12 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
                 recovered_app.query_one("#active-timer", Static).render()
             )
             assert "Website / Implementation" in recovered_text
-
-            await pilot.click("#project")
-            await pilot.press("w", "e", "b", "right")
-            await pilot.pause()
             assert recovered_app.query_one("#project", Input).value == "Website"
-
-            await pilot.click("#activity")
-            await pilot.press("i", "m", "p", "right")
-            await pilot.pause()
             assert recovered_app.query_one("#activity", Input).value == "Implementation"
+            assert recovered_app.query_one("#note", Input).value == "Walking skeleton"
+            recovered_start = recovered_app.query_one("#start-button", Button)
+            assert str(recovered_start.label) == "Already tracking"
+            assert recovered_start.disabled is True
 
             await pilot.click("#stop-button")
             await pilot.pause()
@@ -256,6 +252,79 @@ async def test_user_tracks_again_from_recent_activities(tmp_path: Path) -> None:
             await pilot.pause()
 
             assert [pair.activity for pair in app._recent_activities] == ["Planning"]
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+
+
+@pytest.mark.asyncio
+async def test_primary_action_distinguishes_start_restart_and_switch(
+    tmp_path: Path,
+) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    thread = threading.Thread(target=serve, args=(paths,), daemon=True)
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        app = TimeTrackerApp(client)
+        async with app.run_test() as pilot:
+            start_button = app.query_one("#start-button", Button)
+            assert str(start_button.label) == "Start  F5"
+            assert start_button.disabled is False
+
+            app.query_one("#project", Input).value = "Website"
+            app.query_one("#activity", Input).value = "Implementation"
+            app.query_one("#note", Input).value = "Original note"
+            await pilot.pause()
+            await pilot.press("f5")
+            await pilot.pause()
+
+            original = client.get_active()
+            assert original is not None
+            assert str(start_button.label) == "Already tracking"
+            assert start_button.disabled is True
+
+            await pilot.press("f5")
+            await pilot.pause()
+            assert client.get_active() == original
+            assert client.list_completed() == []
+
+            app.query_one("#note", Input).value = "New note"
+            await pilot.pause()
+            assert str(start_button.label) == "Restart with new note  F5"
+            assert start_button.disabled is False
+
+            await pilot.press("f5")
+            await pilot.pause()
+            restarted = client.get_active()
+            assert restarted is not None
+            assert restarted.entry_id != original.entry_id
+            assert restarted.note == "New note"
+            completed = client.list_completed()
+            assert len(completed) == 1
+            assert completed[0].stopped_at == restarted.started_at
+            assert str(start_button.label) == "Already tracking"
+
+            app.query_one("#activity", Input).value = "Review"
+            await pilot.pause()
+            assert "Switch from Website / Implementation to Website / Review" in str(
+                start_button.label
+            )
+            assert start_button.disabled is False
+
+            await pilot.press("f5")
+            await pilot.pause()
+            switched = client.get_active()
+            assert switched is not None
+            assert switched.activity == "Review"
+            completed = client.list_completed()
+            assert len(completed) == 2
+            assert completed[1].stopped_at == switched.started_at
+            assert str(start_button.label) == "Already tracking"
     finally:
         client.shutdown()
         thread.join(timeout=2)

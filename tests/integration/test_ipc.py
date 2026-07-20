@@ -9,7 +9,7 @@ import pytest
 
 from time_tracker.agent.server import serve
 from time_tracker.application.reminders import Reminder, ReminderIntervals, ReminderKind
-from time_tracker.application.tracking import RecentActivity
+from time_tracker.application.tracking import RecentActivity, StartAction
 from time_tracker.infrastructure.instance_lock import (
     AgentAlreadyRunningError,
     instance_lock,
@@ -86,6 +86,59 @@ def _wait_until_ready(client: AgentClient) -> None:
         except AgentUnavailableError:
             time.sleep(0.01)
     raise AssertionError("agent did not start")
+
+
+def test_start_action_preview_matches_noop_restart_and_switch_transitions(
+    tmp_path: Path,
+) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    thread = threading.Thread(target=serve, args=(paths,), daemon=True)
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        assert (
+            client.get_start_action("Website", "Implementation", "Original")
+            is StartAction.START
+        )
+        original = client.start("Website", "Implementation", "Original")
+
+        assert (
+            client.get_start_action(" website ", "IMPLEMENTATION", " Original ")
+            is StartAction.ALREADY_TRACKING
+        )
+        with pytest.raises(AgentRequestError, match="already tracking"):
+            client.start(" website ", "IMPLEMENTATION", " Original ")
+        assert client.get_active() == original
+        assert client.list_completed() == []
+
+        assert (
+            client.get_start_action("Website", "Implementation", "New note")
+            is StartAction.RESTART
+        )
+        restarted = client.start("Website", "Implementation", "New note")
+        first_completed = client.list_completed()
+        assert len(first_completed) == 1
+        assert first_completed[0].stopped_at == restarted.started_at
+        assert restarted.project == original.project
+        assert restarted.activity == original.activity
+        assert restarted.note == "New note"
+
+        assert (
+            client.get_start_action("Website", "Review", "New note")
+            is StartAction.SWITCH
+        )
+        switched = client.start("Website", "Review", "New note")
+        completed = client.list_completed()
+        assert len(completed) == 2
+        assert completed[1].stopped_at == switched.started_at
+        assert completed[1].entry_id == restarted.entry_id
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
 
 
 def test_instance_lock_rejects_a_second_agent(tmp_path: Path) -> None:

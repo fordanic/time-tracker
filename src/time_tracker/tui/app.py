@@ -27,7 +27,7 @@ from textual.widgets.option_list import Option
 from time_tracker.application.exporting import ExportDestinationExistsError
 from time_tracker.application.reminders import Reminder, ReminderKind
 from time_tracker.application.reporting import build_daily_summaries
-from time_tracker.application.tracking import RecentActivity
+from time_tracker.application.tracking import RecentActivity, StartAction
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
 
 
@@ -60,6 +60,15 @@ class TrackerGateway(Protocol):
 
     def list_recent_activities(self) -> list[RecentActivity]:
         """Return recent selectable project/activity pairs."""
+        ...
+
+    def get_start_action(
+        self,
+        project: str,
+        activity: str,
+        note: str | None = None,
+    ) -> StartAction:
+        """Return the application-classified effect of a capture selection."""
         ...
 
     def archive_project(self, project: str) -> str:
@@ -109,7 +118,7 @@ class TimeTrackerApp(App[None]):
     TITLE = "Time Tracker"
     SUB_TITLE = "Persistent walking skeleton"
     BINDINGS = [
-        Binding("f5", "start_timer", "Start / switch"),
+        Binding("f5", "start_timer", "Timer action"),
         Binding("f6", "stop_timer", "Stop"),
         Binding("f7", "export_csv", "Export CSV"),
         Binding("f8", "archive_project", "Archive project"),
@@ -251,6 +260,7 @@ class TimeTrackerApp(App[None]):
         self._pending_export_path: Path | None = None
         self._completed_entries: list[CompletedTimer] = []
         self._recent_activities: list[RecentActivity] = []
+        self._start_action: StartAction | None = None
 
     def compose(self) -> ComposeResult:
         """Compose the single-screen timer workflow."""
@@ -286,7 +296,7 @@ class TimeTrackerApp(App[None]):
             yield OptionList(id="recent-activities", compact=True)
             yield Static("No recent activities yet.", id="recent-empty")
             with Horizontal(id="actions"):
-                yield Button("Start / switch  F5", id="start-button", variant="success")
+                yield Button("Start  F5", id="start-button", variant="success")
                 yield Button("Stop  F6", id="stop-button", variant="warning")
             with Horizontal(id="export-actions"):
                 yield Input(
@@ -320,7 +330,12 @@ class TimeTrackerApp(App[None]):
             )
             self._render_history(completed)
             self._render_recent_activities(recent)
+            if self.active_timer is not None:
+                self.query_one("#project", Input).value = self.active_timer.project
+                self.query_one("#activity", Input).value = self.active_timer.activity
+                self.query_one("#note", Input).value = self.active_timer.note or ""
         self._render_active()
+        await self._refresh_start_action()
         await self._refresh_reminder()
 
     @on(Input.Changed, "#project")
@@ -334,6 +349,7 @@ class TimeTrackerApp(App[None]):
             )
         except Exception as error:
             self._show_message(str(error), error=True)
+            await self._refresh_start_action()
             return
         if self.query_one("#project", Input).value.strip() != project:
             return
@@ -341,6 +357,17 @@ class TimeTrackerApp(App[None]):
             activities,
             case_sensitive=False,
         )
+        await self._refresh_start_action()
+
+    @on(Input.Changed, "#activity")
+    async def handle_activity_changed(self) -> None:
+        """Refresh the primary action when the selected activity changes."""
+        await self._refresh_start_action()
+
+    @on(Input.Changed, "#note")
+    async def handle_note_changed(self) -> None:
+        """Refresh the primary action when the selected note changes."""
+        await self._refresh_start_action()
 
     @on(Button.Pressed, "#start-button")
     async def handle_start_button(self) -> None:
@@ -424,9 +451,12 @@ class TimeTrackerApp(App[None]):
         await self._confirm_active_reminder()
 
     async def _start_timer(self) -> None:
+        if self.query_one("#start-button", Button).disabled:
+            return
         project = self.query_one("#project", Input).value
         activity = self.query_one("#activity", Input).value
         note = self.query_one("#note", Input).value
+        requested_action = self._start_action
         try:
             self.active_timer = await asyncio.to_thread(
                 self.client.start,
@@ -439,13 +469,27 @@ class TimeTrackerApp(App[None]):
             return
         self.pending_reminder = None
         self._render_reminder()
-        self._show_message("Timer persisted and running.")
+        if requested_action is StartAction.SWITCH:
+            message = (
+                f"Switched to {self.active_timer.project} / "
+                f"{self.active_timer.activity}."
+            )
+        elif requested_action is StartAction.RESTART:
+            message = (
+                f"Restarted {self.active_timer.project} / "
+                f"{self.active_timer.activity} with a new note."
+            )
+        else:
+            message = "Timer persisted and running."
+        self._show_message(message)
         self.query_one("#project", Input).value = self.active_timer.project
         self.query_one("#activity", Input).value = self.active_timer.activity
+        self.query_one("#note", Input).value = self.active_timer.note or ""
         await self._refresh_project_suggestions()
         await self._refresh_history()
         await self._refresh_recent_activities()
         self._render_active()
+        await self._refresh_start_action()
 
     async def _refresh_project_suggestions(self) -> None:
         projects = await asyncio.to_thread(self.client.list_projects)
@@ -518,6 +562,7 @@ class TimeTrackerApp(App[None]):
             await self._refresh_history()
             await self._refresh_recent_activities()
         self._render_active()
+        await self._refresh_start_action()
 
     async def _refresh_reminder(self) -> None:
         try:
@@ -558,6 +603,53 @@ class TimeTrackerApp(App[None]):
             self._show_message(str(error), error=True)
             return
         self._render_recent_activities(recent)
+
+    async def _refresh_start_action(self) -> None:
+        project = self.query_one("#project", Input).value
+        activity = self.query_one("#activity", Input).value
+        note = self.query_one("#note", Input).value
+        selection = (project, activity, note)
+        button = self.query_one("#start-button", Button)
+        try:
+            action = await asyncio.to_thread(
+                self.client.get_start_action,
+                project,
+                activity,
+                note,
+            )
+        except Exception as error:
+            self._start_action = None
+            button.label = "Timer action unavailable  F5"
+            button.disabled = True
+            self._show_message(str(error), error=True)
+            return
+        current_selection = (
+            self.query_one("#project", Input).value,
+            self.query_one("#activity", Input).value,
+            self.query_one("#note", Input).value,
+        )
+        if current_selection != selection:
+            return
+        self._start_action = action
+        button.disabled = action is StartAction.ALREADY_TRACKING
+        if action is StartAction.START:
+            button.label = "Start  F5"
+        elif action is StartAction.ALREADY_TRACKING:
+            button.label = "Already tracking"
+        elif action is StartAction.RESTART:
+            button.label = "Restart with new note  F5"
+        else:
+            current = self.active_timer
+            current_name = (
+                f"{current.project} / {current.activity}"
+                if current is not None
+                else "current timer"
+            )
+            selected_name = (
+                f"{project.strip() or '(project required)'} / "
+                f"{activity.strip() or '(activity required)'}"
+            )
+            button.label = f"Switch from {current_name} to {selected_name}  F5"
 
     async def _export_current_view(self) -> None:
         raw_destination = self.query_one("#export-path", Input).value.strip()

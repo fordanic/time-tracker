@@ -15,7 +15,7 @@ from typing import cast
 
 from time_tracker.application.exporting import ExportDestinationExistsError
 from time_tracker.application.reminders import Reminder, ReminderKind
-from time_tracker.application.tracking import RecentActivity
+from time_tracker.application.tracking import RecentActivity, StartAction
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
 from time_tracker.infrastructure.paths import AgentPaths
 
@@ -83,6 +83,24 @@ class AgentClient:
         if not isinstance(result, list):
             raise AgentRequestError("the agent returned malformed recent activity data")
         return [_recent_activity_from_object(item) for item in result]
+
+    def get_start_action(
+        self,
+        project: str,
+        activity: str,
+        note: str | None = None,
+    ) -> StartAction:
+        """Return the application-classified effect of a capture selection."""
+        result = self._request(
+            "get_start_action",
+            {"project": project, "activity": activity, "note": note},
+        )
+        try:
+            return StartAction(_object_str(result))
+        except ValueError as error:
+            raise AgentRequestError(
+                "the agent returned an unknown start action"
+            ) from error
 
     def archive_project(self, project: str) -> str:
         """Archive a project and return its canonical stored name."""

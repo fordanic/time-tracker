@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Protocol
 
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
@@ -15,6 +16,19 @@ class RecentActivity:
 
     project: str
     activity: str
+
+
+class StartAction(StrEnum):
+    """The effect of applying the current capture selection."""
+
+    START = "start"
+    SWITCH = "switch"
+    ALREADY_TRACKING = "already_tracking"
+    RESTART = "restart"
+
+
+class AlreadyTrackingError(ValueError):
+    """Raised when a requested start would not change the active timer."""
 
 
 class Clock(Protocol):
@@ -133,6 +147,25 @@ class TrackingService:
                 break
         return recent
 
+    def get_start_action(
+        self,
+        project: str,
+        activity: str,
+        note: str | None = None,
+    ) -> StartAction:
+        """Classify a capture selection against authoritative active state."""
+        normalized_project, normalized_activity, normalized_note = _normalize_selection(
+            project,
+            activity,
+            note,
+        )
+        return _classify_start_action(
+            self._repository.get_active(),
+            normalized_project,
+            normalized_activity,
+            normalized_note,
+        )
+
     def archive_project(self, project: str) -> str:
         """Archive a project so it cannot be used for future timers."""
         project = project.strip()
@@ -161,13 +194,25 @@ class TrackingService:
         note: str | None = None,
     ) -> ActiveTimer:
         """Start an activity after validating user-facing names."""
-        project = project.strip()
-        activity = activity.strip()
+        project, activity, normalized_note = _normalize_selection(
+            project,
+            activity,
+            note,
+        )
         if not project:
             raise ValueError("project name is required")
         if not activity:
             raise ValueError("activity name is required")
-        normalized_note = note.strip() if note and note.strip() else None
+        action = _classify_start_action(
+            self._repository.get_active(),
+            project,
+            activity,
+            normalized_note,
+        )
+        if action is StartAction.ALREADY_TRACKING:
+            raise AlreadyTrackingError(
+                "already tracking the selected project, activity, and note"
+            )
         return self._repository.start(
             project,
             activity,
@@ -178,3 +223,31 @@ class TrackingService:
     def stop(self) -> CompletedTimer | None:
         """Stop the current timer using one captured transition instant."""
         return self._repository.stop(self._clock.now())
+
+
+def _normalize_selection(
+    project: str,
+    activity: str,
+    note: str | None,
+) -> tuple[str, str, str | None]:
+    normalized_note = note.strip() if note and note.strip() else None
+    return project.strip(), activity.strip(), normalized_note
+
+
+def _classify_start_action(
+    active: ActiveTimer | None,
+    project: str,
+    activity: str,
+    note: str | None,
+) -> StartAction:
+    if active is None:
+        return StartAction.START
+    same_pair = (
+        project.casefold() == active.project.casefold()
+        and activity.casefold() == active.activity.casefold()
+    )
+    if not same_pair:
+        return StartAction.SWITCH
+    if note == active.note:
+        return StartAction.ALREADY_TRACKING
+    return StartAction.RESTART
