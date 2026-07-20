@@ -99,8 +99,11 @@ TimeEntry(id, activity_id, started_at_utc, stopped_at_utc?, note?, created_at)
 
 - Enable foreign keys for every connection.
 - Track applied numbered SQL migrations in `schema_migrations`.
-- Use transactions for timer transitions. Switching stops the current entry and
-  starts the next with one captured timestamp.
+- Use transactions for timer transitions. Switching to another pair or restarting
+  the active pair with a different normalized note stops the current entry and
+  starts the next with one captured timestamp. An unchanged pair and normalized
+  note is rejected in the application layer before the repository or clock is
+  invoked.
 - Archive projects and activities through agent-owned application use cases.
   Selection queries exclude archived rows, while archived names remain reserved;
   an archive transition does not mutate the active timer or historical entries.
