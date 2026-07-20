@@ -15,6 +15,7 @@ from typing import cast
 
 from time_tracker.application.exporting import ExportDestinationExistsError
 from time_tracker.application.reminders import Reminder, ReminderKind
+from time_tracker.application.tracking import RecentActivity
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
 from time_tracker.infrastructure.paths import AgentPaths
 
@@ -75,6 +76,13 @@ class AgentClient:
         if not isinstance(result, list):
             raise AgentRequestError("the agent returned malformed history data")
         return [_completed_from_object(item) for item in result]
+
+    def list_recent_activities(self) -> list[RecentActivity]:
+        """Return recent selectable project/activity pairs."""
+        result = self._request("list_recent_activities", {})
+        if not isinstance(result, list):
+            raise AgentRequestError("the agent returned malformed recent activity data")
+        return [_recent_activity_from_object(item) for item in result]
 
     def archive_project(self, project: str) -> str:
         """Archive a project and return its canonical stored name."""
@@ -306,6 +314,14 @@ def _completed_from_object(value: object) -> CompletedTimer:
         started_at=datetime.fromisoformat(_object_str(data.get("started_at"))),
         stopped_at=datetime.fromisoformat(_object_str(data.get("stopped_at"))),
         note=_optional_str(data.get("note")),
+    )
+
+
+def _recent_activity_from_object(value: object) -> RecentActivity:
+    data = _object_dict(value)
+    return RecentActivity(
+        project=_object_str(data.get("project")),
+        activity=_object_str(data.get("activity")),
     )
 
 

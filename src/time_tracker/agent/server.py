@@ -199,6 +199,8 @@ def _handle_request(
             result = service.list_activities(_required_str(params, "project"))
         elif method == "list_completed":
             result = [_timer_dict(timer) for timer in service.list_completed()]
+        elif method == "list_recent_activities":
+            result = [asdict(pair) for pair in service.list_recent_activities()]
         elif method == "archive_project":
             result = {
                 "project": service.archive_project(_required_str(params, "project"))

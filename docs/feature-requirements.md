@@ -28,7 +28,7 @@ For each selected feature:
 
 ### Recent activities / Track again
 
-**Status:** Approved
+**Status:** Implemented
 
 #### Purpose
 
