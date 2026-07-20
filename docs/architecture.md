@@ -124,19 +124,22 @@ delivery fails or the TUI disconnects.
   is loaded when the background process starts; restart it to apply edits.
 - Use `platformdirs` for per-user configuration, data, state, runtime, and log
   locations.
-- Use simple native notifications. Interactive notification actions are deferred;
-  users act through the TUI.
+- Use simple native notifications. Native notification action buttons are
+  deferred; the agent retains the latest due reminder in memory for a connected
+  TUI to poll over IPC. Confirming an active reminder clears that prompt and
+  restarts the active monotonic interval without mutating the persisted timer.
+  Ignoring it leaves both the timer and repeating schedule unchanged.
 - `desktop-notifier` uses desktop services on Linux and WinRT on Windows. macOS
   uses its built-in `osascript` notification command: on the current macOS 26
   validation host, `UNUserNotificationCenter` rejected an otherwise valid
   ad-hoc-signed local bundle. Reminder text is passed as command arguments rather
   than interpolated into AppleScript source. Delivery failures do not affect
   authoritative timer state and are written to the platform-appropriate agent
-  log. Surfacing those failures in the TUI belongs with the remaining reminder UI
-  work.
+  log. Surfacing native delivery failures in the TUI is not required for the MVP.
 - Reminder deadlines use a monotonic schedule. A persisted start, switch, or stop
-  resets the relevant deadline; closing the TUI does not affect it. The default
-  schedule is five minutes without a timer and 30 minutes with one.
+  resets the relevant deadline, as does explicit confirmation of an active
+  reminder; closing the TUI does not affect it. The default schedule is five
+  minutes without a timer and 30 minutes with one.
 - Build with PyInstaller on the target OS; it is not used for cross-compilation.
 - Linux and Windows builds are one-file executables. macOS builds are ad-hoc-signed
   `.app` bundles, with the TUI executable inside the bundle.
