@@ -61,7 +61,10 @@ pairs, newest first; selecting one prepares it for another timer without copying
 its historical note. Archived targets are excluded from this recent-work list.
 When connected, the TUI also presents due reminders; confirming an active reminder
 restarts its interval without changing the timer, while ignoring it leaves the
-timer running and reminders repeating.
+timer running and reminders repeating. The TUI is split into keyboard-addressable
+Track, Review, Manage, and Settings views. Its active-timer strip, reminder prompt,
+and result message remain visible across views, while the existing action
+shortcuts continue to work from any view.
 
 The CI workflow is configured to build and exercise the packaged lifecycle on
 Linux, Windows, and macOS. A local macOS arm64 app-bundle lifecycle and
@@ -119,13 +122,21 @@ the TUI leaves the background process and any active timer running. Run
 `uv run time-tracker --stop-agent` to stop only the process; the persisted timer
 remains active and is recovered the next time the application starts.
 
-Use the Daily summaries toggle to switch the history table and export between
-completed entries and local-day totals per project and activity. Enter a
-destination in the CSV export path field and press its button or `F7` to export
-the selected representation. Relative paths are resolved from the directory
-where the TUI was launched, and `~` expands to the current user's home directory.
-If the destination exists, the TUI requires a second export action before
-overwriting it.
+Use `F1` through `F4` to switch between Track, Review, Manage, and Settings. The
+same views can be selected from the tab row. Track owns timer capture and recent
+activities; Review owns history, summaries, and CSV export; Manage owns archive
+actions; and Settings explains how to find and apply the currently TOML-managed
+reminder configuration. The active timer and any pending reminder stay visible
+while moving between them. `F5` through `F10` retain their existing actions from
+every view.
+
+In Review (`F2`), use the Daily summaries toggle to switch the history table and
+export between completed entries and local-day totals per project and activity.
+Enter a destination in the CSV export path field and press its button or `F7` to
+export the selected representation. Relative paths are resolved from the
+directory where the TUI was launched, and `~` expands to the current user's home
+directory. If the destination exists, the TUI requires a second export action
+before overwriting it.
 
 When completed work exists, use the one-line Track again selector below the note
 field to choose from up to five recent project/activity pairs. Use the arrow keys
@@ -133,11 +144,12 @@ to move through the list and Enter to select one. The note is cleared and focuse
 so a new note can be entered before starting with F5; the selection alone does not
 change the running timer.
 
-Enter an existing project or activity and use its archive button or `F8`/`F9`.
-Archiving leaves any running timer active, removes the name from future timer
-suggestions, and preserves completed history. Archived names cannot be reused.
-The archive buttons remain pointer-accessible but are omitted from keyboard tab
-navigation; their function-key shortcuts remain available.
+In Manage (`F3`), enter an existing project or project/activity pair and use its
+archive button or `F8`/`F9`. Archiving leaves any running timer active, removes
+the name from future timer suggestions, and preserves completed history. Archived
+names cannot be reused. The archive buttons remain pointer-accessible but are
+omitted from keyboard tab navigation; their function-key shortcuts remain
+available from every view and use the Manage inputs.
 
 When a reminder becomes due while the TUI is connected, it appears below the
 active timer. For an active timer, press its button or `F10` to confirm that it is
