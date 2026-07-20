@@ -238,13 +238,35 @@ def test_agent_sends_reminders_after_the_tui_disconnects(tmp_path: Path) -> None
     try:
         # There is no persistent client connection while the scheduler fires.
         _wait_for_reminder(notifier, ReminderKind.INACTIVE)
-        before_smoke = len(notifier.reminders)
-        client.send_test_notification()
-        assert len(notifier.reminders) == before_smoke + 1
-        assert notifier.reminders[-1].kind is ReminderKind.INACTIVE
         started = client.start("Background", "Notifications")
         _wait_for_reminder(notifier, ReminderKind.ACTIVE)
         assert AgentClient(paths).get_active() == started
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+
+
+def test_agent_dispatches_notification_smoke(tmp_path: Path) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    notifier = RecordingNotifier()
+    thread = threading.Thread(
+        target=serve,
+        args=(paths,),
+        kwargs={
+            "notifier": notifier,
+            "reminder_intervals": ReminderIntervals(inactive=None, active=None),
+        },
+        daemon=True,
+    )
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        client.send_test_notification()
+        assert notifier.reminders == [Reminder(ReminderKind.INACTIVE)]
     finally:
         client.shutdown()
         thread.join(timeout=2)
