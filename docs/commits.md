@@ -7,8 +7,7 @@ commit must leave the repository in a valid state whenever practical.
 
 1. Review `git status --short` and `git diff`.
 2. Run the relevant format, lint, type-check, and test commands documented in
-   `AGENTS.md`. Until those commands exist, perform the available documentation
-   and consistency checks.
+   `AGENTS.md`.
 3. Stage only files and hunks that belong to the same change.
 4. Review `git diff --cached` before creating the commit.
 5. Check that no secrets, credentials, local paths, editor files, or generated
@@ -57,7 +56,7 @@ changes with `BREAKING CHANGE:`.
 Examples:
 
 ```text
-docs: define MVP tracking behavior
+docs: define top-level tracking requirements
 
 feat(timer): switch activities atomically
 

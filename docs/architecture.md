@@ -1,7 +1,10 @@
 # Architecture
 
-This document is the technical source of truth for the MVP. Product behavior and
-scope belong in [MVP Requirements](mvp-requirements.md).
+This document is the technical source of truth for the application. Product
+top-level behavior and scope belong in
+[Top-Level Requirements](top-level-requirements.md). Additional approved feature
+behavior is recorded in [Feature Requirements](feature-requirements.md) and must
+conform to both authoritative documents.
 
 ## Overview
 
@@ -17,9 +20,10 @@ scope belong in [MVP Requirements](mvp-requirements.md).
                                   +--------+         +------------+
 ```
 
-The TUI is a client. One long-lived background process owns timer state,
-reminders, and all database writes. Closing the TUI does not stop that process.
-The same boundary will allow a future GUI to reuse the application core.
+The TUI is a client. One long-lived background process—called the agent in code
+and operational documentation—owns timer state, reminders, and all database
+writes. Closing the TUI does not stop that process. This boundary keeps product
+behavior independent of Textual presentation code.
 
 ## Technology choices
 
@@ -38,7 +42,7 @@ The same boundary will allow a future GUI to reuse the application core.
 | Quality tools | pytest, pytest-asyncio, Ruff, and mypy |
 
 An ORM, dependency-injection framework, network service, and external migration
-framework are intentionally unnecessary for the MVP.
+framework are intentionally unnecessary for the current product.
 
 ## Process and IPC
 
@@ -51,8 +55,8 @@ framework are intentionally unnecessary for the MVP.
   pickle-based `send` or `recv` methods.
 - A request has a protocol version, request ID, method, and parameters. A response
   has the request ID and either a result or structured error.
-- The MVP supports one foreground client. Multiple concurrent clients are not a
-  protocol guarantee.
+- The current protocol supports one foreground client. Multiple concurrent
+  clients are not a protocol guarantee.
 
 The agent runs reminder scheduling on its asyncio loop and moves blocking IPC and
 SQLite calls to worker threads. Requests are still handled serially, so the agent
@@ -80,8 +84,8 @@ tests/
 - Interfaces call application use cases; they do not implement timer rules.
 - Clocks, repositories, and notification services are injected for deterministic
   testing. No dependency-injection framework is used.
-- A future GUI uses the same background process and protocol and never accesses
-  SQLite or TUI code directly.
+- The TUI uses the background process and protocol; it never accesses SQLite
+  directly.
 
 ## Persistence and time
 
@@ -138,7 +142,7 @@ delivery fails or the TUI disconnects.
   ad-hoc-signed local bundle. Reminder text is passed as command arguments rather
   than interpolated into AppleScript source. Delivery failures do not affect
   authoritative timer state and are written to the platform-appropriate agent
-  log. Surfacing native delivery failures in the TUI is not required for the MVP.
+  log. Surfacing native delivery failures in the TUI is not currently required.
 - Reminder deadlines use a monotonic schedule. A persisted start, switch, or stop
   resets the relevant deadline, as does explicit confirmation of an active
   reminder; closing the TUI does not affect it. The default schedule is five
@@ -147,14 +151,13 @@ delivery fails or the TUI disconnects.
 - Linux and Windows builds are one-file executables. macOS builds are ad-hoc-signed
   `.app` bundles, with the TUI executable inside the bundle.
 
-## Testing and first validation
+## Testing and platform validation
 
 Use unit tests for domain behavior, integration tests for SQLite, IPC, recovery,
 and migrations, and Textual tests for critical keyboard workflows. CI runs the
 canonical checks on Linux, Windows, and macOS.
 
-Before broad feature work, validate a minimal packaged application on all three
-platforms:
+Maintain validation of the minimal packaged application on all three platforms:
 
 1. Start the background process from the TUI and leave it running after the TUI
    closes.
@@ -169,15 +172,12 @@ domain or application boundary.
 The automated packaged smoke runs two real Textual app sessions from the frozen
 artifact using an isolated data directory: start a timer, close the first TUI,
 confirm the agent remains available, reconnect and recover the original timer,
-stop it, and shut down the agent. GitHub Actions builds and executes this lifecycle
-on Linux, Windows, and macOS. Native delivery is checked separately on an
-interactive desktop with `make smoke-notification`, since hosted CI runners do not
-provide a reliable signed-in notification session.
-
-As of July 19, 2026, the full packaged lifecycle and native Notification Center
-dispatch have passed locally on macOS arm64. Linux and Windows packaged lifecycle
-results are intentionally not marked complete until the updated matrix workflow
-has run on those operating systems.
+stop it, and shut down the agent. The GitHub Actions workflow is configured to
+build and execute this lifecycle on Linux, Windows, and macOS. Native delivery is
+checked separately on an interactive desktop with `make smoke-notification`,
+since hosted CI runners do not provide a reliable signed-in notification session.
+Current platform results and outstanding validation are recorded only in the
+[README Status](../README.md#status) section.
 
 ## References
 

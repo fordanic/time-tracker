@@ -1,10 +1,10 @@
 # Time Tracker
 
 A local-first time tracker for Linux, Windows, and macOS, with Linux as the
-primary development environment. The MVP uses a keyboard-driven TUI; a GUI may be
-added later on the same application core.
+primary development environment. The product uses a keyboard-driven TUI backed by
+a local background process.
 
-## MVP
+## Top-level requirements
 
 - Organize activities within projects.
 - Track one activity at a time, with automatically derived start, stop, and
@@ -14,29 +14,37 @@ added later on the same application core.
 - Store data locally in SQLite and settings in TOML.
 - Export completed entries or daily project/activity summaries to UTF-8 CSV.
 
-Manual entry and editing, concurrent timers, cloud features, and the GUI are not
-part of the MVP.
+The product remains local, single-user, and TUI-only. See the top-level
+requirements for authoritative product behavior and the competitive assessment
+for candidate usability work. Selected additions are specified in the feature
+requirements before implementation.
 
 ## Architecture
 
 The Textual TUI is a client of a single Python background process. That process
 owns timer state, reminders, and SQLite access. A versioned local protocol keeps
-business logic independent of the TUI and available to a future GUI.
+business logic independent of Textual presentation code.
 
 ## Documentation
 
-- [MVP requirements](docs/mvp-requirements.md) — product behavior and scope.
+- [Top-level requirements](docs/top-level-requirements.md) — authoritative product
+  behavior and scope.
 - [Architecture](docs/architecture.md) — technical choices and boundaries.
+- [Feature requirements](docs/feature-requirements.md) — approved additional
+  feature behavior subordinate to the top-level requirements and architecture.
+- [Competitive assessment and TUI roadmap](docs/competitive-assessment.md) —
+  desktop and terminal time-tracking UX patterns and the recommended TUI roadmap.
 - [Agent guidance](AGENTS.md) — repository working rules.
 - [Commit guidelines](docs/commits.md) — commit preparation and message format.
 
 ## Status
 
-The timer walking skeleton is in place: the Textual TUI connects to a single
-authenticated background process, creates or reuses project and activity names,
-starts, switches, and stops one SQLite-backed timer, and restores an active timer
-after TUI closure, agent restart, or forced process termination. The background
-process also owns monotonic reminder scheduling, TOML-configured reminder
+This section is the current source of truth for implementation and validation
+status. The initial product baseline is implemented. The Textual TUI connects to
+a single authenticated background process. It creates or reuses project and
+activity names, starts, switches, and stops one SQLite-backed timer, and restores
+an active timer after TUI closure, agent restart, or forced process termination.
+The background process also owns monotonic reminder scheduling, TOML-configured
 intervals, and native notification delivery after the TUI closes. The TUI lists
 completed entries chronologically with their local start and stop times, derived
 duration, and note. A toggle changes both the history view and CSV export to daily
@@ -48,10 +56,16 @@ When connected, the TUI also presents due reminders; confirming an active remind
 restarts its interval without changing the timer, while ignoring it leaves the
 timer running and reminders repeating.
 
-The packaged lifecycle is exercised in CI on Linux, Windows, and macOS. A local
-macOS arm64 app-bundle lifecycle and Notification Center dispatch were validated
-on July 19, 2026; the corresponding Linux and Windows packaged results remain
-pending until the updated CI workflow runs on those hosts.
+The CI workflow is configured to build and exercise the packaged lifecycle on
+Linux, Windows, and macOS. A local macOS arm64 app-bundle lifecycle and
+Notification Center dispatch were validated on July 19, 2026.
+
+Known outstanding validation:
+
+- run the updated packaged-lifecycle workflow successfully on Linux and Windows;
+- run the native-notification smoke on interactive Linux and Windows desktops;
+  and
+- record any additional unmet acceptance criteria here when identified.
 
 ## Development
 
@@ -140,6 +154,7 @@ On an interactive desktop, `make smoke-notification` dispatches one real native
 notification without opening the TUI; the operating system may request permission
 the first time.
 
-The checks, native build, and packaged lifecycle smoke run on Python 3.14 across
-Linux, Windows, and macOS in GitHub Actions. Native notification delivery still
+The GitHub Actions workflow is configured to run the checks, native build, and
+packaged lifecycle smoke on Python 3.14 across Linux, Windows, and macOS; see
+[Status](#status) for current validation results. Native notification delivery
 requires an interactive desktop session and is therefore a manual platform smoke.
