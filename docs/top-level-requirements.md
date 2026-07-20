@@ -69,6 +69,13 @@ internet connection. The current product interface is a TUI.
   reminders.
 - Show the active project, activity, start time, and elapsed duration prominently.
 - Allow an optional plain-text note on the active entry.
+- Allow the active entry's project, activity, and note to be edited without
+  changing its entry identity, original start time, or reminder deadline. A
+  changed assignment uses a non-archived target; an unchanged assignment may
+  remain on a target archived while it was active.
+- Persist an active-detail edit atomically before reporting success. The edit does
+  not stop, restart, or add an entry, and reminder prompts use the updated target
+  names without restarting their interval.
 - Persist each timer transition before reporting success.
 - Restore an active timer with its original start time after a restart, crash, or
   forced termination. Recovery must not invent a stop time.
@@ -77,6 +84,21 @@ internet connection. The current product interface is a TUI.
 
 - List completed entries chronologically with project, activity, local start and
   stop times, derived duration, and note.
+- Allow correction of one completed entry's project, activity, note, start, and
+  stop. A corrected stop must be strictly after its start, and its half-open
+  interval must not overlap another completed or active entry; touching boundaries
+  are allowed.
+- Reassignment during correction uses a non-archived project/activity target,
+  while an unchanged historical assignment may remain on its archived target.
+- Persist correction atomically before reporting success and preserve the entry's
+  identity. Require offset-aware time input so local edits resolve to unambiguous
+  UTC instants.
+- Allow manual creation of one completed entry for missed time. It uses a
+  non-archived project/activity target, requires an offset-aware start and stop,
+  and follows the same strict positive-duration, half-open no-overlap, atomic
+  persistence, and derived-duration rules as correction.
+- Creating missed time does not change the active timer. It may create a new
+  project/activity pair using the same naming and reuse rules as timer start.
 - Provide local daily totals per project and activity.
 - Split entries crossing local midnight across the corresponding daily totals.
 - Preserve historical entries and their names when a project or activity is
@@ -188,8 +210,6 @@ feature changes a top-level requirement.
 - Minimum supported OS versions and CPU architectures.
 - Behavior during computer sleep, system-clock changes, and time-zone changes.
 - Whether the background process starts at login.
-- Correction and manual-entry rules, including whether completed entries may
-  overlap.
 - Archive restoration and hierarchy behavior.
 - Date/project/activity filters, range summaries, and their effect on CSV export.
 - Reminder windows, snooze persistence, and live configuration reload.

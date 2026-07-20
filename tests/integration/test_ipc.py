@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 import threading
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -134,6 +135,94 @@ def test_start_action_preview_matches_noop_restart_and_switch_transitions(
         assert len(completed) == 2
         assert completed[1].stopped_at == switched.started_at
         assert completed[1].entry_id == restarted.entry_id
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+
+
+def test_completed_entry_correction_round_trips_over_ipc(tmp_path: Path) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    thread = threading.Thread(target=serve, args=(paths,), daemon=True)
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        started = client.start("Website", "Planning", "Original")
+        completed = client.stop()
+        assert completed is not None
+        corrected = client.correct_completed(
+            completed.entry_id,
+            " Client ",
+            " Review ",
+            completed.started_at,
+            completed.stopped_at + timedelta(seconds=1),
+            " Revised ",
+        )
+
+        assert corrected.entry_id == started.entry_id
+        assert corrected.project == "Client"
+        assert corrected.activity == "Review"
+        assert corrected.note == "Revised"
+        assert client.list_completed() == [corrected]
+
+        with pytest.raises(AgentRequestError, match="must include a UTC offset"):
+            client._request(
+                "correct_completed",
+                {
+                    "entry_id": corrected.entry_id,
+                    "project": corrected.project,
+                    "activity": corrected.activity,
+                    "started_at": "2026-07-20T10:00:00",
+                    "stopped_at": "2026-07-20T11:00:00+00:00",
+                    "note": None,
+                },
+            )
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+
+
+def test_manual_entry_round_trips_over_ipc_without_changing_active_timer(
+    tmp_path: Path,
+) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    thread = threading.Thread(target=serve, args=(paths,), daemon=True)
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        active = client.start("Website", "Implementation", "Still running")
+        started_at = datetime(2026, 7, 19, 10, tzinfo=UTC)
+        manual = client.create_manual_entry(
+            " Client ",
+            " Review ",
+            started_at,
+            started_at + timedelta(hours=1),
+            " Missed work ",
+        )
+
+        assert manual.project == "Client"
+        assert manual.activity == "Review"
+        assert manual.note == "Missed work"
+        assert client.get_active() == active
+        assert client.list_completed() == [manual]
+        assert AgentClient(paths).list_completed() == [manual]
+
+        client.shutdown()
+        thread.join(timeout=2)
+        assert not thread.is_alive()
+        thread = threading.Thread(target=serve, args=(paths,), daemon=True)
+        thread.start()
+        client = AgentClient(paths)
+        _wait_until_ready(client)
+        assert client.list_completed() == [manual]
+        assert client.get_active() == active
     finally:
         client.shutdown()
         thread.join(timeout=2)
@@ -299,6 +388,16 @@ def test_active_reminder_can_be_polled_confirmed_or_ignored(tmp_path: Path) -> N
             project="Connected",
             activity="Confirmation",
         )
+        edited = client.edit_active("Updated", "Details", "Still running")
+        assert edited.entry_id == started.entry_id
+        assert edited.started_at == started.started_at
+        assert client.list_completed() == []
+        assert client.get_reminder() == Reminder(
+            ReminderKind.ACTIVE,
+            project="Updated",
+            activity="Details",
+        )
+        started = edited
         first_count = len(notifier.reminders)
         _wait_for_reminder_count(notifier, first_count + 1)
         assert client.get_active() == started
@@ -310,6 +409,45 @@ def test_active_reminder_can_be_polled_confirmed_or_ignored(tmp_path: Path) -> N
 
         _wait_for_pending_reminder(client, ReminderKind.ACTIVE)
         assert client.get_active() == started
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+
+
+def test_active_detail_edit_round_trips_and_rejects_a_noop_over_ipc(
+    tmp_path: Path,
+) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    thread = threading.Thread(target=serve, args=(paths,), daemon=True)
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        original = client.start("Website", "Planning", "Original")
+        with pytest.raises(AgentRequestError, match="details are unchanged"):
+            client.edit_active(" website ", "PLANNING", " Original ")
+        assert client.get_active() == original
+
+        edited = client.edit_active(" Client ", " Review ", " Revised ")
+        assert edited.entry_id == original.entry_id
+        assert edited.started_at == original.started_at
+        assert edited.project == "Client"
+        assert edited.activity == "Review"
+        assert edited.note == "Revised"
+        assert client.list_completed() == []
+
+        client.shutdown()
+        thread.join(timeout=2)
+        assert not thread.is_alive()
+        thread = threading.Thread(target=serve, args=(paths,), daemon=True)
+        thread.start()
+        client = AgentClient(paths)
+        _wait_until_ready(client)
+        assert client.get_active() == edited
+        assert client.list_completed() == []
     finally:
         client.shutdown()
         thread.join(timeout=2)

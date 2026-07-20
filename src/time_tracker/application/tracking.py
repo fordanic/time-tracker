@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Protocol
 
-from time_tracker.domain.models import ActiveTimer, CompletedTimer
+from time_tracker.domain.models import ActiveTimer, CompletedTimer, require_utc
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +29,10 @@ class StartAction(StrEnum):
 
 class AlreadyTrackingError(ValueError):
     """Raised when a requested start would not change the active timer."""
+
+
+class UnchangedActiveEntryError(ValueError):
+    """Raised when an active-entry edit contains no normalized change."""
 
 
 class Clock(Protocol):
@@ -83,6 +87,40 @@ class TimerRepository(Protocol):
 
     def stop(self, stopped_at: datetime) -> CompletedTimer | None:
         """Atomically stop the active timer, if one exists."""
+        ...
+
+    def correct_completed(
+        self,
+        entry_id: int,
+        project: str,
+        activity: str,
+        started_at: datetime,
+        stopped_at: datetime,
+        note: str | None,
+    ) -> CompletedTimer:
+        """Atomically validate and update one completed entry."""
+        ...
+
+    def create_completed(
+        self,
+        project: str,
+        activity: str,
+        started_at: datetime,
+        stopped_at: datetime,
+        note: str | None,
+        created_at: datetime,
+    ) -> CompletedTimer:
+        """Atomically validate and insert one manual completed entry."""
+        ...
+
+    def edit_active(
+        self,
+        project: str,
+        activity: str,
+        note: str | None,
+        updated_at: datetime,
+    ) -> ActiveTimer:
+        """Atomically update the active entry's target and note."""
         ...
 
 
@@ -223,6 +261,105 @@ class TrackingService:
     def stop(self) -> CompletedTimer | None:
         """Stop the current timer using one captured transition instant."""
         return self._repository.stop(self._clock.now())
+
+    def correct_completed(
+        self,
+        entry_id: int,
+        project: str,
+        activity: str,
+        started_at: datetime,
+        stopped_at: datetime,
+        note: str | None = None,
+    ) -> CompletedTimer:
+        """Correct one completed entry after validating editable values."""
+        project, activity, normalized_note = _normalize_selection(
+            project,
+            activity,
+            note,
+        )
+        if not project:
+            raise ValueError("project name is required")
+        if not activity:
+            raise ValueError("activity name is required")
+        started_at = require_utc(started_at)
+        stopped_at = require_utc(stopped_at)
+        if stopped_at <= started_at:
+            raise ValueError("corrected stop must be after start")
+        return self._repository.correct_completed(
+            entry_id,
+            project,
+            activity,
+            started_at,
+            stopped_at,
+            normalized_note,
+        )
+
+    def create_manual_entry(
+        self,
+        project: str,
+        activity: str,
+        started_at: datetime,
+        stopped_at: datetime,
+        note: str | None = None,
+    ) -> CompletedTimer:
+        """Create one closed entry for missed time after validating its values."""
+        project, activity, normalized_note = _normalize_selection(
+            project,
+            activity,
+            note,
+        )
+        if not project:
+            raise ValueError("project name is required")
+        if not activity:
+            raise ValueError("activity name is required")
+        started_at = require_utc(started_at)
+        stopped_at = require_utc(stopped_at)
+        if stopped_at <= started_at:
+            raise ValueError("manual entry stop must be after start")
+        return self._repository.create_completed(
+            project,
+            activity,
+            started_at,
+            stopped_at,
+            normalized_note,
+            self._clock.now(),
+        )
+
+    def edit_active(
+        self,
+        project: str,
+        activity: str,
+        note: str | None = None,
+    ) -> ActiveTimer:
+        """Edit active details without replacing or restarting the timer."""
+        project, activity, normalized_note = _normalize_selection(
+            project,
+            activity,
+            note,
+        )
+        if not project:
+            raise ValueError("project name is required")
+        if not activity:
+            raise ValueError("activity name is required")
+        active = self._repository.get_active()
+        if active is None:
+            raise ValueError("no active timer to edit")
+        if (
+            _classify_start_action(
+                active,
+                project,
+                activity,
+                normalized_note,
+            )
+            is StartAction.ALREADY_TRACKING
+        ):
+            raise UnchangedActiveEntryError("active entry details are unchanged")
+        return self._repository.edit_active(
+            project,
+            activity,
+            normalized_note,
+            self._clock.now(),
+        )
 
 
 def _normalize_selection(

@@ -77,6 +77,63 @@ class AgentClient:
             raise AgentRequestError("the agent returned malformed history data")
         return [_completed_from_object(item) for item in result]
 
+    def correct_completed(
+        self,
+        entry_id: int,
+        project: str,
+        activity: str,
+        started_at: datetime,
+        stopped_at: datetime,
+        note: str | None = None,
+    ) -> CompletedTimer:
+        """Persist one completed-entry correction before returning it."""
+        result = self._request(
+            "correct_completed",
+            {
+                "entry_id": entry_id,
+                "project": project,
+                "activity": activity,
+                "started_at": started_at.isoformat(),
+                "stopped_at": stopped_at.isoformat(),
+                "note": note,
+            },
+        )
+        return _completed_from_object(result)
+
+    def create_manual_entry(
+        self,
+        project: str,
+        activity: str,
+        started_at: datetime,
+        stopped_at: datetime,
+        note: str | None = None,
+    ) -> CompletedTimer:
+        """Persist one manual completed entry before returning it."""
+        result = self._request(
+            "create_manual_entry",
+            {
+                "project": project,
+                "activity": activity,
+                "started_at": started_at.isoformat(),
+                "stopped_at": stopped_at.isoformat(),
+                "note": note,
+            },
+        )
+        return _completed_from_object(result)
+
+    def edit_active(
+        self,
+        project: str,
+        activity: str,
+        note: str | None = None,
+    ) -> ActiveTimer:
+        """Persist active detail changes without restarting the timer."""
+        result = self._request(
+            "edit_active",
+            {"project": project, "activity": activity, "note": note},
+        )
+        return _active_from_object(result)
+
     def list_recent_activities(self) -> list[RecentActivity]:
         """Return recent selectable project/activity pairs."""
         result = self._request("list_recent_activities", {})

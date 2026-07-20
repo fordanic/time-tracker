@@ -65,6 +65,19 @@ timer running and reminders repeating. The TUI is split into keyboard-addressabl
 Track, Review, Manage, and Settings views. Its active-timer strip, reminder prompt,
 and result message remain visible across views, while the existing action
 shortcuts continue to work from any view.
+In Review's completed-entry mode, a selected entry can be loaded and corrected
+without changing its identity. Project, activity, note, start, and stop are
+editable; offset-aware timestamps are persisted in UTC, and corrections that
+overlap another completed or active entry are rejected while adjacent boundaries
+remain valid.
+The same Review editor can create one closed entry for missed time. It suggests
+the previous local hour, reuses or creates a selectable project/activity pair,
+and applies the correction workflow's duration, offset, overlap, and atomicity
+rules without changing a running timer.
+Track also provides an explicit active-detail update that changes the running
+entry's project, activity, or note without changing its identity, original start,
+elapsed time, or reminder deadline. Updated names are used by pending and future
+active reminders.
 
 The CI workflow is configured to build and exercise the packaged lifecycle on
 Linux, Windows, and macOS. A local macOS arm64 app-bundle lifecycle and
@@ -122,13 +135,18 @@ the TUI leaves the background process and any active timer running. Run
 `uv run time-tracker --stop-agent` to stop only the process; the persisted timer
 remains active and is recovered the next time the application starts.
 
+While a timer is running, change its Track fields and use Update active details or
+`F11` to persist those values without restarting it. Start/Switch/Restart via `F5`
+remains the separate timer-transition choice. The update action is disabled when
+the normalized fields already match the running entry.
+
 Use `F1` through `F4` to switch between Track, Review, Manage, and Settings. The
 same views can be selected from the tab row. Track owns timer capture and recent
 activities; Review owns history, summaries, and CSV export; Manage owns archive
 actions; and Settings explains how to find and apply the currently TOML-managed
 reminder configuration. The active timer and any pending reminder stay visible
-while moving between them. `F5` through `F10` retain their existing actions from
-every view.
+while moving between them. `F5` through `F11` retain their documented actions
+from every view.
 
 In Review (`F2`), use the Daily summaries toggle to switch the history table and
 export between completed entries and local-day totals per project and activity.
@@ -137,6 +155,18 @@ export the selected representation. Relative paths are resolved from the
 directory where the TUI was launched, and `~` expands to the current user's home
 directory. If the destination exists, the TUI requires a second export action
 before overwriting it.
+
+To correct completed work, turn off Daily summaries, select its history row, and
+choose Load selected entry. Edit the project, activity, note, start, or stop and
+save the correction. Start and stop use ISO 8601 values with an explicit UTC
+offset, as prefilled by the application. The stop must be after the start, and the
+corrected interval cannot overlap another completed or running entry.
+
+To record forgotten work, choose Add missed entry in the same completed-entry
+mode. The editor starts with blank project, activity, and note fields and a
+one-hour interval ending at the current local minute. Adjust the values and create
+the entry; the same timestamp and no-overlap rules apply, and any active timer
+continues unchanged.
 
 When completed work exists, use the one-line Track again selector below the note
 field to choose from up to five recent project/activity pairs. Use the arrow keys

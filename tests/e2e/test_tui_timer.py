@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from textual.pilot import Pilot
 from textual.widgets import (
     Button,
     ContentSwitcher,
@@ -18,6 +21,7 @@ from textual.widgets import (
 
 from time_tracker.agent.server import serve
 from time_tracker.application.reminders import Reminder, ReminderIntervals, ReminderKind
+from time_tracker.application.tracking import RecentActivity
 from time_tracker.infrastructure.ipc import AgentClient, AgentUnavailableError
 from time_tracker.infrastructure.paths import AgentPaths
 from time_tracker.infrastructure.sqlite_repository import SQLiteTimerRepository
@@ -429,6 +433,255 @@ async def test_primary_action_distinguishes_start_restart_and_switch(
     assert not thread.is_alive()
 
 
+@pytest.mark.asyncio
+async def test_user_corrects_a_selected_completed_entry_in_review(
+    tmp_path: Path,
+) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    repository = SQLiteTimerRepository(paths.database)
+    started_at = datetime(2026, 7, 20, 8, tzinfo=UTC)
+    original = repository.start("Website", "Planning", started_at, "Original")
+    repository.stop(started_at + timedelta(hours=1))
+    thread = threading.Thread(target=serve, args=(paths,), daemon=True)
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        app = TimeTrackerApp(client)
+        async with app.run_test() as pilot:
+            await pilot.press("f2")
+            await pilot.pause()
+            app.query_one("#load-correction-button", Button).press()
+            await _wait_for_ui(
+                pilot,
+                lambda: app.query_one("#correction-project", Input).value == "Website",
+                "selected entry was not loaded into the correction form",
+            )
+
+            assert app.query_one("#correction-project", Input).value == "Website"
+            assert app.query_one("#correction-note", Input).value == "Original"
+            app.query_one("#correction-project", Input).value = "Client"
+            app.query_one("#correction-activity", Input).value = "Review"
+            app.query_one("#correction-note", Input).value = "Revised"
+            app.query_one("#correction-start", Input).value = (
+                started_at + timedelta(minutes=5)
+            ).isoformat()
+            app.query_one("#correction-stop", Input).value = (
+                started_at + timedelta(minutes=55)
+            ).isoformat()
+
+            app.query_one("#save-correction-button", Button).press()
+            await _wait_for_ui(
+                pilot,
+                lambda: (
+                    "Corrected Client / Review"
+                    in str(app.query_one("#message", Static).render())
+                ),
+                "correction did not complete",
+            )
+
+            corrected = client.list_completed()[0]
+            assert corrected.entry_id == original.entry_id
+            assert corrected.project == "Client"
+            assert corrected.activity == "Review"
+            assert corrected.note == "Revised"
+            row = app.query_one("#history", DataTable).get_row_at(0)
+            assert row[0] == "Client"
+            assert row[1] == "Review"
+            assert row[5] == "Revised"
+            assert "Corrected Client / Review" in str(
+                app.query_one("#message", Static).render()
+            )
+
+            app.query_one("#correction-start", Input).value = "2026-07-20T08:00:00"
+            app.query_one("#save-correction-button", Button).press()
+            await _wait_for_ui(
+                pilot,
+                lambda: (
+                    "start must include a UTC offset"
+                    in str(app.query_one("#message", Static).render())
+                ),
+                "invalid correction was not reported",
+            )
+            assert "start must include a UTC offset" in str(
+                app.query_one("#message", Static).render()
+            )
+            assert client.list_completed() == [corrected]
+
+            app.query_one("#summary-mode", Switch).value = True
+            await pilot.pause()
+            assert app.query_one("#load-correction-button", Button).disabled is True
+            assert app.query_one("#save-correction-button", Button).disabled is True
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+
+
+@pytest.mark.asyncio
+async def test_user_adds_missed_time_without_changing_active_timer(
+    tmp_path: Path,
+) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    repository = SQLiteTimerRepository(paths.database)
+    started_at = datetime(2026, 7, 20, 8, tzinfo=UTC)
+    repository.start("Website", "Planning", started_at, None)
+    repository.stop(started_at + timedelta(hours=1))
+    active = repository.start(
+        "Website",
+        "Implementation",
+        started_at + timedelta(hours=4),
+        "Current work",
+    )
+    thread = threading.Thread(target=serve, args=(paths,), daemon=True)
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        app = TimeTrackerApp(client)
+        async with app.run_test() as pilot:
+            await pilot.press("f2")
+            await pilot.pause()
+            app.query_one("#add-manual-entry-button", Button).press()
+            await _wait_for_ui(
+                pilot,
+                lambda: (
+                    str(app.query_one("#save-correction-button", Button).label)
+                    == "Create missed entry"
+                ),
+                "missed-entry form was not prepared",
+            )
+
+            assert app.query_one("#correction-project", Input).value == ""
+            assert (
+                datetime.fromisoformat(
+                    app.query_one("#correction-start", Input).value
+                ).tzinfo
+                is not None
+            )
+            assert (
+                str(app.query_one("#save-correction-button", Button).label)
+                == "Create missed entry"
+            )
+
+            app.query_one("#correction-project", Input).value = "Client"
+            app.query_one("#correction-activity", Input).value = "Review"
+            app.query_one("#correction-note", Input).value = "Missed work"
+            app.query_one("#correction-start", Input).value = (
+                started_at + timedelta(hours=1)
+            ).isoformat()
+            app.query_one("#correction-stop", Input).value = (
+                started_at + timedelta(hours=2)
+            ).isoformat()
+            app.query_one("#save-correction-button", Button).press()
+            await _wait_for_ui(
+                pilot,
+                lambda: (
+                    "Added missed entry for Client / Review"
+                    in str(app.query_one("#message", Static).render())
+                ),
+                "missed entry did not complete",
+            )
+
+            assert client.get_active() == active
+            entries = client.list_completed()
+            assert len(entries) == 2
+            manual = entries[1]
+            assert manual.project == "Client"
+            assert manual.activity == "Review"
+            assert manual.note == "Missed work"
+            assert app.query_one("#history", DataTable).row_count == 2
+            assert "Added missed entry for Client / Review" in str(
+                app.query_one("#message", Static).render()
+            )
+            assert app._recent_activities[0] == RecentActivity("Client", "Review")
+
+            app.query_one("#summary-mode", Switch).value = True
+            await pilot.pause()
+            assert app.query_one("#add-manual-entry-button", Button).disabled is True
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+
+
+@pytest.mark.asyncio
+async def test_user_updates_active_details_without_restarting_timer(
+    tmp_path: Path,
+) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    thread = threading.Thread(target=serve, args=(paths,), daemon=True)
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        original = client.start("Website", "Planning", "Original")
+        app = TimeTrackerApp(client)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            edit_button = app.query_one("#edit-active-button", Button)
+            assert edit_button.disabled is True
+
+            app.query_one("#project", Input).value = "Client"
+            app.query_one("#activity", Input).value = "Review"
+            app.query_one("#note", Input).value = "Revised"
+            await pilot.pause()
+            assert edit_button.disabled is False
+
+            await pilot.press("f11")
+            await pilot.pause()
+
+            edited = client.get_active()
+            assert edited is not None
+            assert edited.entry_id == original.entry_id
+            assert edited.started_at == original.started_at
+            assert edited.project == "Client"
+            assert edited.activity == "Review"
+            assert edited.note == "Revised"
+            assert client.list_completed() == []
+            assert edit_button.disabled is True
+            assert "Updated active details to Client / Review" in str(
+                app.query_one("#message", Static).render()
+            )
+            assert "Client / Review" in str(
+                app.query_one("#active-timer", Static).render()
+            )
+
+            app.query_one("#note", Input).value = "Pointer update"
+            await pilot.pause()
+            assert await pilot.click("#edit-active-button")
+            await pilot.pause()
+            pointer_edited = client.get_active()
+            assert pointer_edited is not None
+            assert pointer_edited.entry_id == original.entry_id
+            assert pointer_edited.started_at == original.started_at
+            assert pointer_edited.note == "Pointer update"
+
+        recovered_app = TimeTrackerApp(AgentClient(paths))
+        async with recovered_app.run_test() as pilot:
+            await pilot.pause()
+            assert recovered_app.query_one("#project", Input).value == "Client"
+            assert recovered_app.query_one("#activity", Input).value == "Review"
+            assert recovered_app.query_one("#note", Input).value == "Pointer update"
+            recovered = client.get_active()
+            assert recovered is not None
+            assert recovered.entry_id == original.entry_id
+            assert recovered.started_at == original.started_at
+            assert (
+                recovered_app.query_one("#edit-active-button", Button).disabled is True
+            )
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+
+
 def _wait_until_ready(client: AgentClient) -> None:
     deadline = time.monotonic() + 2
     while time.monotonic() < deadline:
@@ -438,6 +691,19 @@ def _wait_until_ready(client: AgentClient) -> None:
         except AgentUnavailableError:
             time.sleep(0.01)
     raise AssertionError("agent did not start")
+
+
+async def _wait_for_ui(
+    pilot: Pilot[None],
+    condition: Callable[[], bool],
+    failure: str,
+) -> None:
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        if condition():
+            return
+        await pilot.pause(0.01)
+    raise AssertionError(failure)
 
 
 def _wait_for_pending_reminder(

@@ -45,6 +45,16 @@ class ReminderCoordinator:
         """Return the latest due reminder for a connected foreground client."""
         return self._pending
 
+    def active_edited(self, active: ActiveTimer) -> None:
+        """Refresh active reminder names without restarting its interval."""
+        self._schedule.update_active_details(active.project, active.activity)
+        if self._pending is not None and self._pending.kind is ReminderKind.ACTIVE:
+            self._pending = Reminder(
+                ReminderKind.ACTIVE,
+                project=active.project,
+                activity=active.activity,
+            )
+
     def confirm_active(self) -> bool:
         """Clear an active prompt and restart its interval from now."""
         if self._pending is None or self._pending.kind is not ReminderKind.ACTIVE:
