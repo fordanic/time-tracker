@@ -90,6 +90,11 @@ Track also provides an explicit active-detail update that changes the running
 entry's project, activity, or note without changing its identity, original start,
 elapsed time, or reminder deadline. Updated names are used by pending and future
 active reminders.
+Settings exposes the supported inactive- and active-reminder toggles and positive
+minute intervals. Saving atomically replaces the human-readable TOML
+configuration, applies the new schedule without restarting the background
+process, clears any prompt from the replaced schedule, and preserves disabled
+interval values for later re-enabling.
 
 The CI workflow is configured to build and exercise the packaged lifecycle on
 Linux, Windows, and macOS. A local macOS arm64 app-bundle lifecycle and
@@ -156,10 +161,9 @@ total does not include the running portion until Stop persists it.
 Use `F1` through `F4` to switch between Track, Review, Manage, and Settings. The
 same views can be selected from the tab row. Track owns timer capture and recent
 activities; Review owns history, summaries, and CSV export; Manage owns archive
-actions; and Settings explains how to find and apply the currently TOML-managed
-reminder configuration. The active timer and any pending reminder stay visible
-while moving between them. `F5` through `F11` retain their documented actions
-from every view.
+actions; and Settings edits the TOML-backed reminder configuration and applies it
+live. The active timer and any pending reminder stay visible while moving between
+them. `F5` through `F11` retain their documented actions from every view.
 
 In Review (`F2`), completed time is grouped by local date with compact `HH:MM`
 times and a total after each day. An entry crossing midnight has one display
@@ -218,9 +222,12 @@ timer running; use Stop or `F6` when the timer should end.
 
 ## Configuration
 
-Run `uv run time-tracker --config-path` to locate the optional user-edited TOML
-file. When the file does not exist, both reminders use their built-in defaults.
-The complete supported configuration is:
+Use Settings (`F4`) to enable or disable each reminder independently and edit its
+positive interval in minutes. Saving creates or atomically replaces the optional
+TOML file and applies the schedule immediately; no background-process restart is
+needed. Run `uv run time-tracker --config-path` to locate the same user-editable
+file. When it does not exist, both reminders use their built-in defaults. The
+complete supported configuration is:
 
 ```toml
 [reminders]
@@ -231,9 +238,9 @@ active_interval_minutes = 30
 ```
 
 Each reminder can be disabled independently. Intervals must be positive numbers.
-Restart the background process after editing the file by running
-`uv run time-tracker --stop-agent`, then reopen the TUI. Invalid TOML, unknown
-keys, and invalid values are reported without changing the file.
+Direct edits made outside the TUI still require restarting the background process
+with `uv run time-tracker --stop-agent`, then reopening the TUI. Invalid TOML,
+unknown keys, and invalid values are reported without changing the file.
 
 After building, run the complete isolated package lifecycle check with
 `make smoke-packaged`. It opens a headless TUI, starts a timer, closes the TUI,

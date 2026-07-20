@@ -14,6 +14,10 @@ from pathlib import Path
 from typing import cast
 
 from time_tracker.agent.reminders import ReminderCoordinator
+from time_tracker.application.configuration import (
+    ConfigurationService,
+    ReminderSettings,
+)
 from time_tracker.application.exporting import (
     ExportDestinationExistsError,
     ExportService,
@@ -22,7 +26,10 @@ from time_tracker.application.reminders import Reminder, ReminderIntervals, Remi
 from time_tracker.application.reporting import ReviewFilter
 from time_tracker.application.tracking import TrackingService
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
-from time_tracker.infrastructure.configuration import load_config
+from time_tracker.infrastructure.configuration import (
+    TomlConfigurationStore,
+    load_config,
+)
 from time_tracker.infrastructure.csv_export import (
     CsvCompletedEntryWriter,
     CsvDailySummaryWriter,
@@ -56,10 +63,14 @@ def _serve_locked(
     reminder_intervals: ReminderIntervals | None,
 ) -> None:
     """Own the endpoint and database while the instance lock is held."""
-    intervals = (
-        reminder_intervals
+    settings = (
+        ReminderSettings.from_intervals(reminder_intervals)
         if reminder_intervals is not None
-        else load_config(paths.config).reminder_intervals
+        else load_config(paths.config).reminder_settings
+    )
+    configuration_service = ConfigurationService(
+        TomlConfigurationStore(paths.config),
+        settings,
     )
     if paths.family == "AF_UNIX":
         Path(paths.address).unlink(missing_ok=True)
@@ -91,8 +102,9 @@ def _serve_locked(
                 listener,
                 service,
                 export_service,
+                configuration_service,
                 notification_service,
-                intervals,
+                settings.intervals,
             )
         )
     finally:
@@ -107,6 +119,7 @@ async def _serve_connections(
     listener: Listener,
     service: TrackingService,
     export_service: ExportService,
+    configuration_service: ConfigurationService,
     notifier: NotificationService,
     reminder_intervals: ReminderIntervals | None,
 ) -> None:
@@ -129,13 +142,17 @@ async def _serve_connections(
                     notification_smoke,
                     active_confirmed,
                     active_edited,
+                    reloaded_intervals,
                 ) = await asyncio.to_thread(
                     _handle_request,
                     request_bytes,
                     service,
                     export_service,
+                    configuration_service,
                     coordinator.pending_reminder(),
                 )
+                if reloaded_intervals is not None:
+                    coordinator.reload_intervals(reloaded_intervals)
                 if active_confirmed:
                     coordinator.confirm_active()
                 if active_edited:
@@ -172,9 +189,19 @@ def _handle_request(
     payload: bytes,
     service: TrackingService,
     export_service: ExportService,
+    configuration_service: ConfigurationService,
     pending_reminder: Reminder | None = None,
-) -> tuple[dict[str, object], bool, bool, bool, bool, bool]:
+) -> tuple[
+    dict[str, object],
+    bool,
+    bool,
+    bool,
+    bool,
+    bool,
+    ReminderIntervals | None,
+]:
     request_id: object = None
+    reloaded_intervals: ReminderIntervals | None = None
     try:
         decoded: object = json.loads(payload.decode("utf-8"))
         if not isinstance(decoded, dict):
@@ -202,6 +229,23 @@ def _handle_request(
                 pending_reminder is not None
                 and pending_reminder.kind is ReminderKind.ACTIVE
             )
+        elif method == "get_configuration":
+            result = _settings_dict(configuration_service.get())
+        elif method == "save_configuration":
+            settings = configuration_service.save(
+                ReminderSettings(
+                    inactive_enabled=_required_bool(params, "inactive_enabled"),
+                    inactive_interval_minutes=_required_number(
+                        params, "inactive_interval_minutes"
+                    ),
+                    active_enabled=_required_bool(params, "active_enabled"),
+                    active_interval_minutes=_required_number(
+                        params, "active_interval_minutes"
+                    ),
+                )
+            )
+            result = _settings_dict(settings)
+            reloaded_intervals = settings.intervals
         elif method == "list_projects":
             result = service.list_projects()
         elif method == "list_activities":
@@ -326,6 +370,7 @@ def _handle_request(
                 False,
                 False,
                 False,
+                None,
             )
         else:
             raise ValueError(f"unknown method: {method}")
@@ -339,6 +384,7 @@ def _handle_request(
             method == "notification_smoke",
             method == "confirm_active_reminder" and result is True,
             method == "edit_active",
+            reloaded_intervals,
         )
     except ExportDestinationExistsError as error:
         return (
@@ -351,6 +397,7 @@ def _handle_request(
             False,
             False,
             False,
+            None,
         )
     except (OSError, RuntimeError, sqlite3.Error, TypeError, ValueError) as error:
         return (
@@ -363,6 +410,7 @@ def _handle_request(
             False,
             False,
             False,
+            None,
         )
 
 
@@ -384,6 +432,10 @@ def _reminder_dict(reminder: Reminder | None) -> object:
         "project": reminder.project,
         "activity": reminder.activity,
     }
+
+
+def _settings_dict(settings: ReminderSettings) -> dict[str, object]:
+    return asdict(settings)
 
 
 def _required_str(params: dict[str, object], name: str) -> str:
@@ -414,6 +466,13 @@ def _required_int(params: dict[str, object], name: str) -> int:
     if not isinstance(value, int):
         raise ValueError(f"{name} must be an integer")
     return value
+
+
+def _required_number(params: dict[str, object], name: str) -> float:
+    value = params.get(name)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a number")
+    return float(value)
 
 
 def _required_datetime(params: dict[str, object], name: str) -> datetime:

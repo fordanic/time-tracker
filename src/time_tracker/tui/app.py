@@ -28,6 +28,7 @@ from textual.widgets import (
 )
 from textual.widgets.option_list import Option
 
+from time_tracker.application.configuration import ReminderSettings
 from time_tracker.application.exporting import ExportDestinationExistsError
 from time_tracker.application.reminders import Reminder, ReminderKind
 from time_tracker.application.reporting import (
@@ -53,6 +54,19 @@ class TrackerGateway(Protocol):
 
     def get_active(self) -> ActiveTimer | None:
         """Return the recovered active timer."""
+        ...
+
+    @property
+    def configuration_path(self) -> Path:
+        """Return the durable configuration path shown in Settings."""
+        ...
+
+    def get_configuration(self) -> ReminderSettings:
+        """Return settings currently used by the background process."""
+        ...
+
+    def save_configuration(self, settings: ReminderSettings) -> ReminderSettings:
+        """Persist and live-reload reminder settings."""
         ...
 
     def get_reminder(self) -> Reminder | None:
@@ -235,6 +249,7 @@ class TimeTrackerApp(App[None]):
         "track-tab": "#project",
         "review-tab": "#history",
         "manage-tab": "#manage-project",
+        "settings-tab": "#inactive-reminders-enabled",
     }
     CSS = """
     Screen {
@@ -429,10 +444,36 @@ class TimeTrackerApp(App[None]):
         color: $text-muted;
     }
 
-    #manage-help, #settings-info {
+    #manage-help, #settings-info, #settings-path {
         height: auto;
         margin-bottom: 1;
         color: $text-muted;
+    }
+
+    .settings-row {
+        height: 2;
+        align-vertical: middle;
+    }
+
+    .settings-row Static {
+        width: 32;
+        height: 1;
+    }
+
+    .settings-row Switch {
+        width: 10;
+        height: 1;
+        padding: 0;
+        border: none;
+    }
+
+    .settings-row Input {
+        width: 24;
+    }
+
+    #save-settings-button {
+        width: 28;
+        margin-top: 1;
     }
 
     #history-title {
@@ -690,13 +731,30 @@ class TimeTrackerApp(App[None]):
                     )
                 with Vertical(id="settings-view", classes="view"):
                     yield Static(
-                        "Reminder settings are currently managed in the TOML "
-                        "configuration file. Run `time-tracker --config-path` to "
-                        "locate it, then restart the background process after "
-                        "editing. TUI editing and live reload are planned for a "
-                        "later Settings slice.",
+                        "Configure reminders below. Saving updates the TOML file "
+                        "and applies the new schedule immediately.",
                         id="settings-info",
                     )
+                    with Horizontal(classes="settings-row"):
+                        yield Static("Inactive-timer reminders")
+                        yield Switch(id="inactive-reminders-enabled")
+                        yield Input(
+                            placeholder="Interval minutes",
+                            id="inactive-reminder-minutes",
+                        )
+                    with Horizontal(classes="settings-row"):
+                        yield Static("Active-timer reminders")
+                        yield Switch(id="active-reminders-enabled")
+                        yield Input(
+                            placeholder="Interval minutes",
+                            id="active-reminder-minutes",
+                        )
+                    yield Button(
+                        "Save reminder settings",
+                        id="save-settings-button",
+                        variant="primary",
+                    )
+                    yield Static("", id="settings-path")
             yield Static("", id="message")
         yield Footer()
 
@@ -715,6 +773,7 @@ class TimeTrackerApp(App[None]):
             archived_activities = await asyncio.to_thread(
                 self.client.list_archived_activities
             )
+            settings = await asyncio.to_thread(self.client.get_configuration)
         except Exception as error:
             self._show_message(str(error), error=True)
         else:
@@ -722,6 +781,7 @@ class TimeTrackerApp(App[None]):
             self._render_history(completed)
             self._render_recent_activities(recent)
             self._render_archived_items(archived_projects, archived_activities)
+            self._render_settings(settings)
             if self.active_timer is not None:
                 self.query_one("#project", Input).value = self.active_timer.project
                 self.query_one("#activity", Input).value = self.active_timer.activity
@@ -900,6 +960,11 @@ class TimeTrackerApp(App[None]):
         """Confirm an active reminder from its visible prompt."""
         await self._confirm_active_reminder()
 
+    @on(Button.Pressed, "#save-settings-button")
+    async def handle_save_settings_button(self) -> None:
+        """Persist and immediately apply reminder settings."""
+        await self._save_settings()
+
     @on(Input.Changed, "#export-path")
     def handle_export_path_changed(self) -> None:
         """Cancel overwrite confirmation when the destination is edited."""
@@ -1033,6 +1098,33 @@ class TimeTrackerApp(App[None]):
         await self._refresh_recent_activities()
         self._render_active()
         await self._refresh_start_action()
+
+    async def _save_settings(self) -> None:
+        try:
+            settings = ReminderSettings(
+                inactive_enabled=self.query_one(
+                    "#inactive-reminders-enabled", Switch
+                ).value,
+                inactive_interval_minutes=_parse_positive_minutes(
+                    self.query_one("#inactive-reminder-minutes", Input).value,
+                    "Inactive reminder interval",
+                ),
+                active_enabled=self.query_one(
+                    "#active-reminders-enabled", Switch
+                ).value,
+                active_interval_minutes=_parse_positive_minutes(
+                    self.query_one("#active-reminder-minutes", Input).value,
+                    "Active reminder interval",
+                ),
+            )
+            saved = await asyncio.to_thread(self.client.save_configuration, settings)
+        except Exception as error:
+            self._show_message(str(error), error=True)
+            return
+        self._render_settings(saved)
+        self.pending_reminder = None
+        self._render_reminder()
+        self._show_message("Reminder settings saved and applied.")
 
     async def _edit_active(self) -> None:
         button = self.query_one("#edit-active-button", Button)
@@ -1868,6 +1960,23 @@ class TimeTrackerApp(App[None]):
             message = "No timer is running. Start one if you are working."
         message_widget.update(message)
 
+    def _render_settings(self, settings: ReminderSettings) -> None:
+        self.query_one("#settings-path", Static).update(
+            f"Configuration file: {self.client.configuration_path}"
+        )
+        self.query_one(
+            "#inactive-reminders-enabled", Switch
+        ).value = settings.inactive_enabled
+        self.query_one("#inactive-reminder-minutes", Input).value = _format_minutes(
+            settings.inactive_interval_minutes
+        )
+        self.query_one(
+            "#active-reminders-enabled", Switch
+        ).value = settings.active_enabled
+        self.query_one("#active-reminder-minutes", Input).value = _format_minutes(
+            settings.active_interval_minutes
+        )
+
     def _show_message(self, message: str, *, error: bool = False) -> None:
         widget = self.query_one("#message", Static)
         widget.update(message)
@@ -1899,3 +2008,19 @@ def _parse_filter_date(value: str, label: str) -> date:
         return date.fromisoformat(normalized)
     except ValueError as error:
         raise ValueError(f"Custom {label} date must use YYYY-MM-DD format.") from error
+
+
+def _parse_positive_minutes(value: str, label: str) -> float:
+    try:
+        parsed = float(value.strip())
+    except ValueError as error:
+        raise ValueError(f"{label} must be a positive number.") from error
+    try:
+        ReminderSettings(inactive_interval_minutes=parsed)
+    except ValueError as error:
+        raise ValueError(f"{label} must be a positive finite number.") from error
+    return parsed
+
+
+def _format_minutes(value: float) -> str:
+    return format(float(value), ".15g")

@@ -55,6 +55,13 @@ class ReminderCoordinator:
                 activity=active.activity,
             )
 
+    def reload_intervals(self, intervals: ReminderIntervals) -> None:
+        """Apply durable settings and reset the current state's deadline."""
+        self._schedule.replace_intervals(intervals)
+        self._pending = None
+        self._generation += 1
+        self._changed.set()
+
     def confirm_active(self) -> bool:
         """Clear an active prompt and restart its interval from now."""
         if self._pending is None or self._pending.kind is not ReminderKind.ACTIVE:
