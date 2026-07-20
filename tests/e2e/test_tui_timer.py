@@ -59,6 +59,10 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
             assert "Website / Implementation" in active_text
             assert "Walking skeleton" in active_text
 
+        assert not first_app.query("#active-timer")
+        first_app._render_active()
+        first_app._render_reminder()
+
         recovered_app = TimeTrackerApp(AgentClient(paths))
         async with recovered_app.run_test() as pilot:
             await pilot.pause()

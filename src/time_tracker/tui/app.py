@@ -898,8 +898,12 @@ class TimeTrackerApp(App[None]):
         self.query_one("#recent-empty", Static).display = not recent
 
     def _render_active(self) -> None:
-        active_widget = self.query_one("#active-timer", Static)
-        stop_button = self.query_one("#stop-button", Button)
+        active_widgets = self.query("#active-timer")
+        stop_buttons = self.query("#stop-button")
+        if not active_widgets or not stop_buttons:
+            return
+        active_widget = active_widgets.first(Static)
+        stop_button = stop_buttons.first(Button)
         if self.active_timer is None:
             active_widget.update("No timer running")
             stop_button.disabled = True
@@ -917,13 +921,19 @@ class TimeTrackerApp(App[None]):
         stop_button.disabled = False
 
     def _render_reminder(self) -> None:
-        panel = self.query_one("#reminder", Horizontal)
-        button = self.query_one("#confirm-active-reminder-button", Button)
+        panels = self.query("#reminder")
+        buttons = self.query("#confirm-active-reminder-button")
+        message_widgets = self.query("#reminder-message")
+        if not panels or not buttons or not message_widgets:
+            return
+        panel = panels.first(Horizontal)
+        button = buttons.first(Button)
+        message_widget = message_widgets.first(Static)
         reminder = self.pending_reminder
         panel.display = reminder is not None
         button.display = reminder is not None and reminder.kind is ReminderKind.ACTIVE
         if reminder is None:
-            self.query_one("#reminder-message", Static).update("")
+            message_widget.update("")
             return
         if reminder.kind is ReminderKind.ACTIVE:
             timer_name = " / ".join(
@@ -935,7 +945,7 @@ class TimeTrackerApp(App[None]):
             )
         else:
             message = "No timer is running. Start one if you are working."
-        self.query_one("#reminder-message", Static).update(message)
+        message_widget.update(message)
 
     def _show_message(self, message: str, *, error: bool = False) -> None:
         widget = self.query_one("#message", Static)
