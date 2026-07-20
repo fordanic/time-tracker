@@ -14,6 +14,7 @@ from textual.containers import Horizontal, Vertical
 from textual.suggester import SuggestFromList
 from textual.widgets import (
     Button,
+    ContentSwitcher,
     DataTable,
     Footer,
     Header,
@@ -21,6 +22,8 @@ from textual.widgets import (
     OptionList,
     Static,
     Switch,
+    Tab,
+    Tabs,
 )
 from textual.widgets.option_list import Option
 
@@ -113,11 +116,15 @@ class PointerOnlyButton(Button):
 
 
 class TimeTrackerApp(App[None]):
-    """Keyboard-first start/stop screen backed by the local agent."""
+    """Keyboard-first focused workflows backed by the local agent."""
 
     TITLE = "Time Tracker"
-    SUB_TITLE = "Persistent walking skeleton"
+    SUB_TITLE = "Local, persistent time tracking"
     BINDINGS = [
+        Binding("f1", "show_track", "Track"),
+        Binding("f2", "show_review", "Review"),
+        Binding("f3", "show_manage", "Manage"),
+        Binding("f4", "show_settings", "Settings"),
         Binding("f5", "start_timer", "Timer action"),
         Binding("f6", "stop_timer", "Stop"),
         Binding("f7", "export_csv", "Export CSV"),
@@ -126,6 +133,17 @@ class TimeTrackerApp(App[None]):
         Binding("f10", "confirm_active_reminder", "Still active"),
         Binding("ctrl+q", "quit", "Quit"),
     ]
+    _VIEW_CONTENT = {
+        "track-tab": "track-view",
+        "review-tab": "review-view",
+        "manage-tab": "manage-view",
+        "settings-tab": "settings-view",
+    }
+    _VIEW_FOCUS = {
+        "track-tab": "#project",
+        "review-tab": "#history",
+        "manage-tab": "#manage-project",
+    }
     CSS = """
     Screen {
         align: center middle;
@@ -145,6 +163,18 @@ class TimeTrackerApp(App[None]):
         text-align: center;
         background: $panel;
         content-align: center middle;
+    }
+
+    #view-tabs {
+        height: 2;
+    }
+
+    #view-switcher, .view {
+        height: 1fr;
+    }
+
+    .view {
+        padding-top: 1;
     }
 
     #reminder {
@@ -171,11 +201,11 @@ class TimeTrackerApp(App[None]):
         margin-bottom: 0;
     }
 
-    #project-actions, #activity-actions {
+    #manage-project-actions, #manage-activity-actions {
         height: auto;
     }
 
-    #project, #activity {
+    #manage-project, #manage-activity {
         width: 1fr;
     }
 
@@ -241,6 +271,12 @@ class TimeTrackerApp(App[None]):
         color: $text-muted;
     }
 
+    #manage-help, #settings-info {
+        height: auto;
+        margin-bottom: 1;
+        color: $text-muted;
+    }
+
     #history-title {
         margin-top: 1;
         text-style: bold;
@@ -263,7 +299,7 @@ class TimeTrackerApp(App[None]):
         self._start_action: StartAction | None = None
 
     def compose(self) -> ComposeResult:
-        """Compose the single-screen timer workflow."""
+        """Compose focused workflows around one persistent active-timer strip."""
         yield Header()
         with Vertical(id="tracker"):
             yield Static("No timer running", id="active-timer")
@@ -274,42 +310,88 @@ class TimeTrackerApp(App[None]):
                     id="confirm-active-reminder-button",
                     variant="primary",
                 )
-            with Horizontal(id="project-actions"):
-                yield Input(
-                    placeholder="Project (type to reuse existing)",
-                    id="project",
-                )
-                yield PointerOnlyButton(
-                    "Archive project  F8",
-                    id="archive-project-button",
-                )
-            with Horizontal(id="activity-actions"):
-                yield Input(
-                    placeholder="Activity (type to reuse existing)",
-                    id="activity",
-                )
-                yield PointerOnlyButton(
-                    "Archive activity  F9",
-                    id="archive-activity-button",
-                )
-            yield Input(placeholder="Optional note", id="note")
-            yield OptionList(id="recent-activities", compact=True)
-            yield Static("No recent activities yet.", id="recent-empty")
-            with Horizontal(id="actions"):
-                yield Button("Start  F5", id="start-button", variant="success")
-                yield Button("Stop  F6", id="stop-button", variant="warning")
-            with Horizontal(id="export-actions"):
-                yield Input(
-                    placeholder="CSV export path (for example ~/times.csv)",
-                    id="export-path",
-                )
-                yield Button("Export CSV  F7", id="export-button")
-            with Horizontal(id="history-options"):
-                yield Static("Daily summaries", id="summary-mode-label")
-                yield Switch(id="summary-mode")
+            yield Tabs(
+                Tab("Track  F1", id="track-tab"),
+                Tab("Review  F2", id="review-tab"),
+                Tab("Manage  F3", id="manage-tab"),
+                Tab("Settings  F4", id="settings-tab"),
+                active="track-tab",
+                id="view-tabs",
+            )
+            with ContentSwitcher(initial="track-view", id="view-switcher"):
+                with Vertical(id="track-view", classes="view"):
+                    yield Input(
+                        placeholder="Project (type to reuse existing)",
+                        id="project",
+                    )
+                    yield Input(
+                        placeholder="Activity (type to reuse existing)",
+                        id="activity",
+                    )
+                    yield Input(placeholder="Optional note", id="note")
+                    yield OptionList(id="recent-activities", compact=True)
+                    yield Static("No recent activities yet.", id="recent-empty")
+                    with Horizontal(id="actions"):
+                        yield Button(
+                            "Start  F5",
+                            id="start-button",
+                            variant="success",
+                        )
+                        yield Button(
+                            "Stop  F6",
+                            id="stop-button",
+                            variant="warning",
+                        )
+                with Vertical(id="review-view", classes="view"):
+                    with Horizontal(id="export-actions"):
+                        yield Input(
+                            placeholder="CSV export path (for example ~/times.csv)",
+                            id="export-path",
+                        )
+                        yield Button("Export CSV  F7", id="export-button")
+                    with Horizontal(id="history-options"):
+                        yield Static("Daily summaries", id="summary-mode-label")
+                        yield Switch(id="summary-mode")
+                    yield Static("Completed entries", id="history-title")
+                    yield DataTable(
+                        id="history",
+                        cursor_type="row",
+                        zebra_stripes=True,
+                    )
+                with Vertical(id="manage-view", classes="view"):
+                    yield Static(
+                        "Archive selectable projects and activities. "
+                        "Archived-item restore is planned for the next Manage slice.",
+                        id="manage-help",
+                    )
+                    with Horizontal(id="manage-project-actions"):
+                        yield Input(
+                            placeholder="Project to archive",
+                            id="manage-project",
+                        )
+                        yield PointerOnlyButton(
+                            "Archive project  F8",
+                            id="archive-project-button",
+                        )
+                    with Horizontal(id="manage-activity-actions"):
+                        yield Input(
+                            placeholder="Activity to archive",
+                            id="manage-activity",
+                        )
+                        yield PointerOnlyButton(
+                            "Archive activity  F9",
+                            id="archive-activity-button",
+                        )
+                with Vertical(id="settings-view", classes="view"):
+                    yield Static(
+                        "Reminder settings are currently managed in the TOML "
+                        "configuration file. Run `time-tracker --config-path` to "
+                        "locate it, then restart the background process after "
+                        "editing. TUI editing and live reload are planned for a "
+                        "later Settings slice.",
+                        id="settings-info",
+                    )
             yield Static("", id="message")
-            yield Static("Completed entries", id="history-title")
-            yield DataTable(id="history", cursor_type="row", zebra_stripes=True)
         yield Footer()
 
     async def on_mount(self) -> None:
@@ -324,10 +406,7 @@ class TimeTrackerApp(App[None]):
         except Exception as error:
             self._show_message(str(error), error=True)
         else:
-            self.query_one("#project", Input).suggester = SuggestFromList(
-                projects,
-                case_sensitive=False,
-            )
+            self._set_project_suggestions(projects)
             self._render_history(completed)
             self._render_recent_activities(recent)
             if self.active_timer is not None:
@@ -337,6 +416,13 @@ class TimeTrackerApp(App[None]):
         self._render_active()
         await self._refresh_start_action()
         await self._refresh_reminder()
+        self._select_view("track-tab")
+
+    @on(Tabs.TabActivated, "#view-tabs")
+    def handle_view_activated(self, event: Tabs.TabActivated) -> None:
+        """Show and focus the content owned by the selected tab."""
+        if event.tab.id is not None:
+            self._select_view(event.tab.id)
 
     @on(Input.Changed, "#project")
     async def handle_project_changed(self, event: Input.Changed) -> None:
@@ -368,6 +454,25 @@ class TimeTrackerApp(App[None]):
     async def handle_note_changed(self) -> None:
         """Refresh the primary action when the selected note changes."""
         await self._refresh_start_action()
+
+    @on(Input.Changed, "#manage-project")
+    async def handle_manage_project_changed(self, event: Input.Changed) -> None:
+        """Refresh Manage activity suggestions for its selected project."""
+        project = event.value.strip()
+        try:
+            activities = await asyncio.to_thread(
+                self.client.list_activities,
+                project,
+            )
+        except Exception as error:
+            self._show_message(str(error), error=True)
+            return
+        if self.query_one("#manage-project", Input).value.strip() != project:
+            return
+        self.query_one("#manage-activity", Input).suggester = SuggestFromList(
+            activities,
+            case_sensitive=False,
+        )
 
     @on(Button.Pressed, "#start-button")
     async def handle_start_button(self) -> None:
@@ -425,6 +530,22 @@ class TimeTrackerApp(App[None]):
         """Render and export the representation selected by the user."""
         self._clear_export_confirmation()
         self._render_history(self._completed_entries)
+
+    def action_show_track(self) -> None:
+        """Select the Track view from the F1 binding."""
+        self._select_view("track-tab")
+
+    def action_show_review(self) -> None:
+        """Select the Review view from the F2 binding."""
+        self._select_view("review-tab")
+
+    def action_show_manage(self) -> None:
+        """Select the Manage view from the F3 binding."""
+        self._select_view("manage-tab")
+
+    def action_show_settings(self) -> None:
+        """Select the Settings view from the F4 binding."""
+        self._select_view("settings-tab")
 
     async def action_start_timer(self) -> None:
         """Start or switch the timer from the F5 binding."""
@@ -493,20 +614,22 @@ class TimeTrackerApp(App[None]):
 
     async def _refresh_project_suggestions(self) -> None:
         projects = await asyncio.to_thread(self.client.list_projects)
-        self.query_one("#project", Input).suggester = SuggestFromList(
-            projects,
-            case_sensitive=False,
-        )
+        self._set_project_suggestions(projects)
 
-    async def _refresh_activity_suggestions(self, project: str) -> None:
+    async def _refresh_activity_suggestions(
+        self,
+        project: str,
+        *,
+        input_selector: str = "#activity",
+    ) -> None:
         activities = await asyncio.to_thread(self.client.list_activities, project)
-        self.query_one("#activity", Input).suggester = SuggestFromList(
+        self.query_one(input_selector, Input).suggester = SuggestFromList(
             activities,
             case_sensitive=False,
         )
 
     async def _archive_project(self) -> None:
-        project_input = self.query_one("#project", Input)
+        project_input = self.query_one("#manage-project", Input)
         project = project_input.value
         try:
             archived_project = await asyncio.to_thread(
@@ -517,15 +640,18 @@ class TimeTrackerApp(App[None]):
             self._show_message(str(error), error=True)
             return
         project_input.value = ""
-        self.query_one("#activity", Input).value = ""
+        self.query_one("#manage-activity", Input).value = ""
         await self._refresh_project_suggestions()
-        await self._refresh_activity_suggestions("")
+        await self._refresh_activity_suggestions(
+            "",
+            input_selector="#manage-activity",
+        )
         self._show_message(f"Archived project {archived_project}.")
         await self._refresh_recent_activities()
 
     async def _archive_activity(self) -> None:
-        project = self.query_one("#project", Input).value
-        activity_input = self.query_one("#activity", Input)
+        project = self.query_one("#manage-project", Input).value
+        activity_input = self.query_one("#manage-activity", Input)
         activity = activity_input.value
         try:
             archived_project, archived_activity = await asyncio.to_thread(
@@ -537,11 +663,35 @@ class TimeTrackerApp(App[None]):
             self._show_message(str(error), error=True)
             return
         activity_input.value = ""
-        await self._refresh_activity_suggestions(archived_project)
+        await self._refresh_activity_suggestions(
+            archived_project,
+            input_selector="#manage-activity",
+        )
         self._show_message(
             f"Archived activity {archived_project} / {archived_activity}."
         )
         await self._refresh_recent_activities()
+
+    def _select_view(self, tab_id: str) -> None:
+        """Select one view without changing any workflow state."""
+        content_id = self._VIEW_CONTENT[tab_id]
+        tabs = self.query_one("#view-tabs", Tabs)
+        switcher = self.query_one("#view-switcher", ContentSwitcher)
+        tabs.active = tab_id
+        switcher.current = content_id
+        focus_selector = self._VIEW_FOCUS.get(tab_id)
+        if focus_selector is None:
+            tabs.focus()
+        else:
+            self.query_one(focus_selector).focus()
+
+    def _set_project_suggestions(self, projects: list[str]) -> None:
+        """Apply canonical project suggestions to Track and Manage inputs."""
+        for selector in ("#project", "#manage-project"):
+            self.query_one(selector, Input).suggester = SuggestFromList(
+                projects,
+                case_sensitive=False,
+            )
 
     async def _stop_timer(self) -> None:
         try:
@@ -748,8 +898,12 @@ class TimeTrackerApp(App[None]):
         self.query_one("#recent-empty", Static).display = not recent
 
     def _render_active(self) -> None:
-        active_widget = self.query_one("#active-timer", Static)
-        stop_button = self.query_one("#stop-button", Button)
+        active_widgets = self.query("#active-timer")
+        stop_buttons = self.query("#stop-button")
+        if not active_widgets or not stop_buttons:
+            return
+        active_widget = active_widgets.first(Static)
+        stop_button = stop_buttons.first(Button)
         if self.active_timer is None:
             active_widget.update("No timer running")
             stop_button.disabled = True
@@ -767,13 +921,19 @@ class TimeTrackerApp(App[None]):
         stop_button.disabled = False
 
     def _render_reminder(self) -> None:
-        panel = self.query_one("#reminder", Horizontal)
-        button = self.query_one("#confirm-active-reminder-button", Button)
+        panels = self.query("#reminder")
+        buttons = self.query("#confirm-active-reminder-button")
+        message_widgets = self.query("#reminder-message")
+        if not panels or not buttons or not message_widgets:
+            return
+        panel = panels.first(Horizontal)
+        button = buttons.first(Button)
+        message_widget = message_widgets.first(Static)
         reminder = self.pending_reminder
         panel.display = reminder is not None
         button.display = reminder is not None and reminder.kind is ReminderKind.ACTIVE
         if reminder is None:
-            self.query_one("#reminder-message", Static).update("")
+            message_widget.update("")
             return
         if reminder.kind is ReminderKind.ACTIVE:
             timer_name = " / ".join(
@@ -785,7 +945,7 @@ class TimeTrackerApp(App[None]):
             )
         else:
             message = "No timer is running. Start one if you are working."
-        self.query_one("#reminder-message", Static).update(message)
+        message_widget.update(message)
 
     def _show_message(self, message: str, *, error: bool = False) -> None:
         widget = self.query_one("#message", Static)

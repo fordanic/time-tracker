@@ -5,7 +5,16 @@ import time
 from pathlib import Path
 
 import pytest
-from textual.widgets import Button, DataTable, Input, OptionList, Static, Switch
+from textual.widgets import (
+    Button,
+    ContentSwitcher,
+    DataTable,
+    Input,
+    OptionList,
+    Static,
+    Switch,
+    Tabs,
+)
 
 from time_tracker.agent.server import serve
 from time_tracker.application.reminders import Reminder, ReminderIntervals, ReminderKind
@@ -50,6 +59,10 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
             assert "Website / Implementation" in active_text
             assert "Walking skeleton" in active_text
 
+        assert not first_app.query("#active-timer")
+        first_app._render_active()
+        first_app._render_reminder()
+
         recovered_app = TimeTrackerApp(AgentClient(paths))
         async with recovered_app.run_test() as pilot:
             await pilot.pause()
@@ -77,6 +90,13 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
             assert row[1] == "Implementation"
             assert row[5] == "Walking skeleton"
 
+            await pilot.press("f2")
+            await pilot.pause()
+            assert recovered_app.query_one(
+                "#view-switcher", ContentSwitcher
+            ).current == ("review-view")
+            assert recovered_app.focused is history
+
             destination = tmp_path / "tui-export.csv"
             destination.write_text("existing content", encoding="utf-8")
             recovered_app.query_one("#export-path", Input).value = str(destination)
@@ -87,6 +107,13 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
             assert "Overwrite CSV" in str(export_button.label)
             assert destination.read_text(encoding="utf-8") == "existing content"
 
+            await pilot.press("f4")
+            await pilot.pause()
+            assert recovered_app.query_one("#review-view").display is False
+            assert "No timer running" in str(
+                recovered_app.query_one("#active-timer", Static).render()
+            )
+
             await pilot.press("f7")
             await pilot.pause()
 
@@ -96,6 +123,7 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
             )
             assert "Website,Implementation" in destination.read_text(encoding="utf-8")
 
+            await pilot.press("f2")
             assert await pilot.click("#summary-mode")
             await pilot.pause()
 
@@ -121,15 +149,19 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
                 "date,project,activity,duration_seconds"
             )
 
+            await pilot.press("f3")
+            recovered_app.query_one("#manage-project", Input).value = "Website"
+            recovered_app.query_one("#manage-activity", Input).value = "Implementation"
+            await pilot.pause()
             await pilot.click("#archive-activity-button")
             await pilot.pause()
 
-            assert recovered_app.query_one("#activity", Input).value == ""
+            assert recovered_app.query_one("#manage-activity", Input).value == ""
             assert "Archived activity Website / Implementation" in str(
                 recovered_app.query_one("#message", Static).render()
             )
-            recovered_app.query_one("#activity", Input).value = "Implementation"
-            await pilot.click("#start-button")
+            await pilot.press("f1")
+            await pilot.press("f5")
             await pilot.pause()
 
             assert "activity is archived: Implementation" in str(
@@ -140,11 +172,12 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
             )
             assert history.row_count == 1
 
-            await pilot.click("#archive-project-button")
+            recovered_app.query_one("#manage-project", Input).value = "Website"
+            await pilot.press("f4")
+            await pilot.press("f8")
             await pilot.pause()
 
-            assert recovered_app.query_one("#project", Input).value == ""
-            assert recovered_app.query_one("#activity", Input).value == ""
+            assert recovered_app.query_one("#manage-project", Input).value == ""
             assert "Archived project Website" in str(
                 recovered_app.query_one("#message", Static).render()
             )
@@ -248,10 +281,74 @@ async def test_user_tracks_again_from_recent_activities(tmp_path: Path) -> None:
             await pilot.pause()
 
             assert app._recent_activities[0].activity == "Implementation"
-            await pilot.click("#archive-activity-button")
+            await pilot.press("f3")
+            app.query_one("#manage-project", Input).value = "Website"
+            app.query_one("#manage-activity", Input).value = "Implementation"
+            await pilot.press("f9")
             await pilot.pause()
 
             assert [pair.activity for pair in app._recent_activities] == ["Planning"]
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+
+
+@pytest.mark.asyncio
+async def test_user_navigates_focused_views_without_losing_workflow_state(
+    tmp_path: Path,
+) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    thread = threading.Thread(target=serve, args=(paths,), daemon=True)
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        client.start("Website", "Review", "Persistent context")
+        app = TimeTrackerApp(client)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            tabs = app.query_one("#view-tabs", Tabs)
+            switcher = app.query_one("#view-switcher", ContentSwitcher)
+            active = app.query_one("#active-timer", Static)
+
+            assert tabs.active == "track-tab"
+            assert switcher.current == "track-view"
+            assert app.focused is app.query_one("#project", Input)
+            assert "Website / Review" in str(active.render())
+
+            app.query_one("#note", Input).value = "Draft replacement"
+            await pilot.press("f2")
+            assert tabs.active == "review-tab"
+            assert switcher.current == "review-view"
+            assert app.query_one("#history", DataTable).has_focus
+            app.query_one("#export-path", Input).value = str(tmp_path / "review.csv")
+            app.query_one("#summary-mode", Switch).value = True
+
+            await pilot.click("#manage-tab")
+            await pilot.pause()
+            assert tabs.active == "manage-tab"
+            assert switcher.current == "manage-view"
+            assert app.focused is app.query_one("#manage-project", Input)
+            app.query_one("#manage-project", Input).value = "Website"
+            app.query_one("#manage-activity", Input).value = "Review"
+
+            await pilot.press("f4")
+            assert tabs.active == "settings-tab"
+            assert switcher.current == "settings-view"
+            assert tabs.has_focus
+            assert "Website / Review" in str(active.render())
+
+            await pilot.press("f1")
+            assert app.query_one("#note", Input).value == "Draft replacement"
+            await pilot.press("f2")
+            assert app.query_one("#export-path", Input).value.endswith("review.csv")
+            assert app.query_one("#summary-mode", Switch).value is True
+            await pilot.press("f3")
+            assert app.query_one("#manage-project", Input).value == "Website"
+            assert app.query_one("#manage-activity", Input).value == "Review"
     finally:
         client.shutdown()
         thread.join(timeout=2)
