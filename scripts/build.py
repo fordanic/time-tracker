@@ -27,6 +27,8 @@ def main() -> None:
         "desktop_notifier",
         "--hidden-import",
         "desktop_notifier.resources",
+        "--hidden-import",
+        "textual.widgets._tab",
     ]
     if platform.system() == "Darwin":
         command.extend(
