@@ -12,7 +12,7 @@ added later on the same application core.
 - Preserve an active timer across restarts and crashes.
 - Continue reminders after the TUI closes by using a background process.
 - Store data locally in SQLite and settings in TOML.
-- Export completed entries to UTF-8 CSV.
+- Export completed entries or daily project/activity summaries to UTF-8 CSV.
 
 Manual entry and editing, concurrent timers, cloud features, and the GUI are not
 part of the MVP.
@@ -39,8 +39,10 @@ after TUI closure, agent restart, or forced process termination. The background
 process also owns monotonic reminder scheduling, TOML-configured reminder
 intervals, and native notification delivery after the TUI closes. The TUI lists
 completed entries chronologically with their local start and stop times, derived
-duration, and note, and exports completed entries to UTF-8 CSV with explicit
-overwrite confirmation. Projects and activities can be archived from the TUI;
+duration, and note. A toggle changes both the history view and CSV export to daily
+totals per project and activity; entries crossing local midnight are divided
+between their corresponding days. Both CSV formats require explicit overwrite
+confirmation. Projects and activities can be archived from the TUI;
 archived names disappear from new-timer suggestions and remain intact in history.
 When connected, the TUI also presents due reminders; confirming an active reminder
 restarts its interval without changing the timer, while ignoring it leaves the
@@ -93,14 +95,19 @@ the TUI leaves the background process and any active timer running. Run
 `uv run time-tracker --stop-agent` to stop only the process; the persisted timer
 remains active and is recovered the next time the application starts.
 
-Enter a destination in the CSV export path field and press its button or `F7` to
-export completed entries. Relative paths are resolved from the directory where
-the TUI was launched, and `~` expands to the current user's home directory. If the
-destination exists, the TUI requires a second export action before overwriting it.
+Use the Daily summaries toggle to switch the history table and export between
+completed entries and local-day totals per project and activity. Enter a
+destination in the CSV export path field and press its button or `F7` to export
+the selected representation. Relative paths are resolved from the directory
+where the TUI was launched, and `~` expands to the current user's home directory.
+If the destination exists, the TUI requires a second export action before
+overwriting it.
 
 Enter an existing project or activity and use its archive button or `F8`/`F9`.
 Archiving leaves any running timer active, removes the name from future timer
 suggestions, and preserves completed history. Archived names cannot be reused.
+The archive buttons remain pointer-accessible but are omitted from keyboard tab
+navigation; their function-key shortcuts remain available.
 
 When a reminder becomes due while the TUI is connected, it appears below the
 active timer. For an active timer, press its button or `F10` to confirm that it is
