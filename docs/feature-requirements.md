@@ -532,7 +532,7 @@ that were archived by mistake without editing SQLite or losing hierarchy state.
 
 ### Day-oriented Review and today's completed total
 
-**Status:** Approved
+**Status:** Implemented
 
 #### Purpose
 

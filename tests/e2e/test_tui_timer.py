@@ -97,11 +97,13 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
                 recovered_app.query_one("#active-timer", Static).render()
             )
             history = recovered_app.query_one("#history", DataTable)
-            assert history.row_count == 1
+            assert history.row_count == 2
             row = history.get_row_at(0)
-            assert row[0] == "Website"
-            assert row[1] == "Implementation"
-            assert row[5] == "Walking skeleton"
+            assert row[1] == "Website"
+            assert row[2] == "Implementation"
+            assert row[6] == "Walking skeleton"
+            assert len(str(row[3])) == 5
+            assert history.get_row_at(1)[1] == "Day total"
 
             await pilot.press("f2")
             await pilot.pause()
@@ -556,6 +558,114 @@ async def test_primary_action_distinguishes_start_restart_and_switch(
 
 
 @pytest.mark.asyncio
+async def test_review_groups_local_days_and_loads_an_overnight_entry_segment(
+    tmp_path: Path,
+) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    repository = SQLiteTimerRepository(paths.database)
+    local_midnight = (
+        datetime.now()
+        .astimezone()
+        .replace(
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+    )
+    overnight_start = local_midnight - timedelta(minutes=30)
+    overnight_stop = local_midnight + timedelta(minutes=30)
+    overnight = repository.start(
+        "Client",
+        "Release",
+        overnight_start,
+        "Across midnight",
+    )
+    repository.stop(overnight_stop)
+    repository.start(
+        "Client",
+        "Review",
+        local_midnight + timedelta(hours=1),
+        None,
+    )
+    repository.stop(local_midnight + timedelta(hours=1, minutes=45))
+    repository.start(
+        "Client",
+        "Active",
+        local_midnight + timedelta(hours=2),
+        None,
+    )
+    thread = threading.Thread(target=serve, args=(paths,), daemon=True)
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        app = TimeTrackerApp(client)
+        async with app.run_test() as pilot:
+            await pilot.press("f2")
+            await pilot.pause()
+            history = app.query_one("#history", DataTable)
+
+            assert history.row_count == 5
+            first_segment = history.get_row_at(0)
+            assert (
+                first_segment[0]
+                == (local_midnight.date() - timedelta(days=1)).isoformat()
+            )
+            assert first_segment[1:7] == [
+                "Client",
+                "Release",
+                "23:30",
+                "00:00",
+                "00:30:00",
+                "Across midnight",
+            ]
+            assert history.get_row_at(1)[1] == "Day total"
+
+            second_segment = history.get_row_at(2)
+            assert second_segment[0] == local_midnight.date().isoformat()
+            assert second_segment[3:6] == ["00:00", "00:30", "00:30:00"]
+            assert history.get_row_at(3)[0] == ""
+            assert history.get_row_at(4)[1] == "Day total"
+            assert history.get_row_at(4)[5] == "01:15:00"
+            assert "Today's completed time: 01:15:00" in str(
+                app.query_one("#today-total", Static).render()
+            )
+
+            history.move_cursor(row=2)
+            app.query_one("#load-correction-button", Button).press()
+            await _wait_for_ui(
+                pilot,
+                lambda: app._editing_entry_id == overnight.entry_id,
+                "overnight entry segment did not load its source entry",
+            )
+            assert datetime.fromisoformat(
+                app.query_one("#correction-start", Input).value
+            ).astimezone(UTC) == overnight_start.astimezone(UTC)
+            assert datetime.fromisoformat(
+                app.query_one("#correction-stop", Input).value
+            ).astimezone(UTC) == overnight_stop.astimezone(UTC)
+
+            history.move_cursor(row=4)
+            app.query_one("#load-correction-button", Button).press()
+            await _wait_for_ui(
+                pilot,
+                lambda: (
+                    "Select a completed entry row"
+                    in str(app.query_one("#message", Static).render())
+                ),
+                "day-total selection was not rejected",
+            )
+            assert app._editing_entry_id == overnight.entry_id
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+
+
+@pytest.mark.asyncio
 async def test_user_corrects_a_selected_completed_entry_in_review(
     tmp_path: Path,
 ) -> None:
@@ -609,9 +719,9 @@ async def test_user_corrects_a_selected_completed_entry_in_review(
             assert corrected.activity == "Review"
             assert corrected.note == "Revised"
             row = app.query_one("#history", DataTable).get_row_at(0)
-            assert row[0] == "Client"
-            assert row[1] == "Review"
-            assert row[5] == "Revised"
+            assert row[1] == "Client"
+            assert row[2] == "Review"
+            assert row[6] == "Revised"
             assert "Corrected Client / Review" in str(
                 app.query_one("#message", Static).render()
             )
@@ -715,7 +825,7 @@ async def test_user_adds_missed_time_without_changing_active_timer(
             assert manual.project == "Client"
             assert manual.activity == "Review"
             assert manual.note == "Missed work"
-            assert app.query_one("#history", DataTable).row_count == 2
+            assert app.query_one("#history", DataTable).row_count == 3
             assert "Added missed entry for Client / Review" in str(
                 app.query_one("#message", Static).render()
             )
