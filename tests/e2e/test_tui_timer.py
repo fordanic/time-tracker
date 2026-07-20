@@ -14,6 +14,7 @@ from textual.widgets import (
     DataTable,
     Input,
     OptionList,
+    Select,
     Static,
     Switch,
     Tabs,
@@ -658,6 +659,117 @@ async def test_review_groups_local_days_and_loads_an_overnight_entry_segment(
                 "day-total selection was not rejected",
             )
             assert app._editing_entry_id == overnight.entry_id
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+
+
+@pytest.mark.asyncio
+async def test_review_filters_range_totals_and_export_share_one_selection(
+    tmp_path: Path,
+) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    repository = SQLiteTimerRepository(paths.database)
+    local_timezone = datetime.now().astimezone().tzinfo
+
+    def utc_instant(day: int, hour: int, minute: int = 0) -> datetime:
+        return datetime(
+            2026,
+            7,
+            day,
+            hour,
+            minute,
+            tzinfo=local_timezone,
+        ).astimezone(UTC)
+
+    repository.start("Client", "Research", utc_instant(19, 23, 30), "Overnight")
+    repository.stop(utc_instant(20, 0, 30))
+    repository.start("Client", "Writing", utc_instant(20, 9), None)
+    repository.stop(utc_instant(20, 10))
+    repository.start("Internal", "Research", utc_instant(20, 11), None)
+    repository.stop(utc_instant(20, 11, 30))
+
+    thread = threading.Thread(target=serve, args=(paths,), daemon=True)
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        client.archive_project("Client")
+        app = TimeTrackerApp(client)
+        async with app.run_test() as pilot:
+            await pilot.press("f2")
+            app.query_one("#date-preset", Select).value = "custom"
+            app.query_one("#filter-start-date", Input).value = "2026-07-20"
+            app.query_one("#filter-end-date", Input).value = "2026-07-20"
+            app.query_one("#filter-project", Input).value = "client"
+            await pilot.pause()
+
+            history = app.query_one("#history", DataTable)
+            assert history.row_count == 3
+            assert history.get_row_at(0)[0] == "2026-07-20"
+            assert history.get_row_at(0)[1:3] == ["Client", "Research"]
+            assert history.get_row_at(1)[1:3] == ["Client", "Writing"]
+            assert history.get_row_at(2)[1] == "Day total"
+            assert "2026-07-20 · client · all activities" in str(
+                app.query_one("#active-filter", Static).render()
+            )
+
+            range_switch = app.query_one("#range-summary-mode", Switch)
+            range_switch.focus()
+            await pilot.pause()
+            await pilot.press("space")
+            await pilot.pause()
+
+            assert range_switch.value is True
+            assert history.row_count == 2
+            assert history.get_row_at(0) == ["Client", "Research", "00:30:00"]
+            assert history.get_row_at(1) == ["Client", "Writing", "01:00:00"]
+            assert "Project/activity totals" in str(
+                app.query_one("#history-title", Static).render()
+            )
+
+            destination = tmp_path / "filtered-range.csv"
+            app.query_one("#export-path", Input).value = str(destination)
+            await pilot.press("f7")
+            await pilot.pause()
+
+            assert destination.read_text(encoding="utf-8").splitlines() == [
+                "project,activity,duration_seconds",
+                "Client,Research,1800",
+                "Client,Writing,3600",
+            ]
+
+            app.query_one("#filter-end-date", Input).value = "invalid"
+            invalid_destination = tmp_path / "invalid.csv"
+            app.query_one("#export-path", Input).value = str(invalid_destination)
+            await pilot.press("f7")
+            await pilot.pause()
+
+            assert history.row_count == 2
+            assert not invalid_destination.exists()
+            assert "Fix the Review filter" in str(
+                app.query_one("#message", Static).render()
+            )
+
+            app.query_one("#filter-end-date", Input).value = "2026-07-20"
+            app.query_one("#filter-activity", Input).value = "Missing"
+            await pilot.pause()
+
+            assert history.row_count == 0
+            assert app.query_one("#history-empty", Static).display
+            empty_destination = tmp_path / "empty.csv"
+            app.query_one("#export-path", Input).value = str(empty_destination)
+            await pilot.press("f7")
+            await pilot.pause()
+            assert empty_destination.read_text(encoding="utf-8") == (
+                "project,activity,duration_seconds\n"
+            )
+            assert "Exported 0 range totals" in str(
+                app.query_one("#message", Static).render()
+            )
     finally:
         client.shutdown()
         thread.join(timeout=2)

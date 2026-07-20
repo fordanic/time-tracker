@@ -606,7 +606,7 @@ how much completed work has been recorded today without leaving Track.
 
 ### Shared Review filters and range summaries
 
-**Status:** Approved
+**Status:** Implemented
 
 #### Purpose
 
