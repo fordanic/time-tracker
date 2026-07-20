@@ -1,4 +1,4 @@
-"""UTF-8 CSV output for completed entries and daily summaries."""
+"""UTF-8 CSV output for completed entries and Review summaries."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from time_tracker.application.exporting import ExportDestinationExistsError
-from time_tracker.application.reporting import DailySummary
+from time_tracker.application.reporting import DailySummary, RangeSummary
 from time_tracker.domain.models import CompletedTimer
 
 CSV_COLUMNS = (
@@ -19,6 +19,7 @@ CSV_COLUMNS = (
     "note",
 )
 DAILY_SUMMARY_COLUMNS = ("date", "project", "activity", "duration_seconds")
+RANGE_SUMMARY_COLUMNS = ("project", "activity", "duration_seconds")
 
 
 class CsvCompletedEntryWriter:
@@ -74,6 +75,36 @@ class CsvDailySummaryWriter:
                     writer.writerow(
                         (
                             summary.day.isoformat(),
+                            summary.project,
+                            summary.activity,
+                            _duration_seconds(summary.duration),
+                        )
+                    )
+        except FileExistsError as error:
+            raise ExportDestinationExistsError(
+                f"export destination already exists: {destination}"
+            ) from error
+
+
+class CsvRangeSummaryWriter:
+    """Write one row per selected project and activity."""
+
+    def write(
+        self,
+        destination: Path,
+        summaries: list[RangeSummary],
+        *,
+        overwrite: bool,
+    ) -> None:
+        """Write range totals without overwriting unless explicitly confirmed."""
+        mode = "w" if overwrite else "x"
+        try:
+            with destination.open(mode, encoding="utf-8", newline="") as output:
+                writer = csv.writer(output)
+                writer.writerow(RANGE_SUMMARY_COLUMNS)
+                for summary in summaries:
+                    writer.writerow(
+                        (
                             summary.project,
                             summary.activity,
                             _duration_seconds(summary.duration),

@@ -137,12 +137,16 @@ TimeEntry(id, activity_id, started_at_utc, stopped_at_utc?, note?, created_at)
 - Use a monotonic clock for in-process scheduling and persisted UTC instants for
   recovery.
 - CSV export is an agent application use case: it reads completed entries through
-  the repository port and writes either those entries or a local-day
-  project/activity projection through CSV output ports. The shared application
-  projection splits entries at local midnight and is also used by the TUI. The
-  TUI resolves the destination path, selects the matching export method, and sends
-  an explicit overwrite-confirmation flag over IPC; active entries are excluded
-  by the completed-entry query.
+  the repository port and writes filtered entries, local-day project/activity
+  summaries, or selected-range project/activity totals through CSV output ports.
+  One typed application filter model owns inclusive local-date, project, and
+  activity matching. Shared application projections split and clip entries at
+  local calendar boundaries and are used by both the TUI and export service. The
+  TUI resolves preset controls into that model, renders the returned projection,
+  and sends the same validated filter, selected representation, destination, and
+  explicit overwrite-confirmation flag over IPC. The agent reconstructs and
+  validates the filter before export; active entries are excluded by the
+  completed-entry query. No schema migration is required.
 
 SQLite and the background process remain authoritative even when notification
 delivery fails or the TUI disconnects.

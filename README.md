@@ -55,9 +55,14 @@ stop times, derived segment durations, notes, and a total after each day. Entrie
 crossing local midnight are divided into display segments while retaining one
 editable entry identity and full offset-aware timestamps in the editor. Track
 shows the current local day's completed total from the same projection and
-excludes a running timer until it is stopped. A toggle changes both the history
-view and CSV export to daily totals per project and activity. Both CSV formats
-require explicit overwrite confirmation. Projects and activities can be archived
+excludes a running timer until it is stopped. Review filters completed time by
+All time, Today, This week, This month, or an inclusive custom local date range,
+plus optional case-insensitive project and activity names. Archived historical
+targets remain filterable. Daily summaries and range totals by project/activity
+use the same filter as day-grouped detail and CSV export; an overnight entry is
+clipped to selected local dates, including across offset changes. All three CSV
+representations require explicit overwrite confirmation. Projects and activities
+can be archived
 from the TUI after a second explicit confirmation naming the canonical target and
 warning that a running timer continues. Archived names disappear from new-timer
 suggestions, remain intact in history, are listed in Manage, and can be restored
@@ -160,18 +165,27 @@ In Review (`F2`), completed time is grouped by local date with compact `HH:MM`
 times and a total after each day. An entry crossing midnight has one display
 segment in each affected day. Loading either segment for correction opens the
 single full entry with offset-aware timestamps; total rows are not editable. Use
-the Daily summaries toggle to switch the history table and export to local-day
-totals per project and activity. Enter a destination in the CSV export path field
-and press its button or `F7` to export the selected representation. Relative paths
-are resolved from the directory where the TUI was launched, and `~` expands to the
-current user's home directory. If the destination exists, the TUI requires a
-second export action before overwriting it.
+All time, Today, This week, This month, or Custom dates, then optionally enter a
+project and activity. Target matching is case-insensitive and accepts archived
+names that remain in history. Date boundaries are inclusive local dates. Use
+Daily summaries for local-day totals or Range totals for one total per
+project/activity pair; leave both off for completed-entry detail.
 
-To correct completed work, turn off Daily summaries, select its history row, and
-choose Load selected entry. Edit the project, activity, note, start, or stop and
-save the correction. Start and stop use ISO 8601 values with an explicit UTC
-offset, as prefilled by the application. The stop must be after the start, and the
-corrected interval cannot overlap another completed or running entry.
+Enter a destination in the CSV export path field and press its button or `F7` to
+export the visible representation and filter. A date-filtered detailed export
+clips start and stop at the selected local-date boundaries; daily and range
+summary exports contain the same selected durations. Relative paths are resolved
+from the directory where the TUI was launched, and `~` expands to the current
+user's home directory. If the destination exists, the TUI requires a second
+export action before overwriting it. An empty selection exports the appropriate
+header with no data rows.
+
+To correct completed work, turn off Daily summaries and Range totals, select its
+history row, and choose Load selected entry. Edit the project, activity, note,
+start, or stop and save the correction. Start and stop use ISO 8601 values with
+an explicit UTC offset, as prefilled by the application. The stop must be after
+the start, and the corrected interval cannot overlap another completed or running
+entry.
 
 To record forgotten work, choose Add missed entry in the same completed-entry
 mode. The editor starts with blank project, activity, and note fields and a

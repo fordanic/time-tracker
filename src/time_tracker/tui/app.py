@@ -20,6 +20,7 @@ from textual.widgets import (
     Header,
     Input,
     OptionList,
+    Select,
     Static,
     Switch,
     Tab,
@@ -29,7 +30,16 @@ from textual.widgets.option_list import Option
 
 from time_tracker.application.exporting import ExportDestinationExistsError
 from time_tracker.application.reminders import Reminder, ReminderKind
-from time_tracker.application.reporting import build_daily_review, build_daily_summaries
+from time_tracker.application.reporting import (
+    DatePreset,
+    ReviewFilter,
+    build_daily_review,
+    build_daily_summaries,
+    build_range_summaries,
+    review_filter_activities,
+    review_filter_for_preset,
+    review_filter_projects,
+)
 from time_tracker.application.tracking import (
     ArchivedActivity,
     RecentActivity,
@@ -146,7 +156,13 @@ class TrackerGateway(Protocol):
         """Restore one archived activity."""
         ...
 
-    def export_completed(self, destination: Path, *, overwrite: bool = False) -> int:
+    def export_completed(
+        self,
+        destination: Path,
+        *,
+        overwrite: bool = False,
+        review_filter: ReviewFilter | None = None,
+    ) -> int:
         """Export completed entries to a confirmed destination."""
         ...
 
@@ -155,8 +171,19 @@ class TrackerGateway(Protocol):
         destination: Path,
         *,
         overwrite: bool = False,
+        review_filter: ReviewFilter | None = None,
     ) -> int:
         """Export daily project/activity summaries to a confirmed destination."""
+        ...
+
+    def export_range_summaries(
+        self,
+        destination: Path,
+        *,
+        overwrite: bool = False,
+        review_filter: ReviewFilter | None = None,
+    ) -> int:
+        """Export selected-range project/activity totals."""
         ...
 
     def start(
@@ -340,20 +367,48 @@ class TimeTrackerApp(App[None]):
         width: 1fr;
     }
 
-    #summary-mode-label {
+    #review-filters, #custom-filter-dates {
+        height: auto;
+    }
+
+    #date-preset {
+        width: 22;
+        margin-right: 1;
+    }
+
+    #filter-project, #filter-activity,
+    #filter-start-date, #filter-end-date {
+        width: 1fr;
+    }
+
+    #filter-project, #filter-start-date {
+        margin-right: 1;
+    }
+
+    #custom-filter-dates {
+        display: none;
+    }
+
+    #active-filter, #history-empty {
+        height: 1;
+        color: $text-muted;
+    }
+
+    #summary-mode-label, #range-summary-mode-label {
         width: auto;
         height: 1;
         padding-right: 1;
     }
 
-    #summary-mode, #summary-mode:focus {
+    #summary-mode, #summary-mode:focus,
+    #range-summary-mode, #range-summary-mode:focus {
         width: auto;
         height: 1;
         padding: 0;
         border: none;
     }
 
-    #history-options {
+    #history-options, #representation-options {
         height: 3;
         align-horizontal: right;
     }
@@ -421,6 +476,8 @@ class TimeTrackerApp(App[None]):
         self._pending_export_path: Path | None = None
         self._completed_entries: list[CompletedTimer] = []
         self._history_row_entry_ids: list[int | None] = []
+        self._review_filter = ReviewFilter()
+        self._review_filter_valid = True
         self._today_total_day: date | None = None
         self._recent_activities: list[RecentActivity] = []
         self._archived_projects: list[str] = []
@@ -492,6 +549,40 @@ class TimeTrackerApp(App[None]):
                             id="export-path",
                         )
                         yield Button("Export CSV  F7", id="export-button")
+                    with Horizontal(id="review-filters"):
+                        yield Select(
+                            [
+                                ("All time", DatePreset.ALL_TIME.value),
+                                ("Today", DatePreset.TODAY.value),
+                                ("This week", DatePreset.THIS_WEEK.value),
+                                ("This month", DatePreset.THIS_MONTH.value),
+                                ("Custom", DatePreset.CUSTOM.value),
+                            ],
+                            value=DatePreset.ALL_TIME.value,
+                            allow_blank=False,
+                            id="date-preset",
+                        )
+                        yield Input(
+                            placeholder="Any project",
+                            id="filter-project",
+                        )
+                        yield Input(
+                            placeholder="Any activity",
+                            id="filter-activity",
+                        )
+                    with Horizontal(id="custom-filter-dates"):
+                        yield Input(
+                            placeholder="Start date (YYYY-MM-DD)",
+                            id="filter-start-date",
+                        )
+                        yield Input(
+                            placeholder="End date (YYYY-MM-DD)",
+                            id="filter-end-date",
+                        )
+                    yield Static(
+                        "All time · all projects · all activities",
+                        id="active-filter",
+                    )
                     with Horizontal(id="history-options"):
                         yield Button(
                             "Load selected entry",
@@ -501,9 +592,16 @@ class TimeTrackerApp(App[None]):
                             "Add missed entry",
                             id="add-manual-entry-button",
                         )
+                    with Horizontal(id="representation-options"):
                         yield Static("Daily summaries", id="summary-mode-label")
                         yield Switch(id="summary-mode")
+                        yield Static(
+                            "Range totals",
+                            id="range-summary-mode-label",
+                        )
+                        yield Switch(id="range-summary-mode")
                     yield Static("Completed entries", id="history-title")
+                    yield Static("No completed time matches.", id="history-empty")
                     yield DataTable(
                         id="history",
                         cursor_type="row",
@@ -514,20 +612,28 @@ class TimeTrackerApp(App[None]):
                         yield Input(
                             placeholder="Project",
                             id="correction-project",
+                            classes="correction-input",
                         )
                         yield Input(
                             placeholder="Activity",
                             id="correction-activity",
+                            classes="correction-input",
                         )
-                    yield Input(placeholder="Optional note", id="correction-note")
+                    yield Input(
+                        placeholder="Optional note",
+                        id="correction-note",
+                        classes="correction-input",
+                    )
                     with Horizontal(id="correction-times"):
                         yield Input(
                             placeholder="Start (ISO 8601 with UTC offset)",
                             id="correction-start",
+                            classes="correction-input",
                         )
                         yield Input(
                             placeholder="Stop (ISO 8601 with UTC offset)",
                             id="correction-stop",
+                            classes="correction-input",
                         )
                     with Horizontal(id="correction-actions"):
                         yield Button(
@@ -800,9 +906,46 @@ class TimeTrackerApp(App[None]):
         if self._pending_export_path is not None:
             self._clear_export_confirmation()
 
+    @on(Select.Changed, "#date-preset")
+    def handle_date_preset_changed(self) -> None:
+        """Apply one local calendar-date preset to all Review data."""
+        value = self.query_one("#date-preset", Select).value
+        custom = value == DatePreset.CUSTOM.value
+        self.query_one("#custom-filter-dates", Horizontal).display = custom
+        self._apply_review_filter()
+
+    @on(Input.Changed, "#filter-project")
+    def handle_filter_project_changed(self) -> None:
+        """Update historical activity choices and apply the target filter."""
+        self._set_review_filter_suggestions()
+        self._apply_review_filter()
+
+    @on(Input.Changed, "#filter-activity")
+    def handle_filter_activity_changed(self) -> None:
+        """Apply the historical activity filter."""
+        self._apply_review_filter()
+
+    @on(Input.Changed, "#filter-start-date")
+    @on(Input.Changed, "#filter-end-date")
+    def handle_custom_filter_date_changed(self) -> None:
+        """Validate and apply custom inclusive local dates."""
+        value = self.query_one("#date-preset", Select).value
+        if value == DatePreset.CUSTOM.value:
+            self._apply_review_filter()
+
     @on(Switch.Changed, "#summary-mode")
-    def handle_summary_mode_changed(self) -> None:
+    def handle_summary_mode_changed(self, event: Switch.Changed) -> None:
         """Render and export the representation selected by the user."""
+        if event.value:
+            self.query_one("#range-summary-mode", Switch).value = False
+        self._clear_export_confirmation()
+        self._render_history(self._completed_entries)
+
+    @on(Switch.Changed, "#range-summary-mode")
+    def handle_range_summary_mode_changed(self, event: Switch.Changed) -> None:
+        """Select aggregate project/activity totals for the current range."""
+        if event.value:
+            self.query_one("#summary-mode", Switch).value = False
         self._clear_export_confirmation()
         self._render_history(self._completed_entries)
 
@@ -1164,7 +1307,7 @@ class TimeTrackerApp(App[None]):
         self._render_history(completed, preferred_entry_id=preferred_entry_id)
 
     async def _load_selected_correction(self) -> None:
-        if self.query_one("#summary-mode", Switch).value:
+        if self._review_summary_mode():
             self._show_message(
                 "Switch to completed entries before correcting an entry.",
                 error=True,
@@ -1191,7 +1334,7 @@ class TimeTrackerApp(App[None]):
         self.query_one("#correction-project", Input).focus()
 
     async def _start_manual_entry(self) -> None:
-        if self.query_one("#summary-mode", Switch).value:
+        if self._review_summary_mode():
             self._show_message(
                 "Switch to completed entries before adding missed time.",
                 error=True,
@@ -1356,7 +1499,89 @@ class TimeTrackerApp(App[None]):
             )
             button.label = f"Switch from {current_name} to {selected_name}  F5"
 
+    def _apply_review_filter(self) -> None:
+        """Render the last valid shared filter and reject invalid custom input."""
+        was_invalid = not self._review_filter_valid
+        try:
+            selected_filter = self._review_filter_from_controls()
+        except ValueError as error:
+            self._review_filter_valid = False
+            self._clear_export_confirmation()
+            self._show_message(str(error), error=True)
+            return
+        self._review_filter = selected_filter
+        self._review_filter_valid = True
+        self._clear_export_confirmation()
+        self._render_history(self._completed_entries)
+        if was_invalid:
+            self._show_message("Review filter applied.")
+
+    def _review_filter_from_controls(self) -> ReviewFilter:
+        value = self.query_one("#date-preset", Select).value
+        if not isinstance(value, str):
+            raise ValueError("Select a Review date preset.")
+        preset = DatePreset(value)
+        custom_start = custom_end = None
+        if preset is DatePreset.CUSTOM:
+            custom_start = _parse_filter_date(
+                self.query_one("#filter-start-date", Input).value,
+                "start",
+            )
+            custom_end = _parse_filter_date(
+                self.query_one("#filter-end-date", Input).value,
+                "end",
+            )
+        return review_filter_for_preset(
+            preset,
+            today=datetime.now().astimezone().date(),
+            custom_start=custom_start,
+            custom_end=custom_end,
+            project=self.query_one("#filter-project", Input).value,
+            activity=self.query_one("#filter-activity", Input).value,
+        )
+
+    def _set_review_filter_suggestions(self) -> None:
+        project_input = self.query_one("#filter-project", Input)
+        activity_input = self.query_one("#filter-activity", Input)
+        project_input.suggester = SuggestFromList(
+            review_filter_projects(self._completed_entries),
+            case_sensitive=False,
+        )
+        activity_input.suggester = SuggestFromList(
+            review_filter_activities(
+                self._completed_entries,
+                project_input.value,
+            ),
+            case_sensitive=False,
+        )
+
+    def _review_summary_mode(self) -> bool:
+        return (
+            self.query_one("#summary-mode", Switch).value
+            or self.query_one("#range-summary-mode", Switch).value
+        )
+
+    @staticmethod
+    def _describe_review_filter(review_filter: ReviewFilter) -> str:
+        start_date = review_filter.start_date
+        end_date = review_filter.end_date
+        if start_date is None or end_date is None:
+            dates = "All time"
+        elif start_date == end_date:
+            dates = start_date.isoformat()
+        else:
+            dates = f"{start_date.isoformat()} through {end_date.isoformat()}"
+        project = review_filter.project or "all projects"
+        activity = review_filter.activity or "all activities"
+        return f"{dates} · {project} · {activity}"
+
     async def _export_current_view(self) -> None:
+        if not self._review_filter_valid:
+            self._show_message(
+                "Fix the Review filter before exporting.",
+                error=True,
+            )
+            return
         raw_destination = self.query_one("#export-path", Input).value.strip()
         if not raw_destination:
             self._show_message("CSV export path is required.", error=True)
@@ -1364,16 +1589,19 @@ class TimeTrackerApp(App[None]):
         destination = Path(raw_destination).expanduser().resolve()
         overwrite = self._pending_export_path == destination
         summary_mode = self.query_one("#summary-mode", Switch).value
-        export = (
-            self.client.export_daily_summaries
-            if summary_mode
-            else self.client.export_completed
-        )
+        range_mode = self.query_one("#range-summary-mode", Switch).value
+        if range_mode:
+            export = self.client.export_range_summaries
+        elif summary_mode:
+            export = self.client.export_daily_summaries
+        else:
+            export = self.client.export_completed
         try:
             row_count = await asyncio.to_thread(
                 export,
                 destination,
                 overwrite=overwrite,
+                review_filter=self._review_filter,
             )
         except ExportDestinationExistsError:
             self._pending_export_path = destination
@@ -1391,7 +1619,9 @@ class TimeTrackerApp(App[None]):
             return
 
         self._clear_export_confirmation()
-        if summary_mode:
+        if range_mode:
+            noun = "range total" if row_count == 1 else "range totals"
+        elif summary_mode:
             noun = "daily summary" if row_count == 1 else "daily summaries"
         else:
             noun = "entry" if row_count == 1 else "entries"
@@ -1411,34 +1641,62 @@ class TimeTrackerApp(App[None]):
     ) -> None:
         self._completed_entries = entries
         self._render_today_total(entries)
+        self._set_review_filter_suggestions()
         table = self.query_one("#history", DataTable)
         table.clear(columns=True)
         self._history_row_entry_ids = []
         summary_mode = self.query_one("#summary-mode", Switch).value
+        range_mode = self.query_one("#range-summary-mode", Switch).value
+        summaries = build_daily_summaries(entries, review_filter=self._review_filter)
+        range_summaries = build_range_summaries(
+            entries,
+            review_filter=self._review_filter,
+        )
+        groups = build_daily_review(entries, review_filter=self._review_filter)
+        has_entries = any(group.segments for group in groups)
+        has_rows = bool(
+            range_summaries if range_mode else summaries if summary_mode else groups
+        )
+        self.query_one("#history-empty", Static).display = not has_rows
+        self.query_one("#active-filter", Static).update(
+            self._describe_review_filter(self._review_filter)
+        )
         title = self.query_one("#history-title", Static)
         load_button = self.query_one("#load-correction-button", Button)
         manual_button = self.query_one("#add-manual-entry-button", Button)
         save_button = self.query_one("#save-correction-button", Button)
-        correction_inputs = self.query("#review-view Input").exclude("#export-path")
+        correction_inputs = self.query(".correction-input")
+        correction_disabled = summary_mode or range_mode
         for correction_input in correction_inputs:
-            correction_input.disabled = summary_mode
-        load_button.disabled = summary_mode or not entries
-        manual_button.disabled = summary_mode
-        save_button.disabled = summary_mode or (
+            correction_input.disabled = correction_disabled
+        load_button.disabled = correction_disabled or not has_entries
+        manual_button.disabled = correction_disabled
+        save_button.disabled = correction_disabled or (
             self._editing_entry_id is None and not self._creating_manual_entry
         )
+        if range_mode:
+            title.update("Project/activity totals for selected range")
+            table.add_columns("Project", "Activity", "Duration")
+            for range_summary in range_summaries:
+                table.add_row(
+                    range_summary.project,
+                    range_summary.activity,
+                    _format_duration(range_summary.duration),
+                    key=f"{range_summary.project}\0{range_summary.activity}",
+                )
+            return
         if summary_mode:
             title.update("Daily summaries")
             table.add_columns("Date", "Project", "Activity", "Duration")
-            for summary in build_daily_summaries(entries):
+            for daily_summary in summaries:
                 table.add_row(
-                    summary.day.isoformat(),
-                    summary.project,
-                    summary.activity,
-                    _format_duration(summary.duration),
+                    daily_summary.day.isoformat(),
+                    daily_summary.project,
+                    daily_summary.activity,
+                    _format_duration(daily_summary.duration),
                     key=(
-                        f"{summary.day.isoformat()}\0{summary.project}\0"
-                        f"{summary.activity}"
+                        f"{daily_summary.day.isoformat()}\0"
+                        f"{daily_summary.project}\0{daily_summary.activity}"
                     ),
                 )
             return
@@ -1453,7 +1711,7 @@ class TimeTrackerApp(App[None]):
             "Duration",
             "Note",
         )
-        for group_index, group in enumerate(build_daily_review(entries)):
+        for group_index, group in enumerate(groups):
             for segment_index, segment in enumerate(group.segments):
                 table.add_row(
                     group.day.isoformat() if segment_index == 0 else "",
@@ -1553,8 +1811,16 @@ class TimeTrackerApp(App[None]):
         edit_buttons = self.query("#edit-active-button")
         if not active_widgets or not stop_buttons or not edit_buttons:
             return
-        if self._today_total_day != datetime.now().astimezone().date():
+        current_day = datetime.now().astimezone().date()
+        if self._today_total_day != current_day:
             self._render_today_total(self._completed_entries)
+            preset = self.query_one("#date-preset", Select).value
+            if preset in {
+                DatePreset.TODAY.value,
+                DatePreset.THIS_WEEK.value,
+                DatePreset.THIS_MONTH.value,
+            }:
+                self._apply_review_filter()
         active_widget = active_widgets.first(Static)
         stop_button = stop_buttons.first(Button)
         edit_button = edit_buttons.first(Button)
@@ -1623,3 +1889,13 @@ def _parse_offset_datetime(value: str, label: str) -> datetime:
     if parsed.tzinfo is None:
         raise ValueError(f"{label} must include a UTC offset")
     return parsed
+
+
+def _parse_filter_date(value: str, label: str) -> date:
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError(f"Custom {label} date is required.")
+    try:
+        return date.fromisoformat(normalized)
+    except ValueError as error:
+        raise ValueError(f"Custom {label} date must use YYYY-MM-DD format.") from error

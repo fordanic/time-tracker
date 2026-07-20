@@ -15,6 +15,7 @@ from typing import cast
 
 from time_tracker.application.exporting import ExportDestinationExistsError
 from time_tracker.application.reminders import Reminder, ReminderKind
+from time_tracker.application.reporting import ReviewFilter
 from time_tracker.application.tracking import (
     ArchivedActivity,
     RecentActivity,
@@ -234,12 +235,22 @@ class AgentClient:
             _object_str(result.get("activity")),
         )
 
-    def export_completed(self, destination: Path, *, overwrite: bool = False) -> int:
+    def export_completed(
+        self,
+        destination: Path,
+        *,
+        overwrite: bool = False,
+        review_filter: ReviewFilter | None = None,
+    ) -> int:
         """Export completed entries without silently replacing a file."""
         try:
             result = self._request(
                 "export_completed",
-                {"destination": str(destination), "overwrite": overwrite},
+                {
+                    "destination": str(destination),
+                    "overwrite": overwrite,
+                    **_review_filter_params(review_filter),
+                },
             )
         except AgentRequestError as error:
             if error.code == "destination_exists":
@@ -253,12 +264,41 @@ class AgentClient:
         destination: Path,
         *,
         overwrite: bool = False,
+        review_filter: ReviewFilter | None = None,
     ) -> int:
         """Export daily project/activity summaries without silent replacement."""
         try:
             result = self._request(
                 "export_daily_summaries",
-                {"destination": str(destination), "overwrite": overwrite},
+                {
+                    "destination": str(destination),
+                    "overwrite": overwrite,
+                    **_review_filter_params(review_filter),
+                },
+            )
+        except AgentRequestError as error:
+            if error.code == "destination_exists":
+                raise ExportDestinationExistsError(str(error)) from error
+            raise
+        data = _object_dict(result)
+        return _object_int(data.get("summary_count"))
+
+    def export_range_summaries(
+        self,
+        destination: Path,
+        *,
+        overwrite: bool = False,
+        review_filter: ReviewFilter | None = None,
+    ) -> int:
+        """Export selected-range project/activity totals."""
+        try:
+            result = self._request(
+                "export_range_summaries",
+                {
+                    "destination": str(destination),
+                    "overwrite": overwrite,
+                    **_review_filter_params(review_filter),
+                },
             )
         except AgentRequestError as error:
             if error.code == "destination_exists":
@@ -447,6 +487,20 @@ def _completed_from_object(value: object) -> CompletedTimer:
         stopped_at=datetime.fromisoformat(_object_str(data.get("stopped_at"))),
         note=_optional_str(data.get("note")),
     )
+
+
+def _review_filter_params(review_filter: ReviewFilter | None) -> dict[str, object]:
+    selected = review_filter or ReviewFilter()
+    return {
+        "filter_start_date": (
+            selected.start_date.isoformat() if selected.start_date is not None else None
+        ),
+        "filter_end_date": (
+            selected.end_date.isoformat() if selected.end_date is not None else None
+        ),
+        "filter_project": selected.project,
+        "filter_activity": selected.activity,
+    }
 
 
 def _recent_activity_from_object(value: object) -> RecentActivity:

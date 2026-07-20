@@ -107,6 +107,10 @@ internet connection. The current product interface is a TUI.
   project/activity pair using the same naming and reuse rules as timer start.
 - Provide local daily totals per project and activity.
 - Split entries crossing local midnight across the corresponding daily totals.
+- Filter completed history and summaries by inclusive local calendar-date range,
+  project, and activity, and provide project/activity totals across the selected
+  range. Apply one filter selection consistently to on-screen detail, summaries,
+  and export.
 - Preserve historical entries and their names when a project or activity is
   archived.
 
@@ -154,6 +158,18 @@ internet connection. The current product interface is a TUI.
 
 - Order daily summaries by date, project, and activity. Apply the same UTF-8 CSV,
   standard quoting, overwrite-confirmation, and active-entry exclusion rules.
+- Export project/activity totals across the selected filter using these columns:
+
+  ```text
+  project,activity,duration_seconds
+  ```
+
+- A date-filtered completed-entry export clips entries at the selected local-date
+  boundaries so exported timestamps and derived durations represent only the
+  selected time. Filtered daily and range summaries use the same selected time.
+- Order range totals by project and activity. Apply the same UTF-8 CSV, standard
+  quoting, overwrite-confirmation, and active-entry exclusion rules. An empty
+  filtered export contains the applicable header and no data rows.
 
 ## Quality requirements
 
@@ -184,7 +200,9 @@ Automated tests and platform validation must demonstrate that:
 6. Two active entries cannot be created.
 7. CSV export preserves timestamps, Unicode, and notes containing commas, quotes,
    and newlines; daily summary export aggregates by project and activity and
-   divides entries at local midnight.
+   divides entries at local midnight. Shared date/project/activity filters produce
+   matching detailed, daily, and range-total exports, including local-boundary
+   clipping and header-only empty results.
 8. Missing configuration uses defaults; invalid configuration is reported without
    destroying the file.
 
@@ -216,7 +234,6 @@ feature changes a top-level requirement.
 - Minimum supported OS versions and CPU architectures.
 - Behavior during computer sleep, system-clock changes, and time-zone changes.
 - Whether the background process starts at login.
-- Date/project/activity filters, range summaries, and their effect on CSV export.
 - Reminder windows, snooze persistence, and live configuration reload.
 - Whether favorites, defaults, or local prompt-only idle detection are needed
   after the planned usability work.

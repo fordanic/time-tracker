@@ -7,7 +7,7 @@ import json
 import logging
 import sqlite3
 from dataclasses import asdict
-from datetime import datetime
+from datetime import date, datetime
 from multiprocessing import AuthenticationError
 from multiprocessing.connection import Listener
 from pathlib import Path
@@ -19,12 +19,14 @@ from time_tracker.application.exporting import (
     ExportService,
 )
 from time_tracker.application.reminders import Reminder, ReminderIntervals, ReminderKind
+from time_tracker.application.reporting import ReviewFilter
 from time_tracker.application.tracking import TrackingService
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
 from time_tracker.infrastructure.configuration import load_config
 from time_tracker.infrastructure.csv_export import (
     CsvCompletedEntryWriter,
     CsvDailySummaryWriter,
+    CsvRangeSummaryWriter,
 )
 from time_tracker.infrastructure.instance_lock import instance_lock
 from time_tracker.infrastructure.ipc import PROTOCOL_VERSION
@@ -75,6 +77,7 @@ def _serve_locked(
         repository,
         CsvCompletedEntryWriter(),
         CsvDailySummaryWriter(),
+        range_writer=CsvRangeSummaryWriter(),
     )
     notification_service = notifier or NativeNotificationService()
     listener = Listener(
@@ -283,6 +286,7 @@ def _handle_request(
                 "entry_count": export_service.export_completed(
                     Path(_required_str(params, "destination")),
                     overwrite=_required_bool(params, "overwrite"),
+                    review_filter=_review_filter_from_params(params),
                 )
             }
         elif method == "export_daily_summaries":
@@ -290,6 +294,15 @@ def _handle_request(
                 "summary_count": export_service.export_daily_summaries(
                     Path(_required_str(params, "destination")),
                     overwrite=_required_bool(params, "overwrite"),
+                    review_filter=_review_filter_from_params(params),
+                )
+            }
+        elif method == "export_range_summaries":
+            result = {
+                "summary_count": export_service.export_range_summaries(
+                    Path(_required_str(params, "destination")),
+                    overwrite=_required_bool(params, "overwrite"),
+                    review_filter=_review_filter_from_params(params),
                 )
             }
         elif method == "start":
@@ -412,3 +425,21 @@ def _required_datetime(params: dict[str, object], name: str) -> datetime:
     if parsed.tzinfo is None:
         raise ValueError(f"{name} must include a UTC offset")
     return parsed
+
+
+def _review_filter_from_params(params: dict[str, object]) -> ReviewFilter:
+    start_value = _optional_str(params, "filter_start_date")
+    end_value = _optional_str(params, "filter_end_date")
+    try:
+        start_date = (
+            date.fromisoformat(start_value) if start_value is not None else None
+        )
+        end_date = date.fromisoformat(end_value) if end_value is not None else None
+    except ValueError as error:
+        raise ValueError("filter dates must use ISO 8601 YYYY-MM-DD format") from error
+    return ReviewFilter(
+        start_date=start_date,
+        end_date=end_date,
+        project=_optional_str(params, "filter_project"),
+        activity=_optional_str(params, "filter_activity"),
+    )
