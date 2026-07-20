@@ -122,9 +122,14 @@ TimeEntry(id, activity_id, started_at_utc, stopped_at_utc?, note?, created_at)
   a selectable target, applies the same half-open overlap check as correction, and
   inserts the closed entry only after every check passes. The active timer is
   read for overlap validation but is never mutated.
-- Archive projects and activities through agent-owned application use cases.
-  Selection queries exclude archived rows, while archived names remain reserved;
-  an archive transition does not mutate the active timer or historical entries.
+- Resolve archive confirmation targets and archive or restore projects and
+  activities through agent-owned application use cases exposed over the versioned
+  protocol. Selection queries exclude archived rows, while archived-list queries
+  retain canonical hierarchy context and archived names remain reserved. Each
+  transition updates only the target archive flag in one SQLite transaction and
+  does not mutate the active timer or historical entries. Project transitions do
+  not rewrite child activity flags, and activity restore rejects an archived
+  parent project.
 - Enforce at most one entry with no stop time using a partial unique index.
 - Store UTC instants as integer microseconds since the Unix epoch. Convert them to
   local, offset-aware ISO 8601 values at presentation and export boundaries.

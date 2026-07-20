@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from importlib import resources
 from pathlib import Path
 
+from time_tracker.application.tracking import ArchivedActivity
 from time_tracker.domain.models import ActiveTimer, CompletedTimer, require_utc
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
@@ -134,6 +135,101 @@ class SQLiteTimerRepository:
             ).fetchall()
         return [self._completed_from_row(row) for row in rows]
 
+    def resolve_project_to_archive(self, project: str) -> str:
+        """Validate a project archive target without changing it."""
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT name, archived_at_utc
+                FROM projects
+                WHERE name = ? COLLATE NOCASE
+                ORDER BY id
+                LIMIT 1
+                """,
+                (project,),
+            ).fetchone()
+        if row is None:
+            raise ValueError(f"unknown project: {project}")
+        canonical_project = str(row["name"])
+        if row["archived_at_utc"] is not None:
+            raise ValueError(f"project is already archived: {canonical_project}")
+        return canonical_project
+
+    def resolve_activity_to_archive(
+        self,
+        project: str,
+        activity: str,
+    ) -> tuple[str, str]:
+        """Validate an activity archive target without changing it."""
+        with self._connect() as connection:
+            project_row = connection.execute(
+                """
+                SELECT id, name, archived_at_utc
+                FROM projects
+                WHERE name = ? COLLATE NOCASE
+                ORDER BY id
+                LIMIT 1
+                """,
+                (project,),
+            ).fetchone()
+            if project_row is None:
+                raise ValueError(f"unknown project: {project}")
+            canonical_project = str(project_row["name"])
+            if project_row["archived_at_utc"] is not None:
+                raise ValueError(f"project is archived: {canonical_project}")
+            activity_row = connection.execute(
+                """
+                SELECT name, archived_at_utc
+                FROM activities
+                WHERE project_id = ? AND name = ? COLLATE NOCASE
+                ORDER BY id
+                LIMIT 1
+                """,
+                (int(project_row["id"]), activity),
+            ).fetchone()
+        if activity_row is None:
+            raise ValueError(f"unknown activity: {activity}")
+        canonical_activity = str(activity_row["name"])
+        if activity_row["archived_at_utc"] is not None:
+            raise ValueError(f"activity is already archived: {canonical_activity}")
+        return canonical_project, canonical_activity
+
+    def list_archived_projects(self) -> list[str]:
+        """List archived projects using canonical names."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT name
+                FROM projects
+                WHERE archived_at_utc IS NOT NULL
+                ORDER BY name COLLATE NOCASE, id
+                """
+            ).fetchall()
+        return [str(row["name"]) for row in rows]
+
+    def list_archived_activities(self) -> list[ArchivedActivity]:
+        """List archived activities and whether their parent is archived."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT p.name AS project, a.name AS activity,
+                       p.archived_at_utc AS project_archived_at_utc
+                FROM activities AS a
+                JOIN projects AS p ON p.id = a.project_id
+                WHERE a.archived_at_utc IS NOT NULL
+                ORDER BY p.name COLLATE NOCASE, p.id,
+                         a.name COLLATE NOCASE, a.id
+                """
+            ).fetchall()
+        return [
+            ArchivedActivity(
+                project=str(row["project"]),
+                activity=str(row["activity"]),
+                project_archived=row["project_archived_at_utc"] is not None,
+            )
+            for row in rows
+        ]
+
     def archive_project(self, project: str, archived_at: datetime) -> str:
         """Archive a project without changing its activities or history."""
         archived_micros = datetime_to_micros(archived_at)
@@ -172,7 +268,7 @@ class SQLiteTimerRepository:
             connection.execute("BEGIN IMMEDIATE")
             project_row = connection.execute(
                 """
-                SELECT id, name
+                SELECT id, name, archived_at_utc
                 FROM projects
                 WHERE name = ? COLLATE NOCASE
                 ORDER BY id
@@ -182,6 +278,8 @@ class SQLiteTimerRepository:
             ).fetchone()
             if project_row is None:
                 raise ValueError(f"unknown project: {project}")
+            if project_row["archived_at_utc"] is not None:
+                raise ValueError(f"project is archived: {project_row['name']}")
             activity_row = connection.execute(
                 """
                 SELECT id, name, archived_at_utc
@@ -202,6 +300,73 @@ class SQLiteTimerRepository:
                 (archived_micros, int(activity_row["id"])),
             )
         return str(project_row["name"]), canonical_activity
+
+    def unarchive_project(self, project: str) -> str:
+        """Restore a project without changing child activity flags."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT id, name, archived_at_utc
+                FROM projects
+                WHERE name = ? COLLATE NOCASE
+                ORDER BY id
+                LIMIT 1
+                """,
+                (project,),
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"unknown project: {project}")
+            canonical_project = str(row["name"])
+            if row["archived_at_utc"] is None:
+                raise ValueError(f"project is not archived: {canonical_project}")
+            connection.execute(
+                "UPDATE projects SET archived_at_utc = NULL WHERE id = ?",
+                (int(row["id"]),),
+            )
+        return canonical_project
+
+    def unarchive_activity(self, project: str, activity: str) -> tuple[str, str]:
+        """Restore an activity only when its parent project is selectable."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            project_row = connection.execute(
+                """
+                SELECT id, name, archived_at_utc
+                FROM projects
+                WHERE name = ? COLLATE NOCASE
+                ORDER BY id
+                LIMIT 1
+                """,
+                (project,),
+            ).fetchone()
+            if project_row is None:
+                raise ValueError(f"unknown project: {project}")
+            canonical_project = str(project_row["name"])
+            if project_row["archived_at_utc"] is not None:
+                raise ValueError(
+                    f"restore project first: {canonical_project} is archived"
+                )
+            activity_row = connection.execute(
+                """
+                SELECT id, name, archived_at_utc
+                FROM activities
+                WHERE project_id = ? AND name = ? COLLATE NOCASE
+                ORDER BY id
+                LIMIT 1
+                """,
+                (int(project_row["id"]), activity),
+            ).fetchone()
+            if activity_row is None:
+                raise ValueError(f"unknown activity: {activity}")
+            canonical_activity = str(activity_row["name"])
+            if activity_row["archived_at_utc"] is None:
+                raise ValueError(f"activity is not archived: {canonical_activity}")
+            connection.execute(
+                "UPDATE activities SET archived_at_utc = NULL WHERE id = ?",
+                (int(activity_row["id"]),),
+            )
+        return canonical_project, canonical_activity
 
     def start(
         self,

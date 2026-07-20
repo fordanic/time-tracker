@@ -242,12 +242,38 @@ def _handle_request(
                 _required_str(params, "activity"),
                 _optional_str(params, "note"),
             ).value
+        elif method == "get_archive_project_target":
+            result = {
+                "project": service.get_archive_project_target(
+                    _required_str(params, "project")
+                )
+            }
+        elif method == "get_archive_activity_target":
+            project, activity = service.get_archive_activity_target(
+                _required_str(params, "project"),
+                _required_str(params, "activity"),
+            )
+            result = {"project": project, "activity": activity}
+        elif method == "list_archived_projects":
+            result = service.list_archived_projects()
+        elif method == "list_archived_activities":
+            result = [asdict(item) for item in service.list_archived_activities()]
         elif method == "archive_project":
             result = {
                 "project": service.archive_project(_required_str(params, "project"))
             }
         elif method == "archive_activity":
             project, activity = service.archive_activity(
+                _required_str(params, "project"),
+                _required_str(params, "activity"),
+            )
+            result = {"project": project, "activity": activity}
+        elif method == "unarchive_project":
+            result = {
+                "project": service.unarchive_project(_required_str(params, "project"))
+            }
+        elif method == "unarchive_activity":
+            project, activity = service.unarchive_activity(
                 _required_str(params, "project"),
                 _required_str(params, "activity"),
             )

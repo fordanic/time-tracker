@@ -7,6 +7,7 @@ import pytest
 
 from time_tracker.application.tracking import (
     AlreadyTrackingError,
+    ArchivedActivity,
     RecentActivity,
     StartAction,
     TimerRepository,
@@ -147,6 +148,45 @@ class RecordingClock:
         return self.instant
 
 
+class ArchiveRepository:
+    def __init__(self) -> None:
+        self.archived_projects = ["Archived"]
+        self.archived_activities = [
+            ArchivedActivity("Archived", "Hidden", project_archived=True)
+        ]
+        self.project_resolutions: list[str] = []
+        self.activity_resolutions: list[tuple[str, str]] = []
+        self.project_archives: list[tuple[str, datetime]] = []
+
+    def resolve_project_to_archive(self, project: str) -> str:
+        self.project_resolutions.append(project)
+        return "Website"
+
+    def resolve_activity_to_archive(
+        self,
+        project: str,
+        activity: str,
+    ) -> tuple[str, str]:
+        self.activity_resolutions.append((project, activity))
+        return "Website", "Planning"
+
+    def list_archived_projects(self) -> list[str]:
+        return self.archived_projects
+
+    def list_archived_activities(self) -> list[ArchivedActivity]:
+        return self.archived_activities
+
+    def archive_project(self, project: str, archived_at: datetime) -> str:
+        self.project_archives.append((project, archived_at))
+        return "Website"
+
+    def unarchive_project(self, project: str) -> str:
+        return project
+
+    def unarchive_activity(self, project: str, activity: str) -> tuple[str, str]:
+        return project, activity
+
+
 def test_recent_activities_are_unique_selectable_and_limited() -> None:
     started_at = datetime(2026, 7, 20, 8, tzinfo=UTC)
     completed = [
@@ -173,6 +213,31 @@ def test_recent_activities_are_unique_selectable_and_limited() -> None:
         RecentActivity("Work", "Review"),
         RecentActivity("Work", "Research"),
     ]
+
+
+def test_archive_target_preview_and_listing_do_not_capture_a_write_time() -> None:
+    instant = datetime(2026, 7, 20, 8, tzinfo=UTC)
+    repository = ArchiveRepository()
+    clock = RecordingClock(instant)
+    service = TrackingService(cast(TimerRepository, repository), clock)
+
+    assert service.get_archive_project_target(" website ") == "Website"
+    assert service.get_archive_activity_target(" website ", " planning ") == (
+        "Website",
+        "Planning",
+    )
+    assert service.list_archived_projects() == ["Archived"]
+    assert service.list_archived_activities() == [
+        ArchivedActivity("Archived", "Hidden", project_archived=True)
+    ]
+    assert repository.project_resolutions == ["website"]
+    assert repository.activity_resolutions == [("website", "planning")]
+    assert repository.project_archives == []
+    assert clock.calls == 0
+
+    assert service.archive_project(" website ") == "Website"
+    assert repository.project_archives == [("website", instant)]
+    assert clock.calls == 1
 
 
 def test_recent_activity_limit_is_validated() -> None:

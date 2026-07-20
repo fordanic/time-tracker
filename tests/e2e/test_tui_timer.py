@@ -46,6 +46,15 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
     try:
         first_app = TimeTrackerApp(client)
         async with first_app.run_test() as pilot:
+            assert (
+                first_app.query_one("#archived-projects", OptionList).option_count == 0
+            )
+            assert first_app.query_one("#archived-projects-empty", Static).display
+            assert (
+                first_app.query_one("#archived-activities", OptionList).option_count
+                == 0
+            )
+            assert first_app.query_one("#archived-activities-empty", Static).display
             project_input = first_app.query_one("#project", Input)
             first_app.set_focus(project_input)
             await pilot.press("tab")
@@ -160,9 +169,25 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
             await pilot.click("#archive-activity-button")
             await pilot.pause()
 
+            assert (
+                recovered_app.query_one("#manage-activity", Input).value
+                == "Implementation"
+            )
+            assert "Any active timer will continue" in str(
+                recovered_app.query_one("#message", Static).render()
+            )
+            assert client.list_activities("Website") == ["Implementation"]
+
+            await pilot.press("f9")
+            await pilot.pause()
+
             assert recovered_app.query_one("#manage-activity", Input).value == ""
             assert "Archived activity Website / Implementation" in str(
                 recovered_app.query_one("#message", Static).render()
+            )
+            assert (
+                recovered_app.query_one("#archived-activities", OptionList).option_count
+                == 1
             )
             await pilot.press("f1")
             await pilot.press("f5")
@@ -181,13 +206,103 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
             await pilot.press("f8")
             await pilot.pause()
 
+            assert recovered_app.query_one("#manage-project", Input).value == "Website"
+            assert client.list_projects() == ["Website"]
+            recovered_app.query_one("#manage-project", Input).value = "website"
+            await pilot.pause()
+            await pilot.press("f8")
+            await pilot.pause()
+
+            assert client.list_projects() == ["Website"]
+            assert "Press Archive project again" in str(
+                recovered_app.query_one("#message", Static).render()
+            )
+            await pilot.press("f8")
+            await pilot.pause()
+
             assert recovered_app.query_one("#manage-project", Input).value == ""
             assert "Archived project Website" in str(
                 recovered_app.query_one("#message", Static).render()
             )
             assert client.list_projects() == []
+            assert "restore project first" in str(
+                recovered_app.query_one("#archived-activities", OptionList)
+                .get_option_at_index(0)
+                .prompt
+            )
+
+            await pilot.press("f3")
+            restore_activity = recovered_app.query_one(
+                "#restore-activity-button", Button
+            )
+            restore_activity.focus()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert "restore project first" in str(
+                recovered_app.query_one("#message", Static).render()
+            )
+
+            restore_project = recovered_app.query_one("#restore-project-button", Button)
+            restore_project.focus()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert "Restored project Website" in str(
+                recovered_app.query_one("#message", Static).render()
+            )
+            assert client.list_projects() == ["Website"]
+            assert client.list_activities("Website") == []
+
+            restore_activity.focus()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert "Restored activity Website / Implementation" in str(
+                recovered_app.query_one("#message", Static).render()
+            )
+            assert client.list_activities("Website") == ["Implementation"]
 
         assert SQLiteTimerRepository(paths.database).get_active() is None
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+
+
+@pytest.mark.asyncio
+async def test_rejected_second_archive_invocation_clears_confirmation(
+    tmp_path: Path,
+) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    thread = threading.Thread(target=serve, args=(paths,), daemon=True)
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        client.start("Website", "Planning")
+        client.stop()
+        app = TimeTrackerApp(client)
+        async with app.run_test() as pilot:
+            await pilot.press("f3")
+            app.query_one("#manage-project", Input).value = "Website"
+            app.query_one("#manage-activity", Input).value = "Planning"
+            await pilot.pause()
+
+            await pilot.press("f9")
+            await pilot.pause()
+            assert app._pending_archive_activity is not None
+
+            client.archive_activity("Website", "Planning")
+            await pilot.press("f9")
+            await pilot.pause()
+
+            assert app._pending_archive_activity is None
+            assert "activity is already archived: Planning" in str(
+                app.query_one("#message", Static).render()
+            )
+            assert str(app.query_one("#archive-activity-button", Button).label) == (
+                "Archive activity  F9"
+            )
     finally:
         client.shutdown()
         thread.join(timeout=2)
@@ -288,6 +403,13 @@ async def test_user_tracks_again_from_recent_activities(tmp_path: Path) -> None:
             await pilot.press("f3")
             app.query_one("#manage-project", Input).value = "Website"
             app.query_one("#manage-activity", Input).value = "Implementation"
+            await pilot.press("f9")
+            await pilot.pause()
+
+            assert [pair.activity for pair in app._recent_activities] == [
+                "Implementation",
+                "Planning",
+            ]
             await pilot.press("f9")
             await pilot.pause()
 

@@ -54,8 +54,12 @@ completed entries chronologically with their local start and stop times, derived
 duration, and note. A toggle changes both the history view and CSV export to daily
 totals per project and activity; entries crossing local midnight are divided
 between their corresponding days. Both CSV formats require explicit overwrite
-confirmation. Projects and activities can be archived from the TUI;
-archived names disappear from new-timer suggestions and remain intact in history.
+confirmation. Projects and activities can be archived from the TUI after a second
+explicit confirmation naming the canonical target and warning that a running
+timer continues. Archived names disappear from new-timer suggestions, remain
+intact in history, are listed in Manage, and can be restored there. Restoring a
+project preserves each activity's independent archive state, and an activity can
+be restored only after its parent project.
 The Track workflow shows up to five unique recently completed project/activity
 pairs, newest first; selecting one prepares it for another timer without copying
 its historical note. Archived targets are excluded from this recent-work list.
@@ -175,11 +179,16 @@ so a new note can be entered before starting with F5; the selection alone does n
 change the running timer.
 
 In Manage (`F3`), enter an existing project or project/activity pair and use its
-archive button or `F8`/`F9`. Archiving leaves any running timer active, removes
-the name from future timer suggestions, and preserves completed history. Archived
-names cannot be reused. The archive buttons remain pointer-accessible but are
-omitted from keyboard tab navigation; their function-key shortcuts remain
-available from every view and use the Manage inputs.
+archive button or `F8`/`F9`. The first action validates and names the exact target;
+invoke it again without editing the inputs to confirm. Archiving leaves any
+running timer active, removes the name from future timer suggestions, and
+preserves completed history. Archived names cannot be reused. Select an item in
+the archived project or activity lists and use its Restore button to make it
+selectable again. Restore a parent project before restoring one of its archived
+activities; restoring the project alone does not restore independently archived
+activities. The archive buttons remain pointer-accessible but are omitted from
+keyboard tab navigation; their function-key shortcuts remain available from
+every view and use the Manage inputs.
 
 When a reminder becomes due while the TUI is connected, it appears below the
 active timer. For an active timer, press its button or `F10` to confirm that it is

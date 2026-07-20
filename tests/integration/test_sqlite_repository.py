@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from time_tracker.application.tracking import ArchivedActivity
 from time_tracker.infrastructure.sqlite_repository import (
     SQLiteTimerRepository,
     datetime_to_micros,
@@ -183,6 +184,61 @@ def test_archived_project_is_not_selectable_and_rejected_start_is_atomic(
 
     assert repository.get_active() == active
     assert repository.list_completed() == []
+
+
+def test_archive_listing_and_restore_preserve_hierarchy_and_active_timer(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteTimerRepository(tmp_path / "tracker.sqlite3")
+    started_at = datetime(2026, 7, 20, 8, tzinfo=UTC)
+    planning = repository.start("Website", "Planning", started_at, None)
+    implementation = repository.start(
+        "Website",
+        "Implementation",
+        started_at + timedelta(hours=1),
+        None,
+    )
+    repository.archive_activity(
+        "website",
+        "planning",
+        started_at + timedelta(hours=2),
+    )
+    repository.archive_project("WEBSITE", started_at + timedelta(hours=3))
+
+    assert repository.get_active() == implementation
+    assert repository.list_completed() == [
+        planning.stop(started_at + timedelta(hours=1))
+    ]
+    assert repository.list_archived_projects() == ["Website"]
+    assert repository.list_archived_activities() == [
+        ArchivedActivity("Website", "Planning", project_archived=True)
+    ]
+    with pytest.raises(ValueError, match="restore project first"):
+        repository.unarchive_activity("website", "planning")
+
+    assert repository.unarchive_project("website") == "Website"
+    assert repository.list_projects() == ["Website"]
+    assert repository.list_activities("Website") == ["Implementation"]
+    assert repository.list_archived_activities() == [
+        ArchivedActivity("Website", "Planning", project_archived=False)
+    ]
+
+    assert repository.unarchive_activity("WEBSITE", "PLANNING") == (
+        "Website",
+        "Planning",
+    )
+    assert repository.list_activities("website") == ["Implementation", "Planning"]
+    assert repository.list_archived_projects() == []
+    assert repository.list_archived_activities() == []
+    assert repository.get_active() == implementation
+    with pytest.raises(ValueError, match="activity is not archived"):
+        repository.unarchive_activity("Website", "Planning")
+    with pytest.raises(ValueError, match="unknown project"):
+        repository.resolve_project_to_archive("Unknown")
+
+    repository.archive_project("Website", started_at + timedelta(hours=4))
+    with pytest.raises(ValueError, match="project is already archived"):
+        repository.resolve_project_to_archive("website")
 
 
 def test_completed_correction_is_atomic_canonical_and_non_overlapping(

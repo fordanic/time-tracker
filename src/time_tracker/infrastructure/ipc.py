@@ -15,7 +15,11 @@ from typing import cast
 
 from time_tracker.application.exporting import ExportDestinationExistsError
 from time_tracker.application.reminders import Reminder, ReminderKind
-from time_tracker.application.tracking import RecentActivity, StartAction
+from time_tracker.application.tracking import (
+    ArchivedActivity,
+    RecentActivity,
+    StartAction,
+)
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
 from time_tracker.infrastructure.paths import AgentPaths
 
@@ -164,11 +168,64 @@ class AgentClient:
         result = _object_dict(self._request("archive_project", {"project": project}))
         return _object_str(result.get("project"))
 
+    def get_archive_project_target(self, project: str) -> str:
+        """Validate and return a canonical project archive target."""
+        result = _object_dict(
+            self._request("get_archive_project_target", {"project": project})
+        )
+        return _object_str(result.get("project"))
+
     def archive_activity(self, project: str, activity: str) -> tuple[str, str]:
         """Archive an activity and return its canonical stored names."""
         result = _object_dict(
             self._request(
                 "archive_activity",
+                {"project": project, "activity": activity},
+            )
+        )
+        return (
+            _object_str(result.get("project")),
+            _object_str(result.get("activity")),
+        )
+
+    def get_archive_activity_target(
+        self,
+        project: str,
+        activity: str,
+    ) -> tuple[str, str]:
+        """Validate and return a canonical activity archive target."""
+        result = _object_dict(
+            self._request(
+                "get_archive_activity_target",
+                {"project": project, "activity": activity},
+            )
+        )
+        return (
+            _object_str(result.get("project")),
+            _object_str(result.get("activity")),
+        )
+
+    def list_archived_projects(self) -> list[str]:
+        """Return canonical archived project names."""
+        return _string_list(self._request("list_archived_projects", {}))
+
+    def list_archived_activities(self) -> list[ArchivedActivity]:
+        """Return canonical archived activities with parent state."""
+        result = self._request("list_archived_activities", {})
+        if not isinstance(result, list):
+            raise AgentRequestError("the agent returned malformed archived activities")
+        return [_archived_activity_from_object(item) for item in result]
+
+    def unarchive_project(self, project: str) -> str:
+        """Restore a project and return its canonical stored name."""
+        result = _object_dict(self._request("unarchive_project", {"project": project}))
+        return _object_str(result.get("project"))
+
+    def unarchive_activity(self, project: str, activity: str) -> tuple[str, str]:
+        """Restore an activity and return its canonical stored names."""
+        result = _object_dict(
+            self._request(
+                "unarchive_activity",
                 {"project": project, "activity": activity},
             )
         )
@@ -397,6 +454,18 @@ def _recent_activity_from_object(value: object) -> RecentActivity:
     return RecentActivity(
         project=_object_str(data.get("project")),
         activity=_object_str(data.get("activity")),
+    )
+
+
+def _archived_activity_from_object(value: object) -> ArchivedActivity:
+    data = _object_dict(value)
+    project_archived = data.get("project_archived")
+    if not isinstance(project_archived, bool):
+        raise AgentRequestError("the agent returned malformed archive state")
+    return ArchivedActivity(
+        project=_object_str(data.get("project")),
+        activity=_object_str(data.get("activity")),
+        project_archived=project_archived,
     )
 
 

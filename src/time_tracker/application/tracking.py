@@ -18,6 +18,15 @@ class RecentActivity:
     activity: str
 
 
+@dataclass(frozen=True, slots=True)
+class ArchivedActivity:
+    """An archived activity with the state of its parent project."""
+
+    project: str
+    activity: str
+    project_archived: bool
+
+
 class StartAction(StrEnum):
     """The effect of applying the current capture selection."""
 
@@ -62,6 +71,26 @@ class TimerRepository(Protocol):
         """Return completed entries in chronological order."""
         ...
 
+    def resolve_project_to_archive(self, project: str) -> str:
+        """Validate and return the canonical non-archived project name."""
+        ...
+
+    def resolve_activity_to_archive(
+        self,
+        project: str,
+        activity: str,
+    ) -> tuple[str, str]:
+        """Validate and return one canonical selectable activity target."""
+        ...
+
+    def list_archived_projects(self) -> list[str]:
+        """Return archived project names in display order."""
+        ...
+
+    def list_archived_activities(self) -> list[ArchivedActivity]:
+        """Return archived activities with canonical hierarchy context."""
+        ...
+
     def archive_project(self, project: str, archived_at: datetime) -> str:
         """Archive a project and return its canonical stored name."""
         ...
@@ -73,6 +102,14 @@ class TimerRepository(Protocol):
         archived_at: datetime,
     ) -> tuple[str, str]:
         """Archive an activity and return its canonical project and activity."""
+        ...
+
+    def unarchive_project(self, project: str) -> str:
+        """Restore a project without changing child activity flags."""
+        ...
+
+    def unarchive_activity(self, project: str, activity: str) -> tuple[str, str]:
+        """Restore an activity whose parent project is selectable."""
         ...
 
     def start(
@@ -156,6 +193,14 @@ class TrackingService:
         """List completed entries in chronological order."""
         return self._repository.list_completed()
 
+    def list_archived_projects(self) -> list[str]:
+        """List archived projects for reversible management."""
+        return self._repository.list_archived_projects()
+
+    def list_archived_activities(self) -> list[ArchivedActivity]:
+        """List archived activities with their canonical parent state."""
+        return self._repository.list_archived_activities()
+
     def list_recent_activities(self, *, limit: int = 5) -> list[RecentActivity]:
         """List unique selectable pairs by most recent completed use."""
         if limit < 0:
@@ -211,6 +256,13 @@ class TrackingService:
             raise ValueError("project name is required")
         return self._repository.archive_project(project, self._clock.now())
 
+    def get_archive_project_target(self, project: str) -> str:
+        """Validate a project archive target without changing storage."""
+        project = project.strip()
+        if not project:
+            raise ValueError("project name is required")
+        return self._repository.resolve_project_to_archive(project)
+
     def archive_activity(self, project: str, activity: str) -> tuple[str, str]:
         """Archive one activity so it cannot be used for future timers."""
         project = project.strip()
@@ -224,6 +276,37 @@ class TrackingService:
             activity,
             self._clock.now(),
         )
+
+    def get_archive_activity_target(
+        self,
+        project: str,
+        activity: str,
+    ) -> tuple[str, str]:
+        """Validate an activity archive target without changing storage."""
+        project = project.strip()
+        activity = activity.strip()
+        if not project:
+            raise ValueError("project name is required")
+        if not activity:
+            raise ValueError("activity name is required")
+        return self._repository.resolve_activity_to_archive(project, activity)
+
+    def unarchive_project(self, project: str) -> str:
+        """Restore an archived project without changing its activities."""
+        project = project.strip()
+        if not project:
+            raise ValueError("project name is required")
+        return self._repository.unarchive_project(project)
+
+    def unarchive_activity(self, project: str, activity: str) -> tuple[str, str]:
+        """Restore one archived activity beneath a selectable project."""
+        project = project.strip()
+        activity = activity.strip()
+        if not project:
+            raise ValueError("project name is required")
+        if not activity:
+            raise ValueError("activity name is required")
+        return self._repository.unarchive_activity(project, activity)
 
     def start(
         self,
