@@ -9,6 +9,7 @@ import pytest
 
 from time_tracker.agent.server import serve
 from time_tracker.application.reminders import Reminder, ReminderIntervals, ReminderKind
+from time_tracker.application.tracking import RecentActivity
 from time_tracker.infrastructure.instance_lock import (
     AgentAlreadyRunningError,
     instance_lock,
@@ -45,6 +46,9 @@ def test_authenticated_json_ipc_persists_and_recovers_active_timer(
         assert completed.entry_id == started.entry_id
         assert reconnected_client.get_active() is None
         assert reconnected_client.list_completed() == [completed]
+        assert reconnected_client.list_recent_activities() == [
+            RecentActivity("Website", "Implementation")
+        ]
         destination = tmp_path / "ipc-export.csv"
         assert reconnected_client.export_completed(destination) == 1
         assert destination.read_text(encoding="utf-8").startswith(
@@ -60,6 +64,7 @@ def test_authenticated_json_ipc_persists_and_recovers_active_timer(
             "Implementation",
         )
         assert reconnected_client.list_activities("Website") == []
+        assert reconnected_client.list_recent_activities() == []
         with pytest.raises(AgentRequestError, match="activity is archived"):
             reconnected_client.start("Website", "Implementation", None)
         assert reconnected_client.list_completed() == [completed]

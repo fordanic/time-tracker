@@ -12,11 +12,22 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.suggester import SuggestFromList
-from textual.widgets import Button, DataTable, Footer, Header, Input, Static, Switch
+from textual.widgets import (
+    Button,
+    DataTable,
+    Footer,
+    Header,
+    Input,
+    OptionList,
+    Static,
+    Switch,
+)
+from textual.widgets.option_list import Option
 
 from time_tracker.application.exporting import ExportDestinationExistsError
 from time_tracker.application.reminders import Reminder, ReminderKind
 from time_tracker.application.reporting import build_daily_summaries
+from time_tracker.application.tracking import RecentActivity
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
 
 
@@ -45,6 +56,10 @@ class TrackerGateway(Protocol):
 
     def list_completed(self) -> list[CompletedTimer]:
         """Return completed entries in chronological order."""
+        ...
+
+    def list_recent_activities(self) -> list[RecentActivity]:
+        """Return recent selectable project/activity pairs."""
         ...
 
     def archive_project(self, project: str) -> str:
@@ -116,7 +131,7 @@ class TimeTrackerApp(App[None]):
     }
 
     #active-timer {
-        height: 4;
+        height: 3;
         padding: 0 1;
         text-align: center;
         background: $panel;
@@ -170,6 +185,15 @@ class TimeTrackerApp(App[None]):
         margin-right: 1;
     }
 
+    #recent-activities {
+        height: 1;
+    }
+
+    #recent-empty {
+        height: 1;
+        color: $text-muted;
+    }
+
     #export-actions {
         height: auto;
         margin-top: 0;
@@ -215,7 +239,7 @@ class TimeTrackerApp(App[None]):
 
     #history {
         height: 1fr;
-        min-height: 8;
+        min-height: 6;
     }
     """
 
@@ -226,6 +250,7 @@ class TimeTrackerApp(App[None]):
         self.pending_reminder: Reminder | None = None
         self._pending_export_path: Path | None = None
         self._completed_entries: list[CompletedTimer] = []
+        self._recent_activities: list[RecentActivity] = []
 
     def compose(self) -> ComposeResult:
         """Compose the single-screen timer workflow."""
@@ -258,6 +283,8 @@ class TimeTrackerApp(App[None]):
                     id="archive-activity-button",
                 )
             yield Input(placeholder="Optional note", id="note")
+            yield OptionList(id="recent-activities", compact=True)
+            yield Static("No recent activities yet.", id="recent-empty")
             with Horizontal(id="actions"):
                 yield Button("Start / switch  F5", id="start-button", variant="success")
                 yield Button("Stop  F6", id="stop-button", variant="warning")
@@ -283,6 +310,7 @@ class TimeTrackerApp(App[None]):
             self.active_timer = await asyncio.to_thread(self.client.get_active)
             projects = await asyncio.to_thread(self.client.list_projects)
             completed = await asyncio.to_thread(self.client.list_completed)
+            recent = await asyncio.to_thread(self.client.list_recent_activities)
         except Exception as error:
             self._show_message(str(error), error=True)
         else:
@@ -291,6 +319,7 @@ class TimeTrackerApp(App[None]):
                 case_sensitive=False,
             )
             self._render_history(completed)
+            self._render_recent_activities(recent)
         self._render_active()
         await self._refresh_reminder()
 
@@ -317,6 +346,21 @@ class TimeTrackerApp(App[None]):
     async def handle_start_button(self) -> None:
         """Handle pointer activation of the start action."""
         await self._start_timer()
+
+    @on(OptionList.OptionSelected, "#recent-activities")
+    def handle_recent_activity_selected(
+        self,
+        event: OptionList.OptionSelected,
+    ) -> None:
+        """Populate capture inputs from one application-projected recent pair."""
+        if not 0 <= event.option_index < len(self._recent_activities):
+            return
+        pair = self._recent_activities[event.option_index]
+        self.query_one("#project", Input).value = pair.project
+        self.query_one("#activity", Input).value = pair.activity
+        note_input = self.query_one("#note", Input)
+        note_input.value = ""
+        note_input.focus()
 
     @on(Button.Pressed, "#stop-button")
     async def handle_stop_button(self) -> None:
@@ -400,6 +444,7 @@ class TimeTrackerApp(App[None]):
         self.query_one("#activity", Input).value = self.active_timer.activity
         await self._refresh_project_suggestions()
         await self._refresh_history()
+        await self._refresh_recent_activities()
         self._render_active()
 
     async def _refresh_project_suggestions(self) -> None:
@@ -432,6 +477,7 @@ class TimeTrackerApp(App[None]):
         await self._refresh_project_suggestions()
         await self._refresh_activity_suggestions("")
         self._show_message(f"Archived project {archived_project}.")
+        await self._refresh_recent_activities()
 
     async def _archive_activity(self) -> None:
         project = self.query_one("#project", Input).value
@@ -451,6 +497,7 @@ class TimeTrackerApp(App[None]):
         self._show_message(
             f"Archived activity {archived_project} / {archived_activity}."
         )
+        await self._refresh_recent_activities()
 
     async def _stop_timer(self) -> None:
         try:
@@ -469,6 +516,7 @@ class TimeTrackerApp(App[None]):
                 f"after {_format_duration(completed.duration)}."
             )
             await self._refresh_history()
+            await self._refresh_recent_activities()
         self._render_active()
 
     async def _refresh_reminder(self) -> None:
@@ -502,6 +550,14 @@ class TimeTrackerApp(App[None]):
             self._show_message(str(error), error=True)
             return
         self._render_history(completed)
+
+    async def _refresh_recent_activities(self) -> None:
+        try:
+            recent = await asyncio.to_thread(self.client.list_recent_activities)
+        except Exception as error:
+            self._show_message(str(error), error=True)
+            return
+        self._render_recent_activities(recent)
 
     async def _export_current_view(self) -> None:
         raw_destination = self.query_one("#export-path", Input).value.strip()
@@ -584,6 +640,20 @@ class TimeTrackerApp(App[None]):
                 entry.note or "",
                 key=str(entry.entry_id),
             )
+
+    def _render_recent_activities(self, recent: list[RecentActivity]) -> None:
+        self._recent_activities = recent
+        option_list = self.query_one("#recent-activities", OptionList)
+        option_list.set_options(
+            Option(
+                f"Track again: {pair.project} / {pair.activity}",
+                id=f"recent-{index}",
+            )
+            for index, pair in enumerate(recent)
+        )
+        option_list.highlighted = 0 if recent else None
+        option_list.display = bool(recent)
+        self.query_one("#recent-empty", Static).display = not recent
 
     def _render_active(self) -> None:
         active_widget = self.query_one("#active-timer", Static)

@@ -52,6 +52,9 @@ totals per project and activity; entries crossing local midnight are divided
 between their corresponding days. Both CSV formats require explicit overwrite
 confirmation. Projects and activities can be archived from the TUI;
 archived names disappear from new-timer suggestions and remain intact in history.
+The Track workflow shows up to five unique recently completed project/activity
+pairs, newest first; selecting one prepares it for another timer without copying
+its historical note. Archived targets are excluded from this recent-work list.
 When connected, the TUI also presents due reminders; confirming an active reminder
 restarts its interval without changing the timer, while ignoring it leaves the
 timer running and reminders repeating.
@@ -116,6 +119,12 @@ the selected representation. Relative paths are resolved from the directory
 where the TUI was launched, and `~` expands to the current user's home directory.
 If the destination exists, the TUI requires a second export action before
 overwriting it.
+
+When completed work exists, use the one-line Track again selector below the note
+field to choose from up to five recent project/activity pairs. Use the arrow keys
+to move through the list and Enter to select one. The note is cleared and focused
+so a new note can be entered before starting with F5; the selection alone does not
+change the running timer.
 
 Enter an existing project or activity and use its archive button or `F8`/`F9`.
 Archiving leaves any running timer active, removes the name from future timer

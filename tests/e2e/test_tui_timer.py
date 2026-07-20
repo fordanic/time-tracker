@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 
 import pytest
-from textual.widgets import Button, DataTable, Input, Static, Switch
+from textual.widgets import Button, DataTable, Input, OptionList, Static, Switch
 
 from time_tracker.agent.server import serve
 from time_tracker.application.reminders import Reminder, ReminderIntervals, ReminderKind
@@ -196,6 +196,66 @@ async def test_user_confirms_an_active_reminder_from_the_tui(tmp_path: Path) -> 
             )
             assert app.pending_reminder is None
             assert client.get_active() == started
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+
+
+@pytest.mark.asyncio
+async def test_user_tracks_again_from_recent_activities(tmp_path: Path) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    thread = threading.Thread(target=serve, args=(paths,), daemon=True)
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        client.start("Website", "Planning", "First historical note")
+        client.stop()
+        client.start("Website", "Implementation", "Most recent historical note")
+        client.stop()
+
+        app = TimeTrackerApp(client)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            recent = app.query_one("#recent-activities", OptionList)
+            assert recent.option_count == 2
+            assert "Website / Implementation" in str(
+                recent.get_option_at_index(0).prompt
+            )
+
+            app.query_one("#project", Input).value = "Temporary"
+            app.query_one("#activity", Input).value = "Draft"
+            app.query_one("#note", Input).value = "Do not preserve this"
+            app.set_focus(recent)
+            await pilot.press("enter")
+            await pilot.pause()
+
+            assert app.query_one("#project", Input).value == "Website"
+            assert app.query_one("#activity", Input).value == "Implementation"
+            assert app.query_one("#note", Input).value == ""
+            assert app.focused is app.query_one("#note", Input)
+            assert client.get_active() is None
+
+            await pilot.press("f5")
+            await pilot.pause()
+
+            active = client.get_active()
+            assert active is not None
+            assert active.project == "Website"
+            assert active.activity == "Implementation"
+            assert active.note is None
+
+            await pilot.press("f6")
+            await pilot.pause()
+
+            assert app._recent_activities[0].activity == "Implementation"
+            await pilot.click("#archive-activity-button")
+            await pilot.pause()
+
+            assert [pair.activity for pair in app._recent_activities] == ["Planning"]
     finally:
         client.shutdown()
         thread.join(timeout=2)

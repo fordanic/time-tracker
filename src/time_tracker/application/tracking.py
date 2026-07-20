@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
 
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
+
+
+@dataclass(frozen=True, slots=True)
+class RecentActivity:
+    """A selectable project/activity pair ordered by recent completed use."""
+
+    project: str
+    activity: str
 
 
 class Clock(Protocol):
@@ -94,6 +103,35 @@ class TrackingService:
     def list_completed(self) -> list[CompletedTimer]:
         """List completed entries in chronological order."""
         return self._repository.list_completed()
+
+    def list_recent_activities(self, *, limit: int = 5) -> list[RecentActivity]:
+        """List unique selectable pairs by most recent completed use."""
+        if limit < 0:
+            raise ValueError("recent activity limit cannot be negative")
+        if limit == 0:
+            return []
+
+        selectable_pairs = {
+            (project.casefold(), activity.casefold())
+            for project in self._repository.list_projects()
+            for activity in self._repository.list_activities(project)
+        }
+        recent: list[RecentActivity] = []
+        seen: set[tuple[str, str]] = set()
+        completed = sorted(
+            self._repository.list_completed(),
+            key=lambda entry: (entry.stopped_at, entry.entry_id),
+            reverse=True,
+        )
+        for entry in completed:
+            pair = (entry.project.casefold(), entry.activity.casefold())
+            if pair in seen or pair not in selectable_pairs:
+                continue
+            seen.add(pair)
+            recent.append(RecentActivity(entry.project, entry.activity))
+            if len(recent) == limit:
+                break
+        return recent
 
     def archive_project(self, project: str) -> str:
         """Archive a project so it cannot be used for future timers."""
