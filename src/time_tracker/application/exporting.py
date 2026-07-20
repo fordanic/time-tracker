@@ -1,4 +1,4 @@
-"""Completed-entry and daily-summary export use cases and output ports."""
+"""Filtered completed-time export use cases and output ports."""
 
 from __future__ import annotations
 
@@ -6,7 +6,14 @@ from datetime import tzinfo
 from pathlib import Path
 from typing import Protocol
 
-from time_tracker.application.reporting import DailySummary, build_daily_summaries
+from time_tracker.application.reporting import (
+    DailySummary,
+    RangeSummary,
+    ReviewFilter,
+    build_daily_summaries,
+    build_range_summaries,
+    filter_completed_entries,
+)
 from time_tracker.domain.models import CompletedTimer
 
 
@@ -50,8 +57,22 @@ class DailySummaryWriter(Protocol):
         ...
 
 
+class RangeSummaryWriter(Protocol):
+    """Output boundary for selected-range project/activity totals."""
+
+    def write(
+        self,
+        destination: Path,
+        summaries: list[RangeSummary],
+        *,
+        overwrite: bool,
+    ) -> None:
+        """Write range totals or reject an unconfirmed overwrite."""
+        ...
+
+
 class ExportService:
-    """Export completed entries or their daily project/activity summary."""
+    """Export selected completed entries or project/activity summaries."""
 
     def __init__(
         self,
@@ -59,15 +80,27 @@ class ExportService:
         completed_writer: CompletedEntryWriter,
         summary_writer: DailySummaryWriter,
         local_timezone: tzinfo | None = None,
+        range_writer: RangeSummaryWriter | None = None,
     ) -> None:
         self._source = source
         self._completed_writer = completed_writer
         self._summary_writer = summary_writer
         self._local_timezone = local_timezone
+        self._range_writer = range_writer
 
-    def export_completed(self, destination: Path, *, overwrite: bool = False) -> int:
+    def export_completed(
+        self,
+        destination: Path,
+        *,
+        overwrite: bool = False,
+        review_filter: ReviewFilter | None = None,
+    ) -> int:
         """Export completed entries and return the number written."""
-        entries = self._source.list_completed()
+        entries = filter_completed_entries(
+            self._source.list_completed(),
+            self._local_timezone,
+            review_filter,
+        )
         self._completed_writer.write(destination, entries, overwrite=overwrite)
         return len(entries)
 
@@ -76,11 +109,31 @@ class ExportService:
         destination: Path,
         *,
         overwrite: bool = False,
+        review_filter: ReviewFilter | None = None,
     ) -> int:
         """Export local-day summaries and return the number written."""
         summaries = build_daily_summaries(
             self._source.list_completed(),
             self._local_timezone,
+            review_filter,
         )
         self._summary_writer.write(destination, summaries, overwrite=overwrite)
+        return len(summaries)
+
+    def export_range_summaries(
+        self,
+        destination: Path,
+        *,
+        overwrite: bool = False,
+        review_filter: ReviewFilter | None = None,
+    ) -> int:
+        """Export selected-range totals and return the number written."""
+        if self._range_writer is None:
+            raise RuntimeError("range summary export is unavailable")
+        summaries = build_range_summaries(
+            self._source.list_completed(),
+            self._local_timezone,
+            review_filter,
+        )
+        self._range_writer.write(destination, summaries, overwrite=overwrite)
         return len(summaries)

@@ -10,6 +10,7 @@ import pytest
 
 from time_tracker.agent.server import serve
 from time_tracker.application.reminders import Reminder, ReminderIntervals, ReminderKind
+from time_tracker.application.reporting import ReviewFilter
 from time_tracker.application.tracking import (
     ArchivedActivity,
     RecentActivity,
@@ -63,6 +64,17 @@ def test_authenticated_json_ipc_persists_and_recovers_active_timer(
         assert reconnected_client.export_daily_summaries(summary_destination) == 1
         assert summary_destination.read_text(encoding="utf-8").startswith(
             "date,project,activity,duration_seconds"
+        )
+        range_destination = tmp_path / "ipc-range-summary.csv"
+        assert (
+            reconnected_client.export_range_summaries(
+                range_destination,
+                review_filter=ReviewFilter(project="website"),
+            )
+            == 1
+        )
+        assert range_destination.read_text(encoding="utf-8").startswith(
+            "project,activity,duration_seconds"
         )
         assert reconnected_client.get_archive_activity_target(
             "website", "implementation"
