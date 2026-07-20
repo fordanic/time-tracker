@@ -66,6 +66,10 @@ class ReminderSchedule:
         interval = self._interval(kind)
         self._due_at = None if interval is None else self._monotonic() + interval
 
+    def replace_intervals(self, intervals: ReminderIntervals) -> None:
+        """Replace policy before the owner resets the current state."""
+        self._intervals = intervals
+
     def seconds_until_due(self) -> float | None:
         """Return the non-negative wait until the next enabled reminder."""
         if self._due_at is None:

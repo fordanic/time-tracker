@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from time_tracker.agent.server import serve
+from time_tracker.application.configuration import ReminderSettings
 from time_tracker.application.reminders import Reminder, ReminderIntervals, ReminderKind
 from time_tracker.application.reporting import ReviewFilter
 from time_tracker.application.tracking import (
@@ -16,6 +17,7 @@ from time_tracker.application.tracking import (
     RecentActivity,
     StartAction,
 )
+from time_tracker.infrastructure.configuration import load_config
 from time_tracker.infrastructure.instance_lock import (
     AgentAlreadyRunningError,
     instance_lock,
@@ -518,6 +520,76 @@ active_enabled = false
         thread.join(timeout=2)
 
     assert not thread.is_alive()
+
+
+def test_agent_persists_and_live_reloads_reminder_settings(tmp_path: Path) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    notifier = RecordingNotifier()
+    thread = threading.Thread(
+        target=serve,
+        args=(paths,),
+        kwargs={
+            "notifier": notifier,
+            "reminder_intervals": ReminderIntervals(inactive=None, active=None),
+        },
+        daemon=True,
+    )
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    enabled = ReminderSettings(
+        inactive_enabled=True,
+        inactive_interval_minutes=0.001,
+        active_enabled=False,
+        active_interval_minutes=7.5,
+    )
+    disabled = ReminderSettings(
+        inactive_enabled=False,
+        inactive_interval_minutes=0.001,
+        active_enabled=False,
+        active_interval_minutes=7.5,
+    )
+    durable = ReminderSettings(
+        inactive_enabled=False,
+        inactive_interval_minutes=3,
+        active_enabled=True,
+        active_interval_minutes=9.5,
+    )
+    try:
+        assert client.save_configuration(enabled) == enabled
+        assert client.get_configuration() == enabled
+        _wait_for_pending_reminder(client, ReminderKind.INACTIVE)
+
+        count = len(notifier.reminders)
+        assert client.save_configuration(disabled) == disabled
+        assert client.get_reminder() is None
+        time.sleep(0.1)
+        assert len(notifier.reminders) == count
+
+        assert client.save_configuration(durable) == durable
+        assert load_config(paths.config).reminder_settings == durable
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    restarted = threading.Thread(
+        target=serve,
+        args=(paths,),
+        kwargs={"notifier": notifier},
+        daemon=True,
+    )
+    restarted.start()
+    recovered_client = AgentClient(paths)
+    _wait_until_ready(recovered_client)
+    try:
+        assert recovered_client.get_configuration() == durable
+    finally:
+        recovered_client.shutdown()
+        restarted.join(timeout=2)
+
+    assert not thread.is_alive()
+    assert not restarted.is_alive()
 
 
 def test_notification_failure_is_logged_without_stopping_agent(tmp_path: Path) -> None:

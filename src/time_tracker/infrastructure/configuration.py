@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
 import tomllib
 from pathlib import Path
 from typing import cast
 
-from time_tracker.application.configuration import ApplicationConfig
-from time_tracker.application.reminders import ReminderIntervals
+from time_tracker.application.configuration import ApplicationConfig, ReminderSettings
 
 _REMINDER_KEYS = {
     "inactive_enabled",
@@ -68,11 +69,58 @@ def load_config(path: Path) -> ApplicationConfig:
         path,
     )
     return ApplicationConfig(
-        reminder_intervals=ReminderIntervals(
-            inactive=inactive_minutes * 60 if inactive_enabled else None,
-            active=active_minutes * 60 if active_enabled else None,
+        reminder_settings=ReminderSettings(
+            inactive_enabled=inactive_enabled,
+            inactive_interval_minutes=inactive_minutes,
+            active_enabled=active_enabled,
+            active_interval_minutes=active_minutes,
         )
     )
+
+
+class TomlConfigurationStore:
+    """Atomically persist the complete supported TOML configuration."""
+
+    def __init__(self, path: Path) -> None:
+        self._path = path
+
+    def save(self, settings: ReminderSettings) -> None:
+        """Replace the destination only after a complete file is durable."""
+        payload = _toml(settings).encode("utf-8")
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="wb",
+                dir=self._path.parent,
+                prefix=f".{self._path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as temporary:
+                temporary_path = Path(temporary.name)
+                temporary.write(payload)
+                temporary.flush()
+                os.fsync(temporary.fileno())
+            temporary_path.replace(self._path)
+        finally:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
+
+
+def _toml(settings: ReminderSettings) -> str:
+    return (
+        "[reminders]\n"
+        f"inactive_enabled = {str(settings.inactive_enabled).lower()}\n"
+        "inactive_interval_minutes = "
+        f"{_format_number(settings.inactive_interval_minutes)}\n"
+        f"active_enabled = {str(settings.active_enabled).lower()}\n"
+        "active_interval_minutes = "
+        f"{_format_number(settings.active_interval_minutes)}\n"
+    )
+
+
+def _format_number(value: float) -> str:
+    return format(float(value), ".15g")
 
 
 def _boolean(

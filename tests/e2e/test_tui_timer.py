@@ -21,8 +21,10 @@ from textual.widgets import (
 )
 
 from time_tracker.agent.server import serve
+from time_tracker.application.configuration import ReminderSettings
 from time_tracker.application.reminders import Reminder, ReminderIntervals, ReminderKind
 from time_tracker.application.tracking import RecentActivity
+from time_tracker.infrastructure.configuration import load_config
 from time_tracker.infrastructure.ipc import AgentClient, AgentUnavailableError
 from time_tracker.infrastructure.paths import AgentPaths
 from time_tracker.infrastructure.sqlite_repository import SQLiteTimerRepository
@@ -467,7 +469,7 @@ async def test_user_navigates_focused_views_without_losing_workflow_state(
             await pilot.press("f4")
             assert tabs.active == "settings-tab"
             assert switcher.current == "settings-view"
-            assert tabs.has_focus
+            assert app.query_one("#inactive-reminders-enabled", Switch).has_focus
             assert "Website / Review" in str(active.render())
 
             await pilot.press("f1")
@@ -1019,6 +1021,78 @@ async def test_user_updates_active_details_without_restarting_timer(
             assert (
                 recovered_app.query_one("#edit-active-button", Button).disabled is True
             )
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+
+
+@pytest.mark.asyncio
+async def test_user_edits_and_live_applies_reminder_settings(tmp_path: Path) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    thread = threading.Thread(
+        target=serve,
+        args=(paths,),
+        kwargs={
+            "notifier": SilentNotifier(),
+            "reminder_intervals": ReminderIntervals(inactive=None, active=None),
+        },
+        daemon=True,
+    )
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        app = TimeTrackerApp(client)
+        async with app.run_test() as pilot:
+            await pilot.press("f4")
+            await pilot.pause()
+            assert app.focused is app.query_one("#inactive-reminders-enabled", Switch)
+            assert str(paths.config) in str(
+                app.query_one("#settings-path", Static).render()
+            )
+            assert not app.query_one("#inactive-reminders-enabled", Switch).value
+            assert app.query_one("#inactive-reminder-minutes", Input).value == "5"
+
+            app.query_one("#inactive-reminders-enabled", Switch).value = True
+            app.query_one("#inactive-reminder-minutes", Input).value = "2.5"
+            app.query_one("#active-reminders-enabled", Switch).value = True
+            app.query_one("#active-reminder-minutes", Input).value = "12"
+            assert await pilot.click("#save-settings-button")
+            await pilot.pause()
+
+            expected = ReminderSettings(
+                inactive_enabled=True,
+                inactive_interval_minutes=2.5,
+                active_enabled=True,
+                active_interval_minutes=12,
+            )
+            assert client.get_configuration() == expected
+            assert load_config(paths.config).reminder_settings == expected
+            assert "Reminder settings saved and applied" in str(
+                app.query_one("#message", Static).render()
+            )
+
+            original = paths.config.read_bytes()
+            app.query_one("#active-reminder-minutes", Input).value = "0"
+            app.query_one("#save-settings-button", Button).press()
+            await pilot.pause()
+            assert "positive finite number" in str(
+                app.query_one("#message", Static).render()
+            )
+            assert paths.config.read_bytes() == original
+            assert client.get_configuration() == expected
+
+        reopened = TimeTrackerApp(AgentClient(paths))
+        async with reopened.run_test() as pilot:
+            await pilot.press("f4")
+            await pilot.pause()
+            assert reopened.query_one("#inactive-reminder-minutes", Input).value == (
+                "2.5"
+            )
+            assert reopened.query_one("#active-reminder-minutes", Input).value == "12"
     finally:
         client.shutdown()
         thread.join(timeout=2)

@@ -13,6 +13,7 @@ from multiprocessing.connection import Client
 from pathlib import Path
 from typing import cast
 
+from time_tracker.application.configuration import ReminderSettings
 from time_tracker.application.exporting import ExportDestinationExistsError
 from time_tracker.application.reminders import Reminder, ReminderKind
 from time_tracker.application.reporting import ReviewFilter
@@ -49,6 +50,28 @@ class AgentClient:
     def ping(self) -> None:
         """Verify that an authenticated compatible agent is listening."""
         self._request("ping", {})
+
+    @property
+    def configuration_path(self) -> Path:
+        """Return the durable user-editable configuration path."""
+        return self.paths.config
+
+    def get_configuration(self) -> ReminderSettings:
+        """Return reminder settings currently used by the agent."""
+        return _settings_from_object(self._request("get_configuration", {}))
+
+    def save_configuration(self, settings: ReminderSettings) -> ReminderSettings:
+        """Persist and live-reload validated reminder settings."""
+        result = self._request(
+            "save_configuration",
+            {
+                "inactive_enabled": settings.inactive_enabled,
+                "inactive_interval_minutes": settings.inactive_interval_minutes,
+                "active_enabled": settings.active_enabled,
+                "active_interval_minutes": settings.active_interval_minutes,
+            },
+        )
+        return _settings_from_object(result)
 
     def get_active(self) -> ActiveTimer | None:
         """Return the active timer recovered by the background process."""
@@ -477,6 +500,20 @@ def _reminder_from_object(value: object) -> Reminder:
     )
 
 
+def _settings_from_object(value: object) -> ReminderSettings:
+    data = _object_dict(value)
+    inactive_enabled = data.get("inactive_enabled")
+    active_enabled = data.get("active_enabled")
+    if not isinstance(inactive_enabled, bool) or not isinstance(active_enabled, bool):
+        raise AgentRequestError("the agent returned malformed configuration data")
+    return ReminderSettings(
+        inactive_enabled=inactive_enabled,
+        inactive_interval_minutes=_object_number(data.get("inactive_interval_minutes")),
+        active_enabled=active_enabled,
+        active_interval_minutes=_object_number(data.get("active_interval_minutes")),
+    )
+
+
 def _completed_from_object(value: object) -> CompletedTimer:
     data = _object_dict(value)
     return CompletedTimer(
@@ -545,6 +582,12 @@ def _object_int(value: object) -> int:
     if not isinstance(value, int):
         raise AgentRequestError("the agent returned malformed numeric data")
     return value
+
+
+def _object_number(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise AgentRequestError("the agent returned malformed numeric data")
+    return float(value)
 
 
 def _string_list(value: object) -> list[str]:
