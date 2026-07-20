@@ -10,7 +10,11 @@ import pytest
 
 from time_tracker.agent.server import serve
 from time_tracker.application.reminders import Reminder, ReminderIntervals, ReminderKind
-from time_tracker.application.tracking import RecentActivity, StartAction
+from time_tracker.application.tracking import (
+    ArchivedActivity,
+    RecentActivity,
+    StartAction,
+)
 from time_tracker.infrastructure.instance_lock import (
     AgentAlreadyRunningError,
     instance_lock,
@@ -60,6 +64,9 @@ def test_authenticated_json_ipc_persists_and_recovers_active_timer(
         assert summary_destination.read_text(encoding="utf-8").startswith(
             "date,project,activity,duration_seconds"
         )
+        assert reconnected_client.get_archive_activity_target(
+            "website", "implementation"
+        ) == ("Website", "Implementation")
         assert reconnected_client.archive_activity("website", "implementation") == (
             "Website",
             "Implementation",
@@ -69,8 +76,24 @@ def test_authenticated_json_ipc_persists_and_recovers_active_timer(
         with pytest.raises(AgentRequestError, match="activity is archived"):
             reconnected_client.start("Website", "Implementation", None)
         assert reconnected_client.list_completed() == [completed]
+        assert reconnected_client.get_archive_project_target("website") == "Website"
         assert reconnected_client.archive_project("website") == "Website"
         assert reconnected_client.list_projects() == []
+        assert reconnected_client.list_archived_projects() == ["Website"]
+        assert reconnected_client.list_archived_activities() == [
+            ArchivedActivity("Website", "Implementation", project_archived=True)
+        ]
+        with pytest.raises(AgentRequestError, match="restore project first"):
+            reconnected_client.unarchive_activity("Website", "Implementation")
+        assert reconnected_client.unarchive_project("website") == "Website"
+        assert reconnected_client.unarchive_activity("website", "implementation") == (
+            "Website",
+            "Implementation",
+        )
+        assert reconnected_client.list_projects() == ["Website"]
+        assert reconnected_client.list_activities("Website") == ["Implementation"]
+        assert reconnected_client.list_archived_projects() == []
+        assert reconnected_client.list_archived_activities() == []
     finally:
         client.shutdown()
         thread.join(timeout=2)

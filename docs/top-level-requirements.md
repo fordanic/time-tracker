@@ -55,6 +55,12 @@ internet connection. The current product interface is a TUI.
   cannot be recreated by typing the same name again.
 - Projects and activities already used by entries are archived rather than
   permanently deleted.
+- Allow archived projects and activities to be restored. Restoring a project does
+  not change its activities' independent archive flags; its non-archived
+  activities become selectable again. An activity cannot be restored while its
+  parent project remains archived.
+- Require confirmation of the exact project or activity before archiving it and
+  make clear that archiving does not stop an active entry.
 
 ### Tracking
 
@@ -210,7 +216,6 @@ feature changes a top-level requirement.
 - Minimum supported OS versions and CPU architectures.
 - Behavior during computer sleep, system-clock changes, and time-zone changes.
 - Whether the background process starts at login.
-- Archive restoration and hierarchy behavior.
 - Date/project/activity filters, range summaries, and their effect on CSV export.
 - Reminder windows, snooze persistence, and live configuration reload.
 - Whether favorites, defaults, or local prompt-only idle detection are needed
