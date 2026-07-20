@@ -72,6 +72,12 @@ class ReminderSchedule:
             return None
         return max(0.0, self._due_at - self._monotonic())
 
+    def update_active_details(self, project: str, activity: str) -> None:
+        """Update active reminder text without changing its existing deadline."""
+        if self._kind is ReminderKind.ACTIVE:
+            self._project = project
+            self._activity = activity
+
     def take_due(self) -> Reminder | None:
         """Return a due reminder and schedule the next repetition."""
         if self._due_at is None or self._monotonic() < self._due_at:

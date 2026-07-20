@@ -221,6 +221,217 @@ progressively denser, while keeping the current timer continuously visible.
   presentation restructure within the existing interface and agent boundary and
   requires no protocol or schema migration.
 
+### Completed-entry correction
+
+**Status:** Implemented
+
+#### Purpose
+
+Let a user repair an inaccurate completed timer inside the product without
+discarding the entry or editing SQLite directly. This is the first ordered slice
+of the roadmap's correction and missed-time workflow; manual closed-entry creation
+and active-entry editing remain later slices.
+
+#### Required behavior
+
+- In Review's completed-entry mode, let the user load the selected completed row
+  into correction fields for project, activity, note, start, and stop, then save
+  the corrected entry through the background process.
+- Populate start and stop as local, offset-aware ISO 8601 timestamps. Accept only
+  offset-aware ISO 8601 input so each edited value maps to one unambiguous UTC
+  instant, including during daylight-saving transitions.
+- Trim project and activity names and normalize the note by trimming it and
+  treating an empty value as no note, consistently with timer capture.
+- When the project/activity assignment changes, reuse a matching selectable target
+  case-insensitively or create a new project/activity using the timer-start naming
+  rules. Reject reassignment to an archived project or activity.
+- When the assignment is unchanged, allow correction of only time or note while
+  retaining the historical target even if it has since been archived.
+- After a successful correction, refresh completed history, daily summaries,
+  recent activities, and selectable project suggestions, keep the corrected row
+  selected when possible, and show the canonical persisted values.
+- Correction is unavailable in daily-summary mode and when no completed row is
+  selected.
+
+#### Invariants and error handling
+
+- Stop must be strictly after start.
+- Completed and active entries use half-open intervals: `[start, stop)`. A
+  correction must not overlap any other entry, including the active entry, but may
+  touch another entry's start or stop. The entry being corrected is excluded from
+  its own overlap check.
+- Target resolution, overlap validation, and the update occur in one SQLite
+  transaction owned by the background process. The original entry remains
+  unchanged if any validation or persistence step fails, and success is reported
+  only after commit.
+- The entry identifier and original creation timestamp do not change. Duration
+  remains derived from corrected timestamps; no revision history or undo record is
+  added in this slice.
+- Reject an unknown entry, invalid or offset-free timestamp, non-positive interval,
+  archived reassignment, or overlap with a concise error in the persistent TUI
+  message area. A rejection leaves the correction fields available for repair.
+
+#### Acceptance criteria
+
+1. A user can select one completed entry in Review, load its canonical values,
+   change all five editable fields, save, and immediately see the corrected row.
+2. Offset-aware input is converted to UTC before persistence and re-rendered in
+   the user's local offset; offset-free or malformed input is rejected without
+   changing history.
+3. Saving with stop equal to or before start is rejected. Saving an interval that
+   intersects another completed or active entry is rejected, while an interval
+   that only touches a neighboring boundary succeeds.
+4. Reassignment reuses canonical names case-insensitively, can create a new
+   selectable pair, and rejects archived targets. An unchanged archived assignment
+   remains valid for time- or note-only correction.
+5. Correction preserves the entry ID, excludes the active timer from mutation,
+   persists atomically, and updates history, summaries, export input data, and
+   recent-work projections through their existing shared sources.
+6. Unit, SQLite integration, IPC integration, and Textual workflow tests cover
+   normalization and timestamp validation, successful correction, overlap and
+   archived-target rejection, protocol transport, row selection, and refresh.
+
+#### Documentation impact
+
+- Top-level requirements now authorize completed-entry correction and define the
+  no-overlap rule. Architecture records the agent-owned transactional correction
+  boundary. The existing schema already supports the update, so no migration is
+  required.
+
+### Manual missed-time entry
+
+**Status:** Implemented
+
+#### Purpose
+
+Let a user record one forgotten interval as a completed entry without briefly
+starting a live timer or editing SQLite directly. This is the second ordered
+slice of the roadmap's correction and missed-time workflow.
+
+#### Required behavior
+
+- In Review's completed-entry mode, provide an Add missed entry action that opens
+  the existing entry editor in creation mode for project, activity, note, start,
+  and stop.
+- Clear the target and note fields and prefill an editable one-hour local interval
+  ending at the current minute. Render both values as offset-aware ISO 8601
+  timestamps.
+- Trim project and activity names, normalize an empty or whitespace-only note to
+  no note, and accept only offset-aware ISO 8601 timestamps.
+- Reuse matching selectable project/activity names case-insensitively or create a
+  new selectable pair using the timer-start naming rules. Reject an archived
+  project or activity.
+- After successful creation, refresh completed history, daily summaries, recent
+  activities, and project suggestions; select the new row when possible and leave
+  its canonical persisted values in the editor.
+- Manual creation is unavailable in daily-summary mode. It does not start, stop,
+  switch, or otherwise change the active timer.
+
+#### Invariants and error handling
+
+- Stop must be strictly after start. The new half-open interval `[start, stop)`
+  must not overlap any completed or active entry, but may touch an existing
+  boundary.
+- Target resolution, overlap validation, and insertion occur in one SQLite
+  transaction owned by the background process. No partial project, activity, or
+  entry is retained when a request is rejected.
+- Capture the entry's creation timestamp from the injected application clock only
+  after field validation. Duration remains derived from start and stop.
+- Reject invalid or offset-free timestamps, missing names, a non-positive
+  interval, archived targets, or overlap with a concise error in the persistent
+  TUI message area. Preserve the entered values after rejection so they can be
+  repaired.
+
+#### Acceptance criteria
+
+1. A user can choose Add missed entry in Review, edit the five entry fields, save,
+   and immediately see one new completed row without affecting the active timer.
+2. The editor initially offers the previous local hour with explicit UTC offsets;
+   offset-free or malformed input is rejected without creating an entry.
+3. Stop equal to or before start and overlap with a completed or active entry are
+   rejected atomically, while touching an existing boundary succeeds.
+4. Creation reuses canonical names case-insensitively, can create a new selectable
+   pair, and rejects archived targets without leaving partial target records.
+5. The new entry appears in history, summaries, CSV source data, and recent-work
+   projection through their existing shared sources and survives agent restart.
+6. Unit, SQLite integration, IPC integration, and Textual workflow tests cover
+   normalization, injected creation time, target handling, overlap rejection,
+   protocol transport, creation mode, active-timer preservation, and refresh.
+
+#### Documentation impact
+
+- Top-level requirements now authorize manual creation of closed missed-time
+  entries under the existing single-timer and no-overlap model. Architecture adds
+  the agent-owned transactional insertion boundary. The existing schema already
+  supports the entry, so no migration is required.
+
+### Active-entry detail editing
+
+**Status:** Implemented
+
+#### Purpose
+
+Let a user correct the project, activity, or note of work that is still running
+without ending or restarting its timer. This completes the roadmap's initial
+correction and missed-time workflow.
+
+#### Required behavior
+
+- Add an explicit Update active details action to Track, available by pointer and
+  `F11`, using the current project, activity, and note inputs.
+- Persist changes to the single active entry's project/activity assignment and
+  normalized note while preserving its entry ID, original start timestamp, and
+  creation timestamp.
+- Trim names and normalize notes consistently with Start. When the assignment
+  changes, reuse a matching selectable target case-insensitively or create a new
+  selectable target under the timer-start naming rules; reject archived targets.
+- When the assignment is unchanged, allow a note-only edit while retaining the
+  active entry's target even if it has been archived since the timer started.
+- Keep Start/Switch/Restart behavior available as the distinct transition choice.
+  Enable Update active details only when a timer is active and the normalized
+  Track inputs differ from it.
+- After success, show canonical persisted values in Track, refresh target
+  suggestions, and update the persistent active-timer strip without adding a
+  completed entry.
+
+#### Invariants and error handling
+
+- Resolve or create the target and update the active row in one SQLite transaction
+  owned by the background process. A rejection leaves both the active entry and
+  any attempted new target unchanged.
+- Reject missing names, no active timer, an archived reassignment, or normalized
+  values identical to the active entry. Report the error in the persistent TUI
+  message area without changing timer or reminder state.
+- A successful edit does not capture a replacement start time, stop the entry,
+  create another entry, or restart the active-reminder interval.
+- Update future and already-pending active-reminder text to the new canonical
+  project/activity while preserving the existing monotonic reminder deadline.
+
+#### Acceptance criteria
+
+1. With an active timer and changed Track fields, pointer activation or `F11`
+   updates project, activity, and note while preserving entry ID and start time.
+2. The edit creates no completed entry, does not reset elapsed time, and survives
+   TUI and agent restart with its canonical values.
+3. Case-insensitive target reuse and new target creation succeed; archived
+   reassignment and missing names are rejected atomically. A note-only edit on an
+   unchanged archived assignment succeeds.
+4. Identical normalized values disable the TUI action and are rejected by a direct
+   application or protocol request without invoking the clock or repository edit.
+5. Reminder timing is unchanged by success or rejection, while subsequent and
+   pending active prompts use the edited canonical project/activity.
+6. Unit, SQLite integration, IPC/reminder integration, and Textual workflow tests
+   cover normalization, no-op protection, atomic persistence, archived targets,
+   shortcut and pointer use, start preservation, no history creation, recovery,
+   and reminder metadata without deadline reset.
+
+#### Documentation impact
+
+- Top-level tracking requirements now authorize editing active details without a
+  timer transition. Architecture records the transactional update and reminder
+  metadata behavior. The existing schema supports the update, so no migration is
+  required.
+
 ## Feature specification template
 
 Use this structure when a feature is selected. Replace the placeholder rather

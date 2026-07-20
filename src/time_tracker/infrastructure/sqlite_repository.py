@@ -331,6 +331,287 @@ class SQLiteTimerRepository:
             )
         return completed
 
+    def correct_completed(
+        self,
+        entry_id: int,
+        project: str,
+        activity: str,
+        started_at: datetime,
+        stopped_at: datetime,
+        note: str | None,
+    ) -> CompletedTimer:
+        """Correct one completed entry after transactional target and overlap checks."""
+        started_micros = datetime_to_micros(started_at)
+        stopped_micros = datetime_to_micros(stopped_at)
+        if stopped_micros <= started_micros:
+            raise ValueError("corrected stop must be after start")
+
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            original = connection.execute(
+                """
+                SELECT e.id, e.activity_id, p.name AS project,
+                       a.name AS activity
+                FROM time_entries AS e
+                JOIN activities AS a ON a.id = e.activity_id
+                JOIN projects AS p ON p.id = a.project_id
+                WHERE e.id = ? AND e.stopped_at_utc IS NOT NULL
+                """,
+                (entry_id,),
+            ).fetchone()
+            if original is None:
+                raise ValueError(f"unknown completed entry: {entry_id}")
+
+            same_assignment = (
+                project.casefold() == str(original["project"]).casefold()
+                and activity.casefold() == str(original["activity"]).casefold()
+            )
+            if same_assignment:
+                activity_id = int(original["activity_id"])
+                canonical_project = str(original["project"])
+                canonical_activity = str(original["activity"])
+            else:
+                activity_id, canonical_project, canonical_activity = (
+                    self._resolve_selectable_activity(
+                        connection,
+                        project,
+                        activity,
+                        started_micros,
+                    )
+                )
+
+            overlap_id = self._overlapping_entry_id(
+                connection,
+                started_micros,
+                stopped_micros,
+                exclude_entry_id=entry_id,
+            )
+            if overlap_id is not None:
+                raise ValueError(f"corrected entry overlaps entry {overlap_id}")
+
+            connection.execute(
+                """
+                UPDATE time_entries
+                SET activity_id = ?, started_at_utc = ?, stopped_at_utc = ?, note = ?
+                WHERE id = ?
+                """,
+                (activity_id, started_micros, stopped_micros, note, entry_id),
+            )
+
+        return CompletedTimer(
+            entry_id=entry_id,
+            project=canonical_project,
+            activity=canonical_activity,
+            started_at=started_at,
+            stopped_at=stopped_at,
+            note=note,
+        )
+
+    def create_completed(
+        self,
+        project: str,
+        activity: str,
+        started_at: datetime,
+        stopped_at: datetime,
+        note: str | None,
+        created_at: datetime,
+    ) -> CompletedTimer:
+        """Create a closed entry after transactional target and overlap checks."""
+        started_micros = datetime_to_micros(started_at)
+        stopped_micros = datetime_to_micros(stopped_at)
+        created_micros = datetime_to_micros(created_at)
+        if stopped_micros <= started_micros:
+            raise ValueError("manual entry stop must be after start")
+
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            activity_id, canonical_project, canonical_activity = (
+                self._resolve_selectable_activity(
+                    connection,
+                    project,
+                    activity,
+                    created_micros,
+                )
+            )
+            overlap_id = self._overlapping_entry_id(
+                connection,
+                started_micros,
+                stopped_micros,
+            )
+            if overlap_id is not None:
+                raise ValueError(f"manual entry overlaps entry {overlap_id}")
+            cursor = connection.execute(
+                """
+                INSERT INTO time_entries(
+                    activity_id, started_at_utc, stopped_at_utc, note, created_at_utc
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    activity_id,
+                    started_micros,
+                    stopped_micros,
+                    note,
+                    created_micros,
+                ),
+            )
+            if cursor.lastrowid is None:
+                raise RuntimeError("SQLite did not return the inserted entry ID")
+            entry_id = cursor.lastrowid
+
+        return CompletedTimer(
+            entry_id=entry_id,
+            project=canonical_project,
+            activity=canonical_activity,
+            started_at=started_at,
+            stopped_at=stopped_at,
+            note=note,
+        )
+
+    def edit_active(
+        self,
+        project: str,
+        activity: str,
+        note: str | None,
+        updated_at: datetime,
+    ) -> ActiveTimer:
+        """Update active target and note while preserving identity and start."""
+        updated_micros = datetime_to_micros(updated_at)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            original = connection.execute(
+                """
+                SELECT e.id, e.activity_id, e.started_at_utc, e.note,
+                       p.name AS project, a.name AS activity
+                FROM time_entries AS e
+                JOIN activities AS a ON a.id = e.activity_id
+                JOIN projects AS p ON p.id = a.project_id
+                WHERE e.stopped_at_utc IS NULL
+                """
+            ).fetchone()
+            if original is None:
+                raise ValueError("no active timer to edit")
+
+            same_assignment = (
+                project.casefold() == str(original["project"]).casefold()
+                and activity.casefold() == str(original["activity"]).casefold()
+            )
+            if same_assignment:
+                activity_id = int(original["activity_id"])
+                canonical_project = str(original["project"])
+                canonical_activity = str(original["activity"])
+            else:
+                activity_id, canonical_project, canonical_activity = (
+                    self._resolve_selectable_activity(
+                        connection,
+                        project,
+                        activity,
+                        updated_micros,
+                    )
+                )
+            connection.execute(
+                "UPDATE time_entries SET activity_id = ?, note = ? WHERE id = ?",
+                (activity_id, note, int(original["id"])),
+            )
+
+        return ActiveTimer(
+            entry_id=int(original["id"]),
+            project=canonical_project,
+            activity=canonical_activity,
+            started_at=micros_to_datetime(int(original["started_at_utc"])),
+            note=note,
+        )
+
+    @staticmethod
+    def _resolve_selectable_activity(
+        connection: sqlite3.Connection,
+        project: str,
+        activity: str,
+        created_micros: int,
+    ) -> tuple[int, str, str]:
+        project_row = connection.execute(
+            """
+            SELECT id, name, archived_at_utc
+            FROM projects
+            WHERE name = ? COLLATE NOCASE
+            ORDER BY id
+            LIMIT 1
+            """,
+            (project,),
+        ).fetchone()
+        if project_row is None:
+            cursor = connection.execute(
+                """
+                INSERT INTO projects(name, created_at_utc)
+                VALUES (?, ?)
+                """,
+                (project, created_micros),
+            )
+            if cursor.lastrowid is None:
+                raise RuntimeError("SQLite did not return the inserted project ID")
+            project_id = cursor.lastrowid
+            canonical_project = project
+        else:
+            if project_row["archived_at_utc"] is not None:
+                raise ValueError(f"project is archived: {project_row['name']}")
+            project_id = int(project_row["id"])
+            canonical_project = str(project_row["name"])
+
+        activity_row = connection.execute(
+            """
+            SELECT id, name, archived_at_utc
+            FROM activities
+            WHERE project_id = ? AND name = ? COLLATE NOCASE
+            ORDER BY id
+            LIMIT 1
+            """,
+            (project_id, activity),
+        ).fetchone()
+        if activity_row is None:
+            cursor = connection.execute(
+                """
+                INSERT INTO activities(project_id, name, created_at_utc)
+                VALUES (?, ?, ?)
+                """,
+                (project_id, activity, created_micros),
+            )
+            if cursor.lastrowid is None:
+                raise RuntimeError("SQLite did not return the inserted activity ID")
+            activity_id = cursor.lastrowid
+            canonical_activity = activity
+        else:
+            if activity_row["archived_at_utc"] is not None:
+                raise ValueError(f"activity is archived: {activity_row['name']}")
+            activity_id = int(activity_row["id"])
+            canonical_activity = str(activity_row["name"])
+        return activity_id, canonical_project, canonical_activity
+
+    @staticmethod
+    def _overlapping_entry_id(
+        connection: sqlite3.Connection,
+        started_micros: int,
+        stopped_micros: int,
+        *,
+        exclude_entry_id: int | None = None,
+    ) -> int | None:
+        row = connection.execute(
+            """
+            SELECT id
+            FROM time_entries
+            WHERE (? IS NULL OR id <> ?)
+              AND started_at_utc < ?
+              AND (stopped_at_utc IS NULL OR stopped_at_utc > ?)
+            ORDER BY started_at_utc, id
+            LIMIT 1
+            """,
+            (
+                exclude_entry_id,
+                exclude_entry_id,
+                stopped_micros,
+                started_micros,
+            ),
+        ).fetchone()
+        return int(row["id"]) if row is not None else None
+
     @staticmethod
     def _active_from_row(row: sqlite3.Row) -> ActiveTimer:
         return ActiveTimer(

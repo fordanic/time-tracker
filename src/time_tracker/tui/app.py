@@ -10,7 +10,7 @@ from typing import Protocol
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.suggester import SuggestFromList
 from textual.widgets import (
     Button,
@@ -59,6 +59,38 @@ class TrackerGateway(Protocol):
 
     def list_completed(self) -> list[CompletedTimer]:
         """Return completed entries in chronological order."""
+        ...
+
+    def correct_completed(
+        self,
+        entry_id: int,
+        project: str,
+        activity: str,
+        started_at: datetime,
+        stopped_at: datetime,
+        note: str | None = None,
+    ) -> CompletedTimer:
+        """Correct one completed entry and return its canonical values."""
+        ...
+
+    def create_manual_entry(
+        self,
+        project: str,
+        activity: str,
+        started_at: datetime,
+        stopped_at: datetime,
+        note: str | None = None,
+    ) -> CompletedTimer:
+        """Create one completed entry for missed time."""
+        ...
+
+    def edit_active(
+        self,
+        project: str,
+        activity: str,
+        note: str | None = None,
+    ) -> ActiveTimer:
+        """Update active details without restarting the timer."""
         ...
 
     def list_recent_activities(self) -> list[RecentActivity]:
@@ -131,6 +163,7 @@ class TimeTrackerApp(App[None]):
         Binding("f8", "archive_project", "Archive project"),
         Binding("f9", "archive_activity", "Archive activity"),
         Binding("f10", "confirm_active_reminder", "Still active"),
+        Binding("f11", "edit_active", "Update active"),
         Binding("ctrl+q", "quit", "Quit"),
     ]
     _VIEW_CONTENT = {
@@ -256,8 +289,13 @@ class TimeTrackerApp(App[None]):
     }
 
     #history-options {
-        height: 1;
+        height: 3;
         align-horizontal: right;
+    }
+
+    #load-correction-button, #add-manual-entry-button {
+        width: 24;
+        margin-right: 1;
     }
 
     #export-button {
@@ -286,6 +324,28 @@ class TimeTrackerApp(App[None]):
         height: 1fr;
         min-height: 6;
     }
+
+    #correction-title {
+        margin-top: 1;
+        text-style: bold;
+    }
+
+    #correction-target, #correction-times, #correction-actions {
+        height: auto;
+    }
+
+    #correction-target Input, #correction-times Input {
+        width: 1fr;
+    }
+
+    #correction-project, #correction-start {
+        margin-right: 1;
+    }
+
+    #correction-actions Button {
+        width: 1fr;
+        margin-right: 1;
+    }
     """
 
     def __init__(self, client: TrackerGateway) -> None:
@@ -297,6 +357,8 @@ class TimeTrackerApp(App[None]):
         self._completed_entries: list[CompletedTimer] = []
         self._recent_activities: list[RecentActivity] = []
         self._start_action: StartAction | None = None
+        self._editing_entry_id: int | None = None
+        self._creating_manual_entry = False
 
     def compose(self) -> ComposeResult:
         """Compose focused workflows around one persistent active-timer strip."""
@@ -342,7 +404,12 @@ class TimeTrackerApp(App[None]):
                             id="stop-button",
                             variant="warning",
                         )
-                with Vertical(id="review-view", classes="view"):
+                        yield Button(
+                            "Update active details  F11",
+                            id="edit-active-button",
+                            disabled=True,
+                        )
+                with VerticalScroll(id="review-view", classes="view"):
                     with Horizontal(id="export-actions"):
                         yield Input(
                             placeholder="CSV export path (for example ~/times.csv)",
@@ -350,6 +417,14 @@ class TimeTrackerApp(App[None]):
                         )
                         yield Button("Export CSV  F7", id="export-button")
                     with Horizontal(id="history-options"):
+                        yield Button(
+                            "Load selected entry",
+                            id="load-correction-button",
+                        )
+                        yield Button(
+                            "Add missed entry",
+                            id="add-manual-entry-button",
+                        )
                         yield Static("Daily summaries", id="summary-mode-label")
                         yield Switch(id="summary-mode")
                     yield Static("Completed entries", id="history-title")
@@ -358,6 +433,33 @@ class TimeTrackerApp(App[None]):
                         cursor_type="row",
                         zebra_stripes=True,
                     )
+                    yield Static("Correct selected entry", id="correction-title")
+                    with Horizontal(id="correction-target"):
+                        yield Input(
+                            placeholder="Project",
+                            id="correction-project",
+                        )
+                        yield Input(
+                            placeholder="Activity",
+                            id="correction-activity",
+                        )
+                    yield Input(placeholder="Optional note", id="correction-note")
+                    with Horizontal(id="correction-times"):
+                        yield Input(
+                            placeholder="Start (ISO 8601 with UTC offset)",
+                            id="correction-start",
+                        )
+                        yield Input(
+                            placeholder="Stop (ISO 8601 with UTC offset)",
+                            id="correction-stop",
+                        )
+                    with Horizontal(id="correction-actions"):
+                        yield Button(
+                            "Save correction",
+                            id="save-correction-button",
+                            variant="primary",
+                            disabled=True,
+                        )
                 with Vertical(id="manage-view", classes="view"):
                     yield Static(
                         "Archive selectable projects and activities. "
@@ -474,6 +576,25 @@ class TimeTrackerApp(App[None]):
             case_sensitive=False,
         )
 
+    @on(Input.Changed, "#correction-project")
+    async def handle_correction_project_changed(self, event: Input.Changed) -> None:
+        """Refresh correction activity suggestions for the edited project."""
+        project = event.value.strip()
+        try:
+            activities = await asyncio.to_thread(
+                self.client.list_activities,
+                project,
+            )
+        except Exception as error:
+            self._show_message(str(error), error=True)
+            return
+        if self.query_one("#correction-project", Input).value.strip() != project:
+            return
+        self.query_one("#correction-activity", Input).suggester = SuggestFromList(
+            activities,
+            case_sensitive=False,
+        )
+
     @on(Button.Pressed, "#start-button")
     async def handle_start_button(self) -> None:
         """Handle pointer activation of the start action."""
@@ -499,10 +620,30 @@ class TimeTrackerApp(App[None]):
         """Handle pointer activation of the stop action."""
         await self._stop_timer()
 
+    @on(Button.Pressed, "#edit-active-button")
+    async def handle_edit_active_button(self) -> None:
+        """Handle pointer activation of active-detail editing."""
+        await self._edit_active()
+
     @on(Button.Pressed, "#export-button")
     async def handle_export_button(self) -> None:
         """Handle pointer activation of the export action."""
         await self._export_current_view()
+
+    @on(Button.Pressed, "#load-correction-button")
+    async def handle_load_correction_button(self) -> None:
+        """Load the selected completed row into correction fields."""
+        await self._load_selected_correction()
+
+    @on(Button.Pressed, "#add-manual-entry-button")
+    async def handle_add_manual_entry_button(self) -> None:
+        """Prepare the Review editor for one missed-time entry."""
+        await self._start_manual_entry()
+
+    @on(Button.Pressed, "#save-correction-button")
+    async def handle_save_correction_button(self) -> None:
+        """Persist the correction currently shown in Review."""
+        await self._save_correction()
 
     @on(Button.Pressed, "#archive-project-button")
     async def handle_archive_project_button(self) -> None:
@@ -571,6 +712,10 @@ class TimeTrackerApp(App[None]):
         """Confirm an active reminder from the F10 binding."""
         await self._confirm_active_reminder()
 
+    async def action_edit_active(self) -> None:
+        """Update active details from the F11 binding."""
+        await self._edit_active()
+
     async def _start_timer(self) -> None:
         if self.query_one("#start-button", Button).disabled:
             return
@@ -611,6 +756,31 @@ class TimeTrackerApp(App[None]):
         await self._refresh_recent_activities()
         self._render_active()
         await self._refresh_start_action()
+
+    async def _edit_active(self) -> None:
+        button = self.query_one("#edit-active-button", Button)
+        if button.disabled:
+            return
+        try:
+            self.active_timer = await asyncio.to_thread(
+                self.client.edit_active,
+                self.query_one("#project", Input).value,
+                self.query_one("#activity", Input).value,
+                self.query_one("#note", Input).value,
+            )
+        except Exception as error:
+            self._show_message(str(error), error=True)
+            return
+        active = self.active_timer
+        self.query_one("#project", Input).value = active.project
+        self.query_one("#activity", Input).value = active.activity
+        self.query_one("#note", Input).value = active.note or ""
+        await self._refresh_project_suggestions()
+        self._render_active()
+        await self._refresh_start_action()
+        self._show_message(
+            f"Updated active details to {active.project} / {active.activity}."
+        )
 
     async def _refresh_project_suggestions(self) -> None:
         projects = await asyncio.to_thread(self.client.list_projects)
@@ -687,7 +857,7 @@ class TimeTrackerApp(App[None]):
 
     def _set_project_suggestions(self, projects: list[str]) -> None:
         """Apply canonical project suggestions to Track and Manage inputs."""
-        for selector in ("#project", "#manage-project"):
+        for selector in ("#project", "#manage-project", "#correction-project"):
             self.query_one(selector, Input).suggester = SuggestFromList(
                 projects,
                 case_sensitive=False,
@@ -738,13 +908,127 @@ class TimeTrackerApp(App[None]):
         self._render_reminder()
         self._show_message("Timer confirmed; active reminder interval restarted.")
 
-    async def _refresh_history(self) -> None:
+    async def _refresh_history(self, *, preferred_entry_id: int | None = None) -> None:
         try:
             completed = await asyncio.to_thread(self.client.list_completed)
         except Exception as error:
             self._show_message(str(error), error=True)
             return
-        self._render_history(completed)
+        self._render_history(completed, preferred_entry_id=preferred_entry_id)
+
+    async def _load_selected_correction(self) -> None:
+        if self.query_one("#summary-mode", Switch).value:
+            self._show_message(
+                "Switch to completed entries before correcting an entry.",
+                error=True,
+            )
+            return
+        table = self.query_one("#history", DataTable)
+        if not self._completed_entries or table.cursor_row >= len(
+            self._completed_entries
+        ):
+            self._show_message("Select a completed entry to correct.", error=True)
+            return
+        entry = self._completed_entries[table.cursor_row]
+        self._populate_correction(entry)
+        self.query_one("#correction-project", Input).focus()
+
+    async def _start_manual_entry(self) -> None:
+        if self.query_one("#summary-mode", Switch).value:
+            self._show_message(
+                "Switch to completed entries before adding missed time.",
+                error=True,
+            )
+            return
+        stopped_at = datetime.now().astimezone().replace(second=0, microsecond=0)
+        started_at = stopped_at - timedelta(hours=1)
+        self._editing_entry_id = None
+        self._creating_manual_entry = True
+        self.query_one("#correction-title", Static).update("Add missed entry")
+        self.query_one("#correction-project", Input).value = ""
+        self.query_one("#correction-activity", Input).value = ""
+        self.query_one("#correction-note", Input).value = ""
+        self.query_one("#correction-start", Input).value = started_at.isoformat(
+            timespec="seconds"
+        )
+        self.query_one("#correction-stop", Input).value = stopped_at.isoformat(
+            timespec="seconds"
+        )
+        save_button = self.query_one("#save-correction-button", Button)
+        save_button.label = "Create missed entry"
+        save_button.disabled = False
+        self.query_one("#correction-project", Input).focus()
+
+    def _populate_correction(self, entry: CompletedTimer) -> None:
+        self._editing_entry_id = entry.entry_id
+        self._creating_manual_entry = False
+        self.query_one("#correction-title", Static).update("Correct selected entry")
+        self.query_one("#correction-project", Input).value = entry.project
+        self.query_one("#correction-activity", Input).value = entry.activity
+        self.query_one("#correction-note", Input).value = entry.note or ""
+        self.query_one(
+            "#correction-start", Input
+        ).value = entry.started_at.astimezone().isoformat(timespec="seconds")
+        self.query_one(
+            "#correction-stop", Input
+        ).value = entry.stopped_at.astimezone().isoformat(timespec="seconds")
+        save_button = self.query_one("#save-correction-button", Button)
+        save_button.label = "Save correction"
+        save_button.disabled = False
+
+    async def _save_correction(self) -> None:
+        entry_id = self._editing_entry_id
+        if self.query_one("#summary-mode", Switch).value or (
+            entry_id is None and not self._creating_manual_entry
+        ):
+            self._show_message(
+                "Load a completed entry or choose Add missed entry before saving.",
+                error=True,
+            )
+            return
+        try:
+            started_at = _parse_offset_datetime(
+                self.query_one("#correction-start", Input).value,
+                "start",
+            )
+            stopped_at = _parse_offset_datetime(
+                self.query_one("#correction-stop", Input).value,
+                "stop",
+            )
+            project = self.query_one("#correction-project", Input).value
+            activity = self.query_one("#correction-activity", Input).value
+            note = self.query_one("#correction-note", Input).value
+            if self._creating_manual_entry:
+                persisted = await asyncio.to_thread(
+                    self.client.create_manual_entry,
+                    project,
+                    activity,
+                    started_at,
+                    stopped_at,
+                    note,
+                )
+            else:
+                if entry_id is None:
+                    raise RuntimeError("no completed entry is loaded")
+                persisted = await asyncio.to_thread(
+                    self.client.correct_completed,
+                    entry_id,
+                    project,
+                    activity,
+                    started_at,
+                    stopped_at,
+                    note,
+                )
+        except Exception as error:
+            self._show_message(str(error), error=True)
+            return
+        was_manual_entry = self._creating_manual_entry
+        await self._refresh_history(preferred_entry_id=persisted.entry_id)
+        await self._refresh_recent_activities()
+        await self._refresh_project_suggestions()
+        self._populate_correction(persisted)
+        verb = "Added missed entry for" if was_manual_entry else "Corrected"
+        self._show_message(f"{verb} {persisted.project} / {persisted.activity}.")
 
     async def _refresh_recent_activities(self) -> None:
         try:
@@ -760,6 +1044,7 @@ class TimeTrackerApp(App[None]):
         note = self.query_one("#note", Input).value
         selection = (project, activity, note)
         button = self.query_one("#start-button", Button)
+        edit_button = self.query_one("#edit-active-button", Button)
         try:
             action = await asyncio.to_thread(
                 self.client.get_start_action,
@@ -771,6 +1056,7 @@ class TimeTrackerApp(App[None]):
             self._start_action = None
             button.label = "Timer action unavailable  F5"
             button.disabled = True
+            edit_button.disabled = True
             self._show_message(str(error), error=True)
             return
         current_selection = (
@@ -782,6 +1068,9 @@ class TimeTrackerApp(App[None]):
             return
         self._start_action = action
         button.disabled = action is StartAction.ALREADY_TRACKING
+        edit_button.disabled = (
+            self.active_timer is None or action is StartAction.ALREADY_TRACKING
+        )
         if action is StartAction.START:
             button.label = "Start  F5"
         elif action is StartAction.ALREADY_TRACKING:
@@ -848,12 +1137,28 @@ class TimeTrackerApp(App[None]):
         button.label = "Export CSV  F7"
         button.variant = "default"
 
-    def _render_history(self, entries: list[CompletedTimer]) -> None:
+    def _render_history(
+        self,
+        entries: list[CompletedTimer],
+        *,
+        preferred_entry_id: int | None = None,
+    ) -> None:
         self._completed_entries = entries
         table = self.query_one("#history", DataTable)
         table.clear(columns=True)
         summary_mode = self.query_one("#summary-mode", Switch).value
         title = self.query_one("#history-title", Static)
+        load_button = self.query_one("#load-correction-button", Button)
+        manual_button = self.query_one("#add-manual-entry-button", Button)
+        save_button = self.query_one("#save-correction-button", Button)
+        correction_inputs = self.query("#review-view Input").exclude("#export-path")
+        for correction_input in correction_inputs:
+            correction_input.disabled = summary_mode
+        load_button.disabled = summary_mode or not entries
+        manual_button.disabled = summary_mode
+        save_button.disabled = summary_mode or (
+            self._editing_entry_id is None and not self._creating_manual_entry
+        )
         if summary_mode:
             title.update("Daily summaries")
             table.add_columns("Date", "Project", "Activity", "Duration")
@@ -882,6 +1187,11 @@ class TimeTrackerApp(App[None]):
                 entry.note or "",
                 key=str(entry.entry_id),
             )
+        if preferred_entry_id is not None:
+            for index, entry in enumerate(entries):
+                if entry.entry_id == preferred_entry_id:
+                    table.move_cursor(row=index)
+                    break
 
     def _render_recent_activities(self, recent: list[RecentActivity]) -> None:
         self._recent_activities = recent
@@ -900,13 +1210,16 @@ class TimeTrackerApp(App[None]):
     def _render_active(self) -> None:
         active_widgets = self.query("#active-timer")
         stop_buttons = self.query("#stop-button")
-        if not active_widgets or not stop_buttons:
+        edit_buttons = self.query("#edit-active-button")
+        if not active_widgets or not stop_buttons or not edit_buttons:
             return
         active_widget = active_widgets.first(Static)
         stop_button = stop_buttons.first(Button)
+        edit_button = edit_buttons.first(Button)
         if self.active_timer is None:
             active_widget.update("No timer running")
             stop_button.disabled = True
+            edit_button.disabled = True
             return
 
         timer = self.active_timer
@@ -958,3 +1271,13 @@ def _format_duration(duration: timedelta) -> str:
     hours, remainder = divmod(total_seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def _parse_offset_datetime(value: str, label: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value.strip())
+    except ValueError as error:
+        raise ValueError(f"{label} must be an ISO 8601 timestamp") from error
+    if parsed.tzinfo is None:
+        raise ValueError(f"{label} must include a UTC offset")
+    return parsed

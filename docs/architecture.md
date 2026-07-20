@@ -104,6 +104,24 @@ TimeEntry(id, activity_id, started_at_utc, stopped_at_utc?, note?, created_at)
   starts the next with one captured timestamp. An unchanged pair and normalized
   note is rejected in the application layer before the repository or clock is
   invoked.
+- Edit active-entry details through an agent-owned application use case and one
+  SQLite transaction. The transaction preserves the active row's identity and
+  timestamps, retains an unchanged archived assignment when only its note changes,
+  or resolves/creates a selectable changed target before updating activity and
+  note. The agent updates active-reminder metadata after commit without signaling
+  a timer transition or resetting the monotonic deadline.
+- Correct a completed entry through an agent-owned application use case and one
+  SQLite transaction. That transaction resolves or creates a selectable target,
+  rejects archived reassignment, checks the corrected half-open interval against
+  every other completed or active entry, and updates the existing row only after
+  all checks pass. Adjacent interval boundaries are valid; no schema or revision
+  history is added for the first correction slice.
+- Create a manual completed entry through an agent-owned application use case and
+  one SQLite transaction. The application validates normalized values and captures
+  the creation time from its injected clock; the transaction resolves or creates
+  a selectable target, applies the same half-open overlap check as correction, and
+  inserts the closed entry only after every check passes. The active timer is
+  read for overlap validation but is never mutated.
 - Archive projects and activities through agent-owned application use cases.
   Selection queries exclude archived rows, while archived names remain reserved;
   an archive transition does not mutate the active timer or historical entries.

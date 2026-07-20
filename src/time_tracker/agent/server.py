@@ -7,6 +7,7 @@ import json
 import logging
 import sqlite3
 from dataclasses import asdict
+from datetime import datetime
 from multiprocessing import AuthenticationError
 from multiprocessing.connection import Listener
 from pathlib import Path
@@ -124,6 +125,7 @@ async def _serve_connections(
                     timer_changed,
                     notification_smoke,
                     active_confirmed,
+                    active_edited,
                 ) = await asyncio.to_thread(
                     _handle_request,
                     request_bytes,
@@ -133,6 +135,10 @@ async def _serve_connections(
                 )
                 if active_confirmed:
                     coordinator.confirm_active()
+                if active_edited:
+                    edited_active = await asyncio.to_thread(service.get_active)
+                    if edited_active is not None:
+                        coordinator.active_edited(edited_active)
                 if notification_smoke:
                     try:
                         await notifier.send(Reminder(ReminderKind.INACTIVE))
@@ -164,7 +170,7 @@ def _handle_request(
     service: TrackingService,
     export_service: ExportService,
     pending_reminder: Reminder | None = None,
-) -> tuple[dict[str, object], bool, bool, bool, bool]:
+) -> tuple[dict[str, object], bool, bool, bool, bool, bool]:
     request_id: object = None
     try:
         decoded: object = json.loads(payload.decode("utf-8"))
@@ -199,6 +205,35 @@ def _handle_request(
             result = service.list_activities(_required_str(params, "project"))
         elif method == "list_completed":
             result = [_timer_dict(timer) for timer in service.list_completed()]
+        elif method == "correct_completed":
+            result = _timer_dict(
+                service.correct_completed(
+                    _required_int(params, "entry_id"),
+                    _required_str(params, "project"),
+                    _required_str(params, "activity"),
+                    _required_datetime(params, "started_at"),
+                    _required_datetime(params, "stopped_at"),
+                    _optional_str(params, "note"),
+                )
+            )
+        elif method == "create_manual_entry":
+            result = _timer_dict(
+                service.create_manual_entry(
+                    _required_str(params, "project"),
+                    _required_str(params, "activity"),
+                    _required_datetime(params, "started_at"),
+                    _required_datetime(params, "stopped_at"),
+                    _optional_str(params, "note"),
+                )
+            )
+        elif method == "edit_active":
+            result = _timer_dict(
+                service.edit_active(
+                    _required_str(params, "project"),
+                    _required_str(params, "activity"),
+                    _optional_str(params, "note"),
+                )
+            )
         elif method == "list_recent_activities":
             result = [asdict(pair) for pair in service.list_recent_activities()]
         elif method == "get_start_action":
@@ -251,6 +286,7 @@ def _handle_request(
                 False,
                 False,
                 False,
+                False,
             )
         else:
             raise ValueError(f"unknown method: {method}")
@@ -263,6 +299,7 @@ def _handle_request(
             method in {"start", "stop"},
             method == "notification_smoke",
             method == "confirm_active_reminder" and result is True,
+            method == "edit_active",
         )
     except ExportDestinationExistsError as error:
         return (
@@ -274,6 +311,7 @@ def _handle_request(
             False,
             False,
             False,
+            False,
         )
     except (OSError, RuntimeError, sqlite3.Error, TypeError, ValueError) as error:
         return (
@@ -282,6 +320,7 @@ def _handle_request(
                 "error": {"code": "invalid_request", "message": str(error)},
             },
             True,
+            False,
             False,
             False,
             False,
@@ -329,3 +368,21 @@ def _required_bool(params: dict[str, object], name: str) -> bool:
     if not isinstance(value, bool):
         raise ValueError(f"{name} must be a boolean")
     return value
+
+
+def _required_int(params: dict[str, object], name: str) -> int:
+    value = params.get(name)
+    if not isinstance(value, int):
+        raise ValueError(f"{name} must be an integer")
+    return value
+
+
+def _required_datetime(params: dict[str, object], name: str) -> datetime:
+    value = _required_str(params, name)
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as error:
+        raise ValueError(f"{name} must be an ISO 8601 timestamp") from error
+    if parsed.tzinfo is None:
+        raise ValueError(f"{name} must include a UTC offset")
+    return parsed

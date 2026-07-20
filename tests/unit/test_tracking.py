@@ -11,6 +11,7 @@ from time_tracker.application.tracking import (
     StartAction,
     TimerRepository,
     TrackingService,
+    UnchangedActiveEntryError,
 )
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
 
@@ -38,6 +39,7 @@ class ActionRepository:
     def __init__(self, active: ActiveTimer | None) -> None:
         self.active = active
         self.starts: list[tuple[str, str, datetime, str | None]] = []
+        self.edits: list[tuple[str, str, str | None, datetime]] = []
 
     def get_active(self) -> ActiveTimer | None:
         return self.active
@@ -58,6 +60,81 @@ class ActionRepository:
             note=note,
         )
         return self.active
+
+    def edit_active(
+        self,
+        project: str,
+        activity: str,
+        note: str | None,
+        updated_at: datetime,
+    ) -> ActiveTimer:
+        if self.active is None:
+            raise ValueError("no active timer")
+        self.edits.append((project, activity, note, updated_at))
+        self.active = ActiveTimer(
+            self.active.entry_id,
+            project,
+            activity,
+            self.active.started_at,
+            note,
+        )
+        return self.active
+
+
+class CorrectionRepository:
+    def __init__(self) -> None:
+        self.corrections: list[
+            tuple[int, str, str, datetime, datetime, str | None]
+        ] = []
+
+    def correct_completed(
+        self,
+        entry_id: int,
+        project: str,
+        activity: str,
+        started_at: datetime,
+        stopped_at: datetime,
+        note: str | None,
+    ) -> CompletedTimer:
+        self.corrections.append(
+            (entry_id, project, activity, started_at, stopped_at, note)
+        )
+        return CompletedTimer(
+            entry_id,
+            project,
+            activity,
+            started_at,
+            stopped_at,
+            note,
+        )
+
+
+class ManualEntryRepository:
+    def __init__(self) -> None:
+        self.created: list[
+            tuple[str, str, datetime, datetime, str | None, datetime]
+        ] = []
+
+    def create_completed(
+        self,
+        project: str,
+        activity: str,
+        started_at: datetime,
+        stopped_at: datetime,
+        note: str | None,
+        created_at: datetime,
+    ) -> CompletedTimer:
+        self.created.append(
+            (project, activity, started_at, stopped_at, note, created_at)
+        )
+        return CompletedTimer(
+            9,
+            project,
+            activity,
+            started_at,
+            stopped_at,
+            note,
+        )
 
 
 class RecordingClock:
@@ -182,6 +259,121 @@ def test_restart_normalizes_note_and_captures_one_transition_instant() -> None:
 
     assert restarted.note == "New note"
     assert repository.starts == [("Website", "Implementation", transition, "New note")]
+    assert clock.calls == 1
+
+
+def test_completed_correction_normalizes_values_and_requires_positive_interval() -> (
+    None
+):
+    repository = CorrectionRepository()
+    service = TrackingService(cast(TimerRepository, repository))
+    started_at = datetime(2026, 7, 20, 10, tzinfo=UTC)
+    stopped_at = started_at + timedelta(hours=1)
+
+    corrected = service.correct_completed(
+        7,
+        " Website ",
+        " Review ",
+        started_at,
+        stopped_at,
+        "  Revised note  ",
+    )
+
+    assert corrected.note == "Revised note"
+    assert repository.corrections == [
+        (7, "Website", "Review", started_at, stopped_at, "Revised note")
+    ]
+
+    with pytest.raises(ValueError, match="stop must be after start"):
+        service.correct_completed(
+            7,
+            "Website",
+            "Review",
+            stopped_at,
+            stopped_at,
+        )
+    with pytest.raises(ValueError, match="timezone-aware"):
+        service.correct_completed(
+            7,
+            "Website",
+            "Review",
+            started_at.replace(tzinfo=None),
+            stopped_at,
+        )
+    assert len(repository.corrections) == 1
+
+
+def test_manual_entry_normalizes_values_and_captures_creation_time() -> None:
+    repository = ManualEntryRepository()
+    created_at = datetime(2026, 7, 20, 12, tzinfo=UTC)
+    clock = RecordingClock(created_at)
+    service = TrackingService(cast(TimerRepository, repository), clock)
+    started_at = datetime(2026, 7, 19, 10, tzinfo=UTC)
+    stopped_at = started_at + timedelta(hours=1)
+
+    entry = service.create_manual_entry(
+        " Website ",
+        " Review ",
+        started_at,
+        stopped_at,
+        "  Missed work  ",
+    )
+
+    assert entry.note == "Missed work"
+    assert repository.created == [
+        (
+            "Website",
+            "Review",
+            started_at,
+            stopped_at,
+            "Missed work",
+            created_at,
+        )
+    ]
+    assert clock.calls == 1
+
+    with pytest.raises(ValueError, match="stop must be after start"):
+        service.create_manual_entry(
+            "Website",
+            "Review",
+            stopped_at,
+            stopped_at,
+        )
+    assert clock.calls == 1
+    assert len(repository.created) == 1
+
+
+def test_active_edit_preserves_start_and_rejects_unchanged_values_before_clock() -> (
+    None
+):
+    started_at = datetime(2026, 7, 20, 8, tzinfo=UTC)
+    updated_at = started_at + timedelta(hours=1)
+    original = ActiveTimer(
+        4,
+        "Website",
+        "Planning",
+        started_at,
+        "Original",
+    )
+    repository = ActionRepository(original)
+    clock = RecordingClock(updated_at)
+    service = TrackingService(cast(TimerRepository, repository), clock)
+
+    with pytest.raises(UnchangedActiveEntryError, match="unchanged"):
+        service.edit_active(" website ", "PLANNING", " Original ")
+    assert repository.edits == []
+    assert clock.calls == 0
+
+    edited = service.edit_active(
+        " Client ",
+        " Review ",
+        " Revised ",
+    )
+
+    assert edited.entry_id == original.entry_id
+    assert edited.started_at == original.started_at
+    assert edited.note == "Revised"
+    assert repository.edits == [("Client", "Review", "Revised", updated_at)]
     assert clock.calls == 1
 
 
