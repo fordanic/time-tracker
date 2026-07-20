@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from textual.pilot import Pilot
 from textual.widgets import (
     Button,
     ContentSwitcher,
@@ -450,8 +452,12 @@ async def test_user_corrects_a_selected_completed_entry_in_review(
         async with app.run_test() as pilot:
             await pilot.press("f2")
             await pilot.pause()
-            assert await pilot.click("#load-correction-button")
-            await pilot.pause()
+            app.query_one("#load-correction-button", Button).press()
+            await _wait_for_ui(
+                pilot,
+                lambda: app.query_one("#correction-project", Input).value == "Website",
+                "selected entry was not loaded into the correction form",
+            )
 
             assert app.query_one("#correction-project", Input).value == "Website"
             assert app.query_one("#correction-note", Input).value == "Original"
@@ -466,7 +472,14 @@ async def test_user_corrects_a_selected_completed_entry_in_review(
             ).isoformat()
 
             app.query_one("#save-correction-button", Button).press()
-            await pilot.pause()
+            await _wait_for_ui(
+                pilot,
+                lambda: (
+                    "Corrected Client / Review"
+                    in str(app.query_one("#message", Static).render())
+                ),
+                "correction did not complete",
+            )
 
             corrected = client.list_completed()[0]
             assert corrected.entry_id == original.entry_id
@@ -483,7 +496,14 @@ async def test_user_corrects_a_selected_completed_entry_in_review(
 
             app.query_one("#correction-start", Input).value = "2026-07-20T08:00:00"
             app.query_one("#save-correction-button", Button).press()
-            await pilot.pause()
+            await _wait_for_ui(
+                pilot,
+                lambda: (
+                    "start must include a UTC offset"
+                    in str(app.query_one("#message", Static).render())
+                ),
+                "invalid correction was not reported",
+            )
             assert "start must include a UTC offset" in str(
                 app.query_one("#message", Static).render()
             )
@@ -525,8 +545,15 @@ async def test_user_adds_missed_time_without_changing_active_timer(
         async with app.run_test() as pilot:
             await pilot.press("f2")
             await pilot.pause()
-            assert await pilot.click("#add-manual-entry-button")
-            await pilot.pause()
+            app.query_one("#add-manual-entry-button", Button).press()
+            await _wait_for_ui(
+                pilot,
+                lambda: (
+                    str(app.query_one("#save-correction-button", Button).label)
+                    == "Create missed entry"
+                ),
+                "missed-entry form was not prepared",
+            )
 
             assert app.query_one("#correction-project", Input).value == ""
             assert (
@@ -550,7 +577,14 @@ async def test_user_adds_missed_time_without_changing_active_timer(
                 started_at + timedelta(hours=2)
             ).isoformat()
             app.query_one("#save-correction-button", Button).press()
-            await pilot.pause()
+            await _wait_for_ui(
+                pilot,
+                lambda: (
+                    "Added missed entry for Client / Review"
+                    in str(app.query_one("#message", Static).render())
+                ),
+                "missed entry did not complete",
+            )
 
             assert client.get_active() == active
             entries = client.list_completed()
@@ -657,6 +691,19 @@ def _wait_until_ready(client: AgentClient) -> None:
         except AgentUnavailableError:
             time.sleep(0.01)
     raise AssertionError("agent did not start")
+
+
+async def _wait_for_ui(
+    pilot: Pilot[None],
+    condition: Callable[[], bool],
+    failure: str,
+) -> None:
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        if condition():
+            return
+        await pilot.pause(0.01)
+    raise AssertionError(failure)
 
 
 def _wait_for_pending_reminder(
