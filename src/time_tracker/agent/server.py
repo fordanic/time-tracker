@@ -201,6 +201,12 @@ def _handle_request(
             result = [_timer_dict(timer) for timer in service.list_completed()]
         elif method == "list_recent_activities":
             result = [asdict(pair) for pair in service.list_recent_activities()]
+        elif method == "get_start_action":
+            result = service.get_start_action(
+                _required_str(params, "project"),
+                _required_str(params, "activity"),
+                _optional_str(params, "note"),
+            ).value
         elif method == "archive_project":
             result = {
                 "project": service.archive_project(_required_str(params, "project"))

@@ -44,6 +44,10 @@ status. The initial product baseline is implemented. The Textual TUI connects to
 a single authenticated background process. It creates or reuses project and
 activity names, starts, switches, and stops one SQLite-backed timer, and restores
 an active timer after TUI closure, agent restart, or forced process termination.
+The primary action explicitly says whether it will start, switch, or restart work;
+an unchanged project/activity and normalized note shows Already tracking and is
+disabled instead of fragmenting the active entry. Changing only the note restarts
+the same pair with adjacent entries at one transactional timestamp.
 The background process also owns monotonic reminder scheduling, TOML-configured
 intervals, and native notification delivery after the TUI closes. The TUI lists
 completed entries chronologically with their local start and stop times, derived
@@ -106,7 +110,10 @@ uv run pytest
 ```
 
 Run `uv run time-tracker` to open the TUI. Enter a project and activity, then use
-the buttons or `F5`/`F6` to start and stop. Existing project and activity names
+the primary button or `F5` and the Stop button or `F6`. The primary action says
+Start with no active timer, names both pairs before a switch, says Already
+tracking and is disabled for an unchanged selection, or says Restart with new
+note when only the normalized note differs. Existing project and activity names
 are suggested as you type; press the right arrow to accept a completion. Closing
 the TUI leaves the background process and any active timer running. Run
 `uv run time-tracker --stop-agent` to stop only the process; the persisted timer

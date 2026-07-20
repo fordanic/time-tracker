@@ -83,7 +83,7 @@ TUI opens, while keeping the user in control of the new timer and its note.
 
 ### Explicit Start, Switch, and Restart actions
 
-**Status:** Approved
+**Status:** Implemented
 
 #### Purpose
 
