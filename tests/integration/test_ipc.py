@@ -189,6 +189,49 @@ def test_agent_sends_reminders_after_the_tui_disconnects(tmp_path: Path) -> None
     assert not thread.is_alive()
 
 
+def test_active_reminder_can_be_polled_confirmed_or_ignored(tmp_path: Path) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    notifier = RecordingNotifier()
+    thread = threading.Thread(
+        target=serve,
+        args=(paths,),
+        kwargs={
+            "notifier": notifier,
+            "reminder_intervals": ReminderIntervals(inactive=None, active=0.15),
+        },
+        daemon=True,
+    )
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        started = client.start("Connected", "Confirmation")
+        reminder = _wait_for_pending_reminder(client, ReminderKind.ACTIVE)
+
+        assert reminder == Reminder(
+            ReminderKind.ACTIVE,
+            project="Connected",
+            activity="Confirmation",
+        )
+        first_count = len(notifier.reminders)
+        _wait_for_reminder_count(notifier, first_count + 1)
+        assert client.get_active() == started
+
+        assert client.confirm_active_reminder() is True
+        assert client.get_reminder() is None
+        assert client.get_active() == started
+        assert client.confirm_active_reminder() is False
+
+        _wait_for_pending_reminder(client, ReminderKind.ACTIVE)
+        assert client.get_active() == started
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+
+
 def test_agent_uses_reminder_intervals_from_configuration(tmp_path: Path) -> None:
     paths = AgentPaths.in_directory(tmp_path)
     paths.config.write_text(
@@ -269,3 +312,25 @@ def _wait_for_reminder(
             return
         time.sleep(0.01)
     raise AssertionError(f"{kind.value} reminder was not delivered")
+
+
+def _wait_for_pending_reminder(
+    client: AgentClient,
+    kind: ReminderKind,
+) -> Reminder:
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        reminder = client.get_reminder()
+        if reminder is not None and reminder.kind is kind:
+            return reminder
+        time.sleep(0.01)
+    raise AssertionError(f"{kind.value} reminder was not exposed over IPC")
+
+
+def _wait_for_reminder_count(notifier: RecordingNotifier, count: int) -> None:
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        if len(notifier.reminders) >= count:
+            return
+        time.sleep(0.01)
+    raise AssertionError(f"fewer than {count} reminders were delivered")

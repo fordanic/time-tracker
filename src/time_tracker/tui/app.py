@@ -15,6 +15,7 @@ from textual.suggester import SuggestFromList
 from textual.widgets import Button, DataTable, Footer, Header, Input, Static
 
 from time_tracker.application.exporting import ExportDestinationExistsError
+from time_tracker.application.reminders import Reminder, ReminderKind
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
 
 
@@ -23,6 +24,14 @@ class TrackerGateway(Protocol):
 
     def get_active(self) -> ActiveTimer | None:
         """Return the recovered active timer."""
+        ...
+
+    def get_reminder(self) -> Reminder | None:
+        """Return the latest reminder due in the background process."""
+        ...
+
+    def confirm_active_reminder(self) -> bool:
+        """Confirm the active timer and restart its reminder interval."""
         ...
 
     def list_projects(self) -> list[str]:
@@ -74,6 +83,7 @@ class TimeTrackerApp(App[None]):
         Binding("f7", "export_completed", "Export CSV"),
         Binding("f8", "archive_project", "Archive project"),
         Binding("f9", "archive_activity", "Archive activity"),
+        Binding("f10", "confirm_active_reminder", "Still active"),
         Binding("ctrl+q", "quit", "Quit"),
     ]
     CSS = """
@@ -95,6 +105,26 @@ class TimeTrackerApp(App[None]):
         text-align: center;
         background: $panel;
         content-align: center middle;
+    }
+
+    #reminder {
+        display: none;
+        height: auto;
+        margin-bottom: 1;
+        padding: 0 1;
+        background: $warning-muted;
+    }
+
+    #reminder-message {
+        width: 1fr;
+        height: auto;
+        content-align: left middle;
+    }
+
+    #confirm-active-reminder-button {
+        display: none;
+        width: 24;
+        margin-left: 1;
     }
 
     Input {
@@ -159,6 +189,7 @@ class TimeTrackerApp(App[None]):
         super().__init__()
         self.client = client
         self.active_timer: ActiveTimer | None = None
+        self.pending_reminder: Reminder | None = None
         self._pending_export_path: Path | None = None
 
     def compose(self) -> ComposeResult:
@@ -166,6 +197,13 @@ class TimeTrackerApp(App[None]):
         yield Header()
         with Vertical(id="tracker"):
             yield Static("No timer running", id="active-timer")
+            with Horizontal(id="reminder"):
+                yield Static("", id="reminder-message")
+                yield Button(
+                    "Still active  F10",
+                    id="confirm-active-reminder-button",
+                    variant="primary",
+                )
             with Horizontal(id="project-actions"):
                 yield Input(
                     placeholder="Project (type to reuse existing)",
@@ -196,6 +234,7 @@ class TimeTrackerApp(App[None]):
     async def on_mount(self) -> None:
         """Recover any persisted active timer when the TUI reconnects."""
         self.set_interval(1.0, self._render_active)
+        self.set_interval(1.0, self._refresh_reminder)
         history = self.query_one("#history", DataTable)
         history.add_columns("Project", "Activity", "Start", "Stop", "Duration", "Note")
         try:
@@ -211,6 +250,7 @@ class TimeTrackerApp(App[None]):
             )
             self._render_history(completed)
         self._render_active()
+        await self._refresh_reminder()
 
     @on(Input.Changed, "#project")
     async def handle_project_changed(self, event: Input.Changed) -> None:
@@ -256,6 +296,11 @@ class TimeTrackerApp(App[None]):
         """Handle pointer activation of activity archiving."""
         await self._archive_activity()
 
+    @on(Button.Pressed, "#confirm-active-reminder-button")
+    async def handle_confirm_active_reminder_button(self) -> None:
+        """Confirm an active reminder from its visible prompt."""
+        await self._confirm_active_reminder()
+
     @on(Input.Changed, "#export-path")
     def handle_export_path_changed(self) -> None:
         """Cancel overwrite confirmation when the destination is edited."""
@@ -282,6 +327,10 @@ class TimeTrackerApp(App[None]):
         """Archive the entered activity from the F9 binding."""
         await self._archive_activity()
 
+    async def action_confirm_active_reminder(self) -> None:
+        """Confirm an active reminder from the F10 binding."""
+        await self._confirm_active_reminder()
+
     async def _start_timer(self) -> None:
         project = self.query_one("#project", Input).value
         activity = self.query_one("#activity", Input).value
@@ -296,6 +345,8 @@ class TimeTrackerApp(App[None]):
         except Exception as error:
             self._show_message(str(error), error=True)
             return
+        self.pending_reminder = None
+        self._render_reminder()
         self._show_message("Timer persisted and running.")
         self.query_one("#project", Input).value = self.active_timer.project
         self.query_one("#activity", Input).value = self.active_timer.activity
@@ -360,6 +411,8 @@ class TimeTrackerApp(App[None]):
             self._show_message(str(error), error=True)
             return
         self.active_timer = None
+        self.pending_reminder = None
+        self._render_reminder()
         if completed is None:
             self._show_message("No active timer to stop.")
         else:
@@ -369,6 +422,30 @@ class TimeTrackerApp(App[None]):
             )
             await self._refresh_history()
         self._render_active()
+
+    async def _refresh_reminder(self) -> None:
+        try:
+            reminder = await asyncio.to_thread(self.client.get_reminder)
+        except Exception:
+            return
+        if reminder == self.pending_reminder:
+            return
+        self.pending_reminder = reminder
+        self._render_reminder()
+
+    async def _confirm_active_reminder(self) -> None:
+        try:
+            confirmed = await asyncio.to_thread(self.client.confirm_active_reminder)
+        except Exception as error:
+            self._show_message(str(error), error=True)
+            return
+        if not confirmed:
+            await self._refresh_reminder()
+            self._show_message("No active reminder to confirm.", error=True)
+            return
+        self.pending_reminder = None
+        self._render_reminder()
+        self._show_message("Timer confirmed; active reminder interval restarted.")
 
     async def _refresh_history(self) -> None:
         try:
@@ -448,6 +525,27 @@ class TimeTrackerApp(App[None]):
             f"Started {local_start} · {_format_duration(elapsed)}{note}"
         )
         stop_button.disabled = False
+
+    def _render_reminder(self) -> None:
+        panel = self.query_one("#reminder", Horizontal)
+        button = self.query_one("#confirm-active-reminder-button", Button)
+        reminder = self.pending_reminder
+        panel.display = reminder is not None
+        button.display = reminder is not None and reminder.kind is ReminderKind.ACTIVE
+        if reminder is None:
+            self.query_one("#reminder-message", Static).update("")
+            return
+        if reminder.kind is ReminderKind.ACTIVE:
+            timer_name = " / ".join(
+                part for part in (reminder.project, reminder.activity) if part
+            )
+            message = (
+                f"Still tracking {timer_name}? Confirm to restart the reminder "
+                "interval, or stop the timer."
+            )
+        else:
+            message = "No timer is running. Start one if you are working."
+        self.query_one("#reminder-message", Static).update(message)
 
     def _show_message(self, message: str, *, error: bool = False) -> None:
         widget = self.query_one("#message", Static)

@@ -116,12 +116,16 @@ async def _serve_connections(
                     running,
                     timer_changed,
                     notification_smoke,
+                    active_confirmed,
                 ) = await asyncio.to_thread(
                     _handle_request,
                     request_bytes,
                     service,
                     export_service,
+                    coordinator.pending_reminder(),
                 )
+                if active_confirmed:
+                    coordinator.confirm_active()
                 if notification_smoke:
                     try:
                         await notifier.send(Reminder(ReminderKind.INACTIVE))
@@ -152,7 +156,8 @@ def _handle_request(
     payload: bytes,
     service: TrackingService,
     export_service: ExportService,
-) -> tuple[dict[str, object], bool, bool, bool]:
+    pending_reminder: Reminder | None = None,
+) -> tuple[dict[str, object], bool, bool, bool, bool]:
     request_id: object = None
     try:
         decoded: object = json.loads(payload.decode("utf-8"))
@@ -174,6 +179,13 @@ def _handle_request(
             result: object = {"version": PROTOCOL_VERSION}
         elif method == "get_active":
             result = _timer_dict(service.get_active())
+        elif method == "get_reminder":
+            result = _reminder_dict(pending_reminder)
+        elif method == "confirm_active_reminder":
+            result = (
+                pending_reminder is not None
+                and pending_reminder.kind is ReminderKind.ACTIVE
+            )
         elif method == "list_projects":
             result = service.list_projects()
         elif method == "list_activities":
@@ -211,7 +223,13 @@ def _handle_request(
             result = None
         elif method == "shutdown":
             result = None
-            return {"request_id": request_id, "result": result}, False, False, False
+            return (
+                {"request_id": request_id, "result": result},
+                False,
+                False,
+                False,
+                False,
+            )
         else:
             raise ValueError(f"unknown method: {method}")
         return (
@@ -222,6 +240,7 @@ def _handle_request(
             True,
             method in {"start", "stop"},
             method == "notification_smoke",
+            method == "confirm_active_reminder" and result is True,
         )
     except ExportDestinationExistsError as error:
         return (
@@ -232,6 +251,7 @@ def _handle_request(
             True,
             False,
             False,
+            False,
         )
     except (OSError, RuntimeError, sqlite3.Error, TypeError, ValueError) as error:
         return (
@@ -240,6 +260,7 @@ def _handle_request(
                 "error": {"code": "invalid_request", "message": str(error)},
             },
             True,
+            False,
             False,
             False,
         )
@@ -253,6 +274,16 @@ def _timer_dict(timer: ActiveTimer | CompletedTimer | None) -> object:
     if isinstance(timer, CompletedTimer):
         values["stopped_at"] = timer.stopped_at.isoformat()
     return values
+
+
+def _reminder_dict(reminder: Reminder | None) -> object:
+    if reminder is None:
+        return None
+    return {
+        "kind": reminder.kind.value,
+        "project": reminder.project,
+        "activity": reminder.activity,
+    }
 
 
 def _required_str(params: dict[str, object], name: str) -> str:

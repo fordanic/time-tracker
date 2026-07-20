@@ -8,10 +8,16 @@ import pytest
 from textual.widgets import Button, DataTable, Input, Static
 
 from time_tracker.agent.server import serve
+from time_tracker.application.reminders import Reminder, ReminderIntervals, ReminderKind
 from time_tracker.infrastructure.ipc import AgentClient, AgentUnavailableError
 from time_tracker.infrastructure.paths import AgentPaths
 from time_tracker.infrastructure.sqlite_repository import SQLiteTimerRepository
 from time_tracker.tui.app import TimeTrackerApp
+
+
+class SilentNotifier:
+    async def send(self, reminder: Reminder) -> None:
+        """Accept test reminders without contacting the host desktop."""
 
 
 @pytest.mark.asyncio
@@ -124,6 +130,47 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
     assert not thread.is_alive()
 
 
+@pytest.mark.asyncio
+async def test_user_confirms_an_active_reminder_from_the_tui(tmp_path: Path) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    thread = threading.Thread(
+        target=serve,
+        args=(paths,),
+        kwargs={
+            "notifier": SilentNotifier(),
+            "reminder_intervals": ReminderIntervals(inactive=None, active=0.25),
+        },
+        daemon=True,
+    )
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        started = client.start("Reminder", "Interaction")
+        _wait_for_pending_reminder(client, ReminderKind.ACTIVE)
+
+        app = TimeTrackerApp(client)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            prompt = str(app.query_one("#reminder-message", Static).render())
+            assert "Still tracking Reminder / Interaction?" in prompt
+
+            assert await pilot.click("#confirm-active-reminder-button")
+            await pilot.pause()
+
+            assert "interval restarted" in str(
+                app.query_one("#message", Static).render()
+            )
+            assert app.pending_reminder is None
+            assert client.get_active() == started
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+
+
 def _wait_until_ready(client: AgentClient) -> None:
     deadline = time.monotonic() + 2
     while time.monotonic() < deadline:
@@ -133,3 +180,16 @@ def _wait_until_ready(client: AgentClient) -> None:
         except AgentUnavailableError:
             time.sleep(0.01)
     raise AssertionError("agent did not start")
+
+
+def _wait_for_pending_reminder(
+    client: AgentClient,
+    kind: ReminderKind,
+) -> None:
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        reminder = client.get_reminder()
+        if reminder is not None and reminder.kind is kind:
+            return
+        time.sleep(0.01)
+    raise AssertionError(f"{kind.value} reminder was not exposed over IPC")

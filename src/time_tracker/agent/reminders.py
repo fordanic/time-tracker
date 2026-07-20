@@ -6,6 +6,7 @@ import asyncio
 import logging
 
 from time_tracker.application.reminders import (
+    Reminder,
     ReminderIntervals,
     ReminderKind,
     ReminderSchedule,
@@ -31,12 +32,27 @@ class ReminderCoordinator:
         self._schedule = ReminderSchedule(intervals)
         self._changed = asyncio.Event()
         self._generation = 0
+        self._pending: Reminder | None = None
         self._stopping = False
 
     def timer_changed(self) -> None:
         """Wake the scheduler after a successfully persisted transition."""
+        self._pending = None
         self._generation += 1
         self._changed.set()
+
+    def pending_reminder(self) -> Reminder | None:
+        """Return the latest due reminder for a connected foreground client."""
+        return self._pending
+
+    def confirm_active(self) -> bool:
+        """Clear an active prompt and restart its interval from now."""
+        if self._pending is None or self._pending.kind is not ReminderKind.ACTIVE:
+            return False
+        self._pending = None
+        self._generation += 1
+        self._changed.set()
+        return True
 
     def stop(self) -> None:
         """Wake and stop the scheduler without modifying timer state."""
@@ -62,6 +78,7 @@ class ReminderCoordinator:
             except TimeoutError:
                 reminder = self._schedule.take_due()
                 if reminder is not None:
+                    self._pending = reminder
                     try:
                         await self._notifier.send(reminder)
                     except Exception:

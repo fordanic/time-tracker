@@ -42,12 +42,14 @@ completed entries chronologically with their local start and stop times, derived
 duration, and note, and exports completed entries to UTF-8 CSV with explicit
 overwrite confirmation. Projects and activities can be archived from the TUI;
 archived names disappear from new-timer suggestions and remain intact in history.
+When connected, the TUI also presents due reminders; confirming an active reminder
+restarts its interval without changing the timer, while ignoring it leaves the
+timer running and reminders repeating.
 
 The packaged lifecycle is exercised in CI on Linux, Windows, and macOS. A local
 macOS arm64 app-bundle lifecycle and Notification Center dispatch were validated
 on July 19, 2026; the corresponding Linux and Windows packaged results remain
-pending until the updated CI workflow runs on those hosts. The remaining reminder
-interaction is upcoming MVP work.
+pending until the updated CI workflow runs on those hosts.
 
 ## Development
 
@@ -99,6 +101,11 @@ destination exists, the TUI requires a second export action before overwriting i
 Enter an existing project or activity and use its archive button or `F8`/`F9`.
 Archiving leaves any running timer active, removes the name from future timer
 suggestions, and preserves completed history. Archived names cannot be reused.
+
+When a reminder becomes due while the TUI is connected, it appears below the
+active timer. For an active timer, press its button or `F10` to confirm that it is
+still active and restart the configured interval. Taking no action leaves the
+timer running; use Stop or `F6` when the timer should end.
 
 ## Configuration
 

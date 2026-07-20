@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import cast
 
 from time_tracker.application.exporting import ExportDestinationExistsError
+from time_tracker.application.reminders import Reminder, ReminderKind
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
 from time_tracker.infrastructure.paths import AgentPaths
 
@@ -47,6 +48,18 @@ class AgentClient:
         """Return the active timer recovered by the background process."""
         result = self._request("get_active", {})
         return None if result is None else _active_from_object(result)
+
+    def get_reminder(self) -> Reminder | None:
+        """Return the latest reminder due in the background process."""
+        result = self._request("get_reminder", {})
+        return None if result is None else _reminder_from_object(result)
+
+    def confirm_active_reminder(self) -> bool:
+        """Confirm an active timer and restart its reminder interval."""
+        result = self._request("confirm_active_reminder", {})
+        if not isinstance(result, bool):
+            raise AgentRequestError("the agent returned malformed confirmation data")
+        return result
 
     def list_projects(self) -> list[str]:
         """Return selectable project names from authoritative storage."""
@@ -247,6 +260,21 @@ def _active_from_object(value: object) -> ActiveTimer:
         activity=_object_str(data.get("activity")),
         started_at=datetime.fromisoformat(_object_str(data.get("started_at"))),
         note=_optional_str(data.get("note")),
+    )
+
+
+def _reminder_from_object(value: object) -> Reminder:
+    data = _object_dict(value)
+    try:
+        kind = ReminderKind(_object_str(data.get("kind")))
+    except ValueError as error:
+        raise AgentRequestError(
+            "the agent returned an unknown reminder kind"
+        ) from error
+    return Reminder(
+        kind=kind,
+        project=_optional_str(data.get("project")),
+        activity=_optional_str(data.get("activity")),
     )
 
 
