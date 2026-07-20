@@ -108,6 +108,25 @@ class AgentClient:
         data = _object_dict(result)
         return _object_int(data.get("entry_count"))
 
+    def export_daily_summaries(
+        self,
+        destination: Path,
+        *,
+        overwrite: bool = False,
+    ) -> int:
+        """Export daily project/activity summaries without silent replacement."""
+        try:
+            result = self._request(
+                "export_daily_summaries",
+                {"destination": str(destination), "overwrite": overwrite},
+            )
+        except AgentRequestError as error:
+            if error.code == "destination_exists":
+                raise ExportDestinationExistsError(str(error)) from error
+            raise
+        data = _object_dict(result)
+        return _object_int(data.get("summary_count"))
+
     def start(
         self,
         project: str,

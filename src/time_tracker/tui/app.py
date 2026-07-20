@@ -12,10 +12,11 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.suggester import SuggestFromList
-from textual.widgets import Button, DataTable, Footer, Header, Input, Static
+from textual.widgets import Button, DataTable, Footer, Header, Input, Static, Switch
 
 from time_tracker.application.exporting import ExportDestinationExistsError
 from time_tracker.application.reminders import Reminder, ReminderKind
+from time_tracker.application.reporting import build_daily_summaries
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
 
 
@@ -58,6 +59,15 @@ class TrackerGateway(Protocol):
         """Export completed entries to a confirmed destination."""
         ...
 
+    def export_daily_summaries(
+        self,
+        destination: Path,
+        *,
+        overwrite: bool = False,
+    ) -> int:
+        """Export daily project/activity summaries to a confirmed destination."""
+        ...
+
     def start(
         self,
         project: str,
@@ -72,6 +82,12 @@ class TrackerGateway(Protocol):
         ...
 
 
+class PointerOnlyButton(Button):
+    """A clickable button intentionally omitted from keyboard tab order."""
+
+    can_focus = False
+
+
 class TimeTrackerApp(App[None]):
     """Keyboard-first start/stop screen backed by the local agent."""
 
@@ -80,7 +96,7 @@ class TimeTrackerApp(App[None]):
     BINDINGS = [
         Binding("f5", "start_timer", "Start / switch"),
         Binding("f6", "stop_timer", "Stop"),
-        Binding("f7", "export_completed", "Export CSV"),
+        Binding("f7", "export_csv", "Export CSV"),
         Binding("f8", "archive_project", "Archive project"),
         Binding("f9", "archive_activity", "Archive activity"),
         Binding("f10", "confirm_active_reminder", "Still active"),
@@ -156,11 +172,29 @@ class TimeTrackerApp(App[None]):
 
     #export-actions {
         height: auto;
-        margin-top: 1;
+        margin-top: 0;
     }
 
     #export-path {
         width: 1fr;
+    }
+
+    #summary-mode-label {
+        width: auto;
+        height: 1;
+        padding-right: 1;
+    }
+
+    #summary-mode, #summary-mode:focus {
+        width: auto;
+        height: 1;
+        padding: 0;
+        border: none;
+    }
+
+    #history-options {
+        height: 1;
+        align-horizontal: right;
     }
 
     #export-button {
@@ -191,6 +225,7 @@ class TimeTrackerApp(App[None]):
         self.active_timer: ActiveTimer | None = None
         self.pending_reminder: Reminder | None = None
         self._pending_export_path: Path | None = None
+        self._completed_entries: list[CompletedTimer] = []
 
     def compose(self) -> ComposeResult:
         """Compose the single-screen timer workflow."""
@@ -209,13 +244,19 @@ class TimeTrackerApp(App[None]):
                     placeholder="Project (type to reuse existing)",
                     id="project",
                 )
-                yield Button("Archive project  F8", id="archive-project-button")
+                yield PointerOnlyButton(
+                    "Archive project  F8",
+                    id="archive-project-button",
+                )
             with Horizontal(id="activity-actions"):
                 yield Input(
                     placeholder="Activity (type to reuse existing)",
                     id="activity",
                 )
-                yield Button("Archive activity  F9", id="archive-activity-button")
+                yield PointerOnlyButton(
+                    "Archive activity  F9",
+                    id="archive-activity-button",
+                )
             yield Input(placeholder="Optional note", id="note")
             with Horizontal(id="actions"):
                 yield Button("Start / switch  F5", id="start-button", variant="success")
@@ -226,6 +267,9 @@ class TimeTrackerApp(App[None]):
                     id="export-path",
                 )
                 yield Button("Export CSV  F7", id="export-button")
+            with Horizontal(id="history-options"):
+                yield Static("Daily summaries", id="summary-mode-label")
+                yield Switch(id="summary-mode")
             yield Static("", id="message")
             yield Static("Completed entries", id="history-title")
             yield DataTable(id="history", cursor_type="row", zebra_stripes=True)
@@ -235,8 +279,6 @@ class TimeTrackerApp(App[None]):
         """Recover any persisted active timer when the TUI reconnects."""
         self.set_interval(1.0, self._render_active)
         self.set_interval(1.0, self._refresh_reminder)
-        history = self.query_one("#history", DataTable)
-        history.add_columns("Project", "Activity", "Start", "Stop", "Duration", "Note")
         try:
             self.active_timer = await asyncio.to_thread(self.client.get_active)
             projects = await asyncio.to_thread(self.client.list_projects)
@@ -284,7 +326,7 @@ class TimeTrackerApp(App[None]):
     @on(Button.Pressed, "#export-button")
     async def handle_export_button(self) -> None:
         """Handle pointer activation of the export action."""
-        await self._export_completed()
+        await self._export_current_view()
 
     @on(Button.Pressed, "#archive-project-button")
     async def handle_archive_project_button(self) -> None:
@@ -307,6 +349,12 @@ class TimeTrackerApp(App[None]):
         if self._pending_export_path is not None:
             self._clear_export_confirmation()
 
+    @on(Switch.Changed, "#summary-mode")
+    def handle_summary_mode_changed(self) -> None:
+        """Render and export the representation selected by the user."""
+        self._clear_export_confirmation()
+        self._render_history(self._completed_entries)
+
     async def action_start_timer(self) -> None:
         """Start or switch the timer from the F5 binding."""
         await self._start_timer()
@@ -315,9 +363,9 @@ class TimeTrackerApp(App[None]):
         """Stop the timer from the F6 binding."""
         await self._stop_timer()
 
-    async def action_export_completed(self) -> None:
-        """Export completed entries from the F7 binding."""
-        await self._export_completed()
+    async def action_export_csv(self) -> None:
+        """Export the selected representation from the F7 binding."""
+        await self._export_current_view()
 
     async def action_archive_project(self) -> None:
         """Archive the entered project from the F8 binding."""
@@ -455,16 +503,22 @@ class TimeTrackerApp(App[None]):
             return
         self._render_history(completed)
 
-    async def _export_completed(self) -> None:
+    async def _export_current_view(self) -> None:
         raw_destination = self.query_one("#export-path", Input).value.strip()
         if not raw_destination:
             self._show_message("CSV export path is required.", error=True)
             return
         destination = Path(raw_destination).expanduser().resolve()
         overwrite = self._pending_export_path == destination
+        summary_mode = self.query_one("#summary-mode", Switch).value
+        export = (
+            self.client.export_daily_summaries
+            if summary_mode
+            else self.client.export_completed
+        )
         try:
-            entry_count = await asyncio.to_thread(
-                self.client.export_completed,
+            row_count = await asyncio.to_thread(
+                export,
                 destination,
                 overwrite=overwrite,
             )
@@ -484,8 +538,11 @@ class TimeTrackerApp(App[None]):
             return
 
         self._clear_export_confirmation()
-        noun = "entry" if entry_count == 1 else "entries"
-        self._show_message(f"Exported {entry_count} {noun} to {destination}.")
+        if summary_mode:
+            noun = "daily summary" if row_count == 1 else "daily summaries"
+        else:
+            noun = "entry" if row_count == 1 else "entries"
+        self._show_message(f"Exported {row_count} {noun} to {destination}.")
 
     def _clear_export_confirmation(self) -> None:
         self._pending_export_path = None
@@ -494,8 +551,29 @@ class TimeTrackerApp(App[None]):
         button.variant = "default"
 
     def _render_history(self, entries: list[CompletedTimer]) -> None:
+        self._completed_entries = entries
         table = self.query_one("#history", DataTable)
-        table.clear()
+        table.clear(columns=True)
+        summary_mode = self.query_one("#summary-mode", Switch).value
+        title = self.query_one("#history-title", Static)
+        if summary_mode:
+            title.update("Daily summaries")
+            table.add_columns("Date", "Project", "Activity", "Duration")
+            for summary in build_daily_summaries(entries):
+                table.add_row(
+                    summary.day.isoformat(),
+                    summary.project,
+                    summary.activity,
+                    _format_duration(summary.duration),
+                    key=(
+                        f"{summary.day.isoformat()}\0{summary.project}\0"
+                        f"{summary.activity}"
+                    ),
+                )
+            return
+
+        title.update("Completed entries")
+        table.add_columns("Project", "Activity", "Start", "Stop", "Duration", "Note")
         for entry in entries:
             table.add_row(
                 entry.project,

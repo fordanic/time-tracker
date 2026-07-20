@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 
 import pytest
-from textual.widgets import Button, DataTable, Input, Static
+from textual.widgets import Button, DataTable, Input, Static, Switch
 
 from time_tracker.agent.server import serve
 from time_tracker.application.reminders import Reminder, ReminderIntervals, ReminderKind
@@ -33,7 +33,14 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
     try:
         first_app = TimeTrackerApp(client)
         async with first_app.run_test() as pilot:
-            first_app.query_one("#project", Input).value = "Website"
+            project_input = first_app.query_one("#project", Input)
+            first_app.set_focus(project_input)
+            await pilot.press("tab")
+            assert first_app.focused is first_app.query_one("#activity", Input)
+            await pilot.press("tab")
+            assert first_app.focused is first_app.query_one("#note", Input)
+
+            project_input.value = "Website"
             first_app.query_one("#activity", Input).value = "Implementation"
             first_app.query_one("#note", Input).value = "Walking skeleton"
             await pilot.click("#start-button")
@@ -92,6 +99,31 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
                 recovered_app.query_one("#message", Static).render()
             )
             assert "Website,Implementation" in destination.read_text(encoding="utf-8")
+
+            assert await pilot.click("#summary-mode")
+            await pilot.pause()
+
+            assert recovered_app.query_one("#summary-mode", Switch).value is True
+            summary_row = history.get_row_at(0)
+            assert summary_row[1] == "Website"
+            assert summary_row[2] == "Implementation"
+            assert "Daily summaries" in str(
+                recovered_app.query_one("#history-title", Static).render()
+            )
+
+            summary_destination = tmp_path / "tui-daily-summary.csv"
+            recovered_app.query_one("#export-path", Input).value = str(
+                summary_destination
+            )
+            await pilot.press("f7")
+            await pilot.pause()
+
+            assert "Exported 1 daily summary" in str(
+                recovered_app.query_one("#message", Static).render()
+            )
+            assert summary_destination.read_text(encoding="utf-8").startswith(
+                "date,project,activity,duration_seconds"
+            )
 
             await pilot.click("#archive-activity-button")
             await pilot.pause()

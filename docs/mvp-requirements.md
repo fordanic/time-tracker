@@ -35,7 +35,9 @@ leaving a clean path to a later GUI.
   one at the same transition timestamp, without overlap.
 - Show the active project, activity, start time, and elapsed duration prominently.
 - Allow an optional plain-text note on the active entry.
-- List completed entries chronologically.
+- List completed entries chronologically, with a toggle that instead shows local
+  daily totals per project and activity.
+- Split entries crossing local midnight across the corresponding daily totals.
 - Persist each timer transition before reporting success.
 - Restore an active timer with its original start time after a restart, crash, or
   forced termination. Recovery must not invent a stop time.
@@ -70,6 +72,15 @@ leaving a clean path to a later GUI.
 
 - Export timestamps as ISO 8601 with a UTC offset and apply standard CSV quoting.
   Require confirmation before overwriting a file. Do not export an active entry.
+- Allow the display toggle to export daily project/activity totals instead, using
+  local calendar dates and these columns:
+
+  ```text
+  date,project,activity,duration_seconds
+  ```
+
+- Order daily summaries by date, project, and activity. Apply the same UTF-8 CSV,
+  standard quoting, overwrite-confirmation, and active-entry exclusion rules.
 
 ## Quality constraints
 
@@ -95,7 +106,8 @@ The MVP is complete when automated tests and platform smoke tests demonstrate th
 5. Archived items remain readable in history but cannot start new timers.
 6. Two active entries cannot be created.
 7. CSV export preserves timestamps, Unicode, and notes containing commas, quotes,
-   and newlines.
+   and newlines; daily summary export aggregates by project and activity and
+   divides entries at local midnight.
 8. Missing configuration uses defaults; invalid configuration is reported without
    destroying the file.
 
@@ -106,8 +118,8 @@ The MVP is complete when automated tests and platform smoke tests demonstrate th
 - Concurrent timers, users, or foreground clients.
 - Accounts, synchronization, collaboration, telemetry, and remote services.
 - Automatic idle/activity detection and third-party integrations.
-- Billing, invoicing, advanced reporting, plugins, imports, and public automation
-  APIs.
+- Billing, invoicing, reporting beyond daily project/activity totals, plugins,
+  imports, and public automation APIs.
 - Prebuilt downloads, installers, package-manager publishing, and automatic
   updates; binaries are built locally.
 
