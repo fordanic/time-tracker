@@ -123,6 +123,11 @@ internet connection. The current product interface is a TUI.
   default.
 - With an active timer, ask every 30 minutes by default whether it is still active.
 - Both reminder intervals are configurable and independently disableable.
+- Allow an optional shared weekly local-time window for reminder delivery and a
+  configurable explicit snooze duration.
+- A reminder due outside its window waits for the next opening without producing
+  catch-up notifications. Snoozing defers the pending reminder without changing
+  timer state or its configured recurring interval.
 - Ignoring an active reminder leaves the timer running; confirming it restarts the
   interval.
 - Reminders require no internet connection. A connected TUI may also show them.

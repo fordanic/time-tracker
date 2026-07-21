@@ -104,7 +104,7 @@ def _serve_locked(
                 export_service,
                 configuration_service,
                 notification_service,
-                settings.intervals,
+                settings,
             )
         )
     finally:
@@ -121,10 +121,16 @@ async def _serve_connections(
     export_service: ExportService,
     configuration_service: ConfigurationService,
     notifier: NotificationService,
-    reminder_intervals: ReminderIntervals | None,
+    reminder_settings: ReminderSettings,
 ) -> None:
     """Keep reminder scheduling responsive while IPC and SQLite block in threads."""
-    coordinator = ReminderCoordinator(service, notifier, reminder_intervals)
+    coordinator = ReminderCoordinator(
+        service,
+        notifier,
+        reminder_settings.intervals,
+        window=reminder_settings.window,
+        snooze_seconds=reminder_settings.snooze_seconds,
+    )
     reminder_task = asyncio.create_task(coordinator.run())
     running = True
     try:
@@ -141,8 +147,9 @@ async def _serve_connections(
                     timer_changed,
                     notification_smoke,
                     active_confirmed,
+                    reminder_snoozed,
                     active_edited,
-                    reloaded_intervals,
+                    reloaded_settings,
                 ) = await asyncio.to_thread(
                     _handle_request,
                     request_bytes,
@@ -151,10 +158,16 @@ async def _serve_connections(
                     configuration_service,
                     coordinator.pending_reminder(),
                 )
-                if reloaded_intervals is not None:
-                    coordinator.reload_intervals(reloaded_intervals)
+                if reloaded_settings is not None:
+                    coordinator.reload_settings(
+                        reloaded_settings.intervals,
+                        reloaded_settings.window,
+                        reloaded_settings.snooze_seconds,
+                    )
                 if active_confirmed:
                     coordinator.confirm_active()
+                if reminder_snoozed:
+                    coordinator.snooze()
                 if active_edited:
                     edited_active = await asyncio.to_thread(service.get_active)
                     if edited_active is not None:
@@ -198,10 +211,11 @@ def _handle_request(
     bool,
     bool,
     bool,
-    ReminderIntervals | None,
+    bool,
+    ReminderSettings | None,
 ]:
     request_id: object = None
-    reloaded_intervals: ReminderIntervals | None = None
+    reloaded_settings: ReminderSettings | None = None
     try:
         decoded: object = json.loads(payload.decode("utf-8"))
         if not isinstance(decoded, dict):
@@ -229,6 +243,8 @@ def _handle_request(
                 pending_reminder is not None
                 and pending_reminder.kind is ReminderKind.ACTIVE
             )
+        elif method == "snooze_reminder":
+            result = pending_reminder is not None
         elif method == "get_configuration":
             result = _settings_dict(configuration_service.get())
         elif method == "save_configuration":
@@ -242,10 +258,15 @@ def _handle_request(
                     active_interval_minutes=_required_number(
                         params, "active_interval_minutes"
                     ),
+                    window_enabled=_required_bool(params, "window_enabled"),
+                    window_weekdays=_required_int_tuple(params, "window_weekdays"),
+                    window_start=_required_str(params, "window_start"),
+                    window_end=_required_str(params, "window_end"),
+                    snooze_minutes=_required_number(params, "snooze_minutes"),
                 )
             )
             result = _settings_dict(settings)
-            reloaded_intervals = settings.intervals
+            reloaded_settings = settings
         elif method == "list_projects":
             result = service.list_projects()
         elif method == "list_activities":
@@ -370,6 +391,7 @@ def _handle_request(
                 False,
                 False,
                 False,
+                False,
                 None,
             )
         else:
@@ -383,8 +405,9 @@ def _handle_request(
             method in {"start", "stop"},
             method == "notification_smoke",
             method == "confirm_active_reminder" and result is True,
+            method == "snooze_reminder" and result is True,
             method == "edit_active",
-            reloaded_intervals,
+            reloaded_settings,
         )
     except ExportDestinationExistsError as error:
         return (
@@ -393,6 +416,7 @@ def _handle_request(
                 "error": {"code": "destination_exists", "message": str(error)},
             },
             True,
+            False,
             False,
             False,
             False,
@@ -406,6 +430,7 @@ def _handle_request(
                 "error": {"code": "invalid_request", "message": str(error)},
             },
             True,
+            False,
             False,
             False,
             False,
@@ -466,6 +491,15 @@ def _required_int(params: dict[str, object], name: str) -> int:
     if not isinstance(value, int):
         raise ValueError(f"{name} must be an integer")
     return value
+
+
+def _required_int_tuple(params: dict[str, object], name: str) -> tuple[int, ...]:
+    value = params.get(name)
+    if not isinstance(value, list) or any(
+        isinstance(item, bool) or not isinstance(item, int) for item in value
+    ):
+        raise ValueError(f"{name} must be an integer array")
+    return tuple(value)
 
 
 def _required_number(params: dict[str, object], name: str) -> float:

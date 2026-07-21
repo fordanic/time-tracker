@@ -48,6 +48,8 @@ from time_tracker.application.tracking import (
 )
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
 
+_WEEKDAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
 
 class TrackerGateway(Protocol):
     """Operations available to the TUI across the application boundary."""
@@ -75,6 +77,10 @@ class TrackerGateway(Protocol):
 
     def confirm_active_reminder(self) -> bool:
         """Confirm the active timer and restart its reminder interval."""
+        ...
+
+    def snooze_reminder(self) -> bool:
+        """Defer the pending reminder without changing timer state."""
         ...
 
     def list_projects(self) -> list[str]:
@@ -237,6 +243,7 @@ class TimeTrackerApp(App[None]):
         Binding("f9", "archive_activity", "Archive activity"),
         Binding("f10", "confirm_active_reminder", "Still active"),
         Binding("f11", "edit_active", "Update active"),
+        Binding("f12", "snooze_reminder", "Snooze"),
         Binding("ctrl+q", "quit", "Quit"),
     ]
     _VIEW_CONTENT = {
@@ -301,6 +308,12 @@ class TimeTrackerApp(App[None]):
     #confirm-active-reminder-button {
         display: none;
         width: 24;
+        margin-left: 1;
+    }
+
+    #snooze-reminder-button {
+        display: none;
+        width: 16;
         margin-left: 1;
     }
 
@@ -541,6 +554,7 @@ class TimeTrackerApp(App[None]):
                     id="confirm-active-reminder-button",
                     variant="primary",
                 )
+                yield Button("Snooze  F12", id="snooze-reminder-button")
             yield Tabs(
                 Tab("Track  F1", id="track-tab"),
                 Tab("Review  F2", id="review-tab"),
@@ -729,7 +743,7 @@ class TimeTrackerApp(App[None]):
                         id="restore-activity-button",
                         disabled=True,
                     )
-                with Vertical(id="settings-view", classes="view"):
+                with VerticalScroll(id="settings-view", classes="view"):
                     yield Static(
                         "Configure reminders below. Saving updates the TOML file "
                         "and applies the new schedule immediately.",
@@ -749,6 +763,20 @@ class TimeTrackerApp(App[None]):
                             placeholder="Interval minutes",
                             id="active-reminder-minutes",
                         )
+                    with Horizontal(classes="settings-row"):
+                        yield Static("Weekly reminder window")
+                        yield Switch(id="reminder-window-enabled")
+                        yield Input(
+                            placeholder="Weekdays (Mon,Tue,Wed,Thu,Fri)",
+                            id="reminder-window-weekdays",
+                        )
+                    with Horizontal(classes="settings-row"):
+                        yield Static("Window start / end")
+                        yield Input(placeholder="09:00", id="reminder-window-start")
+                        yield Input(placeholder="17:00", id="reminder-window-end")
+                    with Horizontal(classes="settings-row"):
+                        yield Static("Snooze minutes")
+                        yield Input(placeholder="10", id="reminder-snooze-minutes")
                     yield Button(
                         "Save reminder settings",
                         id="save-settings-button",
@@ -960,6 +988,11 @@ class TimeTrackerApp(App[None]):
         """Confirm an active reminder from its visible prompt."""
         await self._confirm_active_reminder()
 
+    @on(Button.Pressed, "#snooze-reminder-button")
+    async def handle_snooze_reminder_button(self) -> None:
+        """Snooze a visible reminder."""
+        await self._snooze_reminder()
+
     @on(Button.Pressed, "#save-settings-button")
     async def handle_save_settings_button(self) -> None:
         """Persist and immediately apply reminder settings."""
@@ -1054,6 +1087,10 @@ class TimeTrackerApp(App[None]):
         """Confirm an active reminder from the F10 binding."""
         await self._confirm_active_reminder()
 
+    async def action_snooze_reminder(self) -> None:
+        """Snooze a pending reminder from the F12 binding."""
+        await self._snooze_reminder()
+
     async def action_edit_active(self) -> None:
         """Update active details from the F11 binding."""
         await self._edit_active()
@@ -1115,6 +1152,18 @@ class TimeTrackerApp(App[None]):
                 active_interval_minutes=_parse_positive_minutes(
                     self.query_one("#active-reminder-minutes", Input).value,
                     "Active reminder interval",
+                ),
+                window_enabled=self.query_one("#reminder-window-enabled", Switch).value,
+                window_weekdays=_parse_weekdays(
+                    self.query_one("#reminder-window-weekdays", Input).value
+                ),
+                window_start=self.query_one(
+                    "#reminder-window-start", Input
+                ).value.strip(),
+                window_end=self.query_one("#reminder-window-end", Input).value.strip(),
+                snooze_minutes=_parse_positive_minutes(
+                    self.query_one("#reminder-snooze-minutes", Input).value,
+                    "Snooze duration",
                 ),
             )
             saved = await asyncio.to_thread(self.client.save_configuration, settings)
@@ -1389,6 +1438,20 @@ class TimeTrackerApp(App[None]):
         self.pending_reminder = None
         self._render_reminder()
         self._show_message("Timer confirmed; active reminder interval restarted.")
+
+    async def _snooze_reminder(self) -> None:
+        try:
+            snoozed = await asyncio.to_thread(self.client.snooze_reminder)
+        except Exception as error:
+            self._show_message(str(error), error=True)
+            return
+        if not snoozed:
+            await self._refresh_reminder()
+            self._show_message("No reminder to snooze.", error=True)
+            return
+        self.pending_reminder = None
+        self._render_reminder()
+        self._show_message("Reminder snoozed.")
 
     async def _refresh_history(self, *, preferred_entry_id: int | None = None) -> None:
         try:
@@ -1936,15 +1999,18 @@ class TimeTrackerApp(App[None]):
     def _render_reminder(self) -> None:
         panels = self.query("#reminder")
         buttons = self.query("#confirm-active-reminder-button")
+        snooze_buttons = self.query("#snooze-reminder-button")
         message_widgets = self.query("#reminder-message")
-        if not panels or not buttons or not message_widgets:
+        if not panels or not buttons or not snooze_buttons or not message_widgets:
             return
         panel = panels.first(Horizontal)
         button = buttons.first(Button)
+        snooze_button = snooze_buttons.first(Button)
         message_widget = message_widgets.first(Static)
         reminder = self.pending_reminder
         panel.display = reminder is not None
         button.display = reminder is not None and reminder.kind is ReminderKind.ACTIVE
+        snooze_button.display = reminder is not None
         if reminder is None:
             message_widget.update("")
             return
@@ -1975,6 +2041,17 @@ class TimeTrackerApp(App[None]):
         ).value = settings.active_enabled
         self.query_one("#active-reminder-minutes", Input).value = _format_minutes(
             settings.active_interval_minutes
+        )
+        self.query_one(
+            "#reminder-window-enabled", Switch
+        ).value = settings.window_enabled
+        self.query_one("#reminder-window-weekdays", Input).value = ",".join(
+            _WEEKDAY_NAMES[day] for day in settings.window_weekdays
+        )
+        self.query_one("#reminder-window-start", Input).value = settings.window_start
+        self.query_one("#reminder-window-end", Input).value = settings.window_end
+        self.query_one("#reminder-snooze-minutes", Input).value = _format_minutes(
+            settings.snooze_minutes
         )
 
     def _show_message(self, message: str, *, error: bool = False) -> None:
@@ -2020,6 +2097,20 @@ def _parse_positive_minutes(value: str, label: str) -> float:
     except ValueError as error:
         raise ValueError(f"{label} must be a positive finite number.") from error
     return parsed
+
+
+def _parse_weekdays(value: str) -> tuple[int, ...]:
+    names = [part.strip().title() for part in value.split(",") if part.strip()]
+    if not names:
+        raise ValueError("Reminder window weekdays must not be empty.")
+    if len(set(names)) != len(names):
+        raise ValueError("Reminder window weekdays must not contain duplicates.")
+    try:
+        return tuple(_WEEKDAY_NAMES.index(name) for name in names)
+    except ValueError as error:
+        raise ValueError(
+            "Reminder window weekdays must use Mon,Tue,Wed,Thu,Fri,Sat,Sun."
+        ) from error
 
 
 def _format_minutes(value: float) -> str:

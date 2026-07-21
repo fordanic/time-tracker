@@ -25,7 +25,7 @@ from time_tracker.application.tracking import (
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
 from time_tracker.infrastructure.paths import AgentPaths
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 _WINDOWS_DETACHED_PROCESS_FLAGS = 0x00000208
 
 
@@ -69,6 +69,11 @@ class AgentClient:
                 "inactive_interval_minutes": settings.inactive_interval_minutes,
                 "active_enabled": settings.active_enabled,
                 "active_interval_minutes": settings.active_interval_minutes,
+                "window_enabled": settings.window_enabled,
+                "window_weekdays": list(settings.window_weekdays),
+                "window_start": settings.window_start,
+                "window_end": settings.window_end,
+                "snooze_minutes": settings.snooze_minutes,
             },
         )
         return _settings_from_object(result)
@@ -88,6 +93,13 @@ class AgentClient:
         result = self._request("confirm_active_reminder", {})
         if not isinstance(result, bool):
             raise AgentRequestError("the agent returned malformed confirmation data")
+        return result
+
+    def snooze_reminder(self) -> bool:
+        """Defer the pending reminder without changing timer state."""
+        result = self._request("snooze_reminder", {})
+        if not isinstance(result, bool):
+            raise AgentRequestError("the agent returned malformed snooze data")
         return result
 
     def list_projects(self) -> list[str]:
@@ -511,6 +523,11 @@ def _settings_from_object(value: object) -> ReminderSettings:
         inactive_interval_minutes=_object_number(data.get("inactive_interval_minutes")),
         active_enabled=active_enabled,
         active_interval_minutes=_object_number(data.get("active_interval_minutes")),
+        window_enabled=_object_bool(data.get("window_enabled")),
+        window_weekdays=tuple(_object_int_list(data.get("window_weekdays"))),
+        window_start=_object_str(data.get("window_start")),
+        window_end=_object_str(data.get("window_end")),
+        snooze_minutes=_object_number(data.get("snooze_minutes")),
     )
 
 
@@ -588,6 +605,20 @@ def _object_number(value: object) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise AgentRequestError("the agent returned malformed numeric data")
     return float(value)
+
+
+def _object_bool(value: object) -> bool:
+    if not isinstance(value, bool):
+        raise AgentRequestError("the agent returned malformed boolean data")
+    return value
+
+
+def _object_int_list(value: object) -> list[int]:
+    if not isinstance(value, list) or any(
+        isinstance(item, bool) or not isinstance(item, int) for item in value
+    ):
+        raise AgentRequestError("the agent returned a malformed integer list")
+    return cast(list[int], value)
 
 
 def _string_list(value: object) -> list[str]:

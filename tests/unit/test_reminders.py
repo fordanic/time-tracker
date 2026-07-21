@@ -1,7 +1,10 @@
+from datetime import UTC, datetime, time
+
 from time_tracker.application.reminders import (
     ReminderIntervals,
     ReminderKind,
     ReminderSchedule,
+    ReminderWindow,
 )
 
 
@@ -68,3 +71,42 @@ def test_active_detail_update_changes_names_without_resetting_deadline() -> None
     assert reminder is not None
     assert reminder.project == "New"
     assert reminder.activity == "Details"
+
+
+def test_due_reminder_waits_for_same_day_window_opening() -> None:
+    monotonic = ControlledMonotonicClock()
+    wall_now = datetime(2026, 7, 20, 8, 0, tzinfo=UTC)  # Monday
+    schedule = ReminderSchedule(
+        ReminderIntervals(inactive=60),
+        monotonic,
+        window=ReminderWindow((0,), time(9), time(17)),
+        wall_clock=lambda: wall_now,
+    )
+    schedule.reset(ReminderKind.INACTIVE)
+    monotonic.value = 60
+
+    assert schedule.take_due() is None
+    assert schedule.seconds_until_due() == 3600
+
+
+def test_overnight_window_includes_following_morning() -> None:
+    window = ReminderWindow((0,), time(22), time(6))
+
+    assert window.contains(datetime(2026, 7, 20, 23, tzinfo=UTC))
+    assert window.contains(datetime(2026, 7, 21, 5, tzinfo=UTC))
+    assert not window.contains(datetime(2026, 7, 21, 7, tzinfo=UTC))
+
+
+def test_snooze_replaces_monotonic_deadline() -> None:
+    clock = ControlledMonotonicClock()
+    schedule = ReminderSchedule(ReminderIntervals(active=100), clock)
+    schedule.reset(ReminderKind.ACTIVE, project="One", activity="Two")
+    clock.value = 100
+    assert schedule.take_due() is not None
+
+    schedule.snooze(30)
+
+    clock.value = 129
+    assert schedule.take_due() is None
+    clock.value = 130
+    assert schedule.take_due() is not None

@@ -160,8 +160,9 @@ delivery fails or the TUI disconnects.
   failure leaves the prior file and live schedule unchanged.
 - The optional TOML file has one `[reminders]` table with independent
   `inactive_enabled`/`active_enabled` booleans and positive
-  `inactive_interval_minutes`/`active_interval_minutes` numbers. Configuration is
-  loaded when the background process starts. A successful agent-owned TUI save
+  `inactive_interval_minutes`/`active_interval_minutes` numbers, an optional
+  weekly local-time delivery window, and a positive snooze duration. Configuration
+  is loaded when the background process starts. A successful agent-owned TUI save
   reloads it immediately, clears a prompt created by the replaced schedule, and
   resets the current timer state's monotonic deadline from the save time.
 - Use `platformdirs` for per-user configuration, data, state, runtime, and log
@@ -182,6 +183,13 @@ delivery fails or the TUI disconnects.
   resets the relevant deadline, as does explicit confirmation of an active
   reminder; closing the TUI does not affect it. The default schedule is five
   minutes without a timer and 30 minutes with one.
+- An application reminder-window policy uses the agent's local aware wall clock
+  only to decide whether a due monotonic deadline may be presented and to find the
+  next weekly opening. It supports same-day and overnight windows and suppresses
+  catch-up bursts. Snooze is agent-owned in-memory state that replaces the current
+  deadline without changing timer or configuration; timer transitions, active
+  confirmation, settings reload, and process restart reset the normal interval,
+  while active-detail edits preserve the deadline.
 - Build with PyInstaller on the target OS; it is not used for cross-compilation.
 - Linux and Windows builds are one-file executables. macOS builds are ad-hoc-signed
   `.app` bundles, with the TUI executable inside the bundle.

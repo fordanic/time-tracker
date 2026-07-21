@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from datetime import time
 from typing import Protocol
 
-from time_tracker.application.reminders import ReminderIntervals
+from time_tracker.application.reminders import ReminderIntervals, ReminderWindow
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,15 +18,26 @@ class ReminderSettings:
     inactive_interval_minutes: float = 5.0
     active_enabled: bool = True
     active_interval_minutes: float = 30.0
+    window_enabled: bool = False
+    window_weekdays: tuple[int, ...] = (0, 1, 2, 3, 4)
+    window_start: str = "09:00"
+    window_end: str = "17:00"
+    snooze_minutes: float = 10.0
 
     def __post_init__(self) -> None:
-        if not isinstance(self.inactive_enabled, bool) or not isinstance(
-            self.active_enabled, bool
+        if any(
+            not isinstance(value, bool)
+            for value in (
+                self.inactive_enabled,
+                self.active_enabled,
+                self.window_enabled,
+            )
         ):
             raise ValueError("reminder enabled values must be booleans")
         for interval in (
             self.inactive_interval_minutes,
             self.active_interval_minutes,
+            self.snooze_minutes,
         ):
             if (
                 isinstance(interval, bool)
@@ -34,6 +46,22 @@ class ReminderSettings:
                 or interval <= 0
             ):
                 raise ValueError("reminder intervals must be positive finite numbers")
+        if (
+            not isinstance(self.window_weekdays, tuple)
+            or not self.window_weekdays
+            or any(
+                isinstance(day, bool) or not isinstance(day, int)
+                for day in self.window_weekdays
+            )
+        ):
+            raise ValueError(
+                "reminder window weekdays must be a non-empty integer tuple"
+            )
+        ReminderWindow(
+            self.window_weekdays,
+            _parse_clock(self.window_start),
+            _parse_clock(self.window_end),
+        )
 
     @property
     def intervals(self) -> ReminderIntervals:
@@ -50,6 +78,22 @@ class ReminderSettings:
                 else None
             ),
         )
+
+    @property
+    def window(self) -> ReminderWindow | None:
+        """Return the enabled local weekly delivery window."""
+        if not self.window_enabled:
+            return None
+        return ReminderWindow(
+            self.window_weekdays,
+            _parse_clock(self.window_start),
+            _parse_clock(self.window_end),
+        )
+
+    @property
+    def snooze_seconds(self) -> float:
+        """Return the configured in-memory snooze duration in seconds."""
+        return float(self.snooze_minutes) * 60
 
     @classmethod
     def from_intervals(cls, intervals: ReminderIntervals) -> ReminderSettings:
@@ -106,3 +150,20 @@ class ApplicationConfig:
     def reminder_intervals(self) -> ReminderIntervals:
         """Return the scheduler representation of configured reminders."""
         return self.reminder_settings.intervals
+
+
+def _parse_clock(value: str) -> time:
+    if not isinstance(value, str):
+        raise ValueError("reminder window times must be HH:MM strings")
+    try:
+        parsed = time.fromisoformat(value)
+    except ValueError as error:
+        raise ValueError("reminder window times must use HH:MM") from error
+    if (
+        len(value) != 5
+        or parsed.second
+        or parsed.microsecond
+        or parsed.tzinfo is not None
+    ):
+        raise ValueError("reminder window times must use HH:MM")
+    return parsed

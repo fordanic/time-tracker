@@ -417,6 +417,14 @@ def test_active_reminder_can_be_polled_confirmed_or_ignored(tmp_path: Path) -> N
     _wait_until_ready(client)
 
     try:
+        client.save_configuration(
+            ReminderSettings(
+                inactive_enabled=False,
+                active_enabled=True,
+                active_interval_minutes=0.0025,
+                snooze_minutes=0.001,
+            )
+        )
         started = client.start("Connected", "Confirmation")
         reminder = _wait_for_pending_reminder(client, ReminderKind.ACTIVE)
 
@@ -437,6 +445,12 @@ def test_active_reminder_can_be_polled_confirmed_or_ignored(tmp_path: Path) -> N
         started = edited
         first_count = len(notifier.reminders)
         _wait_for_reminder_count(notifier, first_count + 1)
+        assert client.get_active() == started
+
+        assert client.snooze_reminder() is True
+        assert client.get_reminder() is None
+        assert client.snooze_reminder() is False
+        _wait_for_pending_reminder(client, ReminderKind.ACTIVE)
         assert client.get_active() == started
 
         assert client.confirm_active_reminder() is True
@@ -543,6 +557,7 @@ def test_agent_persists_and_live_reloads_reminder_settings(tmp_path: Path) -> No
         inactive_interval_minutes=0.001,
         active_enabled=False,
         active_interval_minutes=7.5,
+        snooze_minutes=0.001,
     )
     disabled = ReminderSettings(
         inactive_enabled=False,
@@ -559,6 +574,9 @@ def test_agent_persists_and_live_reloads_reminder_settings(tmp_path: Path) -> No
     try:
         assert client.save_configuration(enabled) == enabled
         assert client.get_configuration() == enabled
+        _wait_for_pending_reminder(client, ReminderKind.INACTIVE)
+        assert client.snooze_reminder() is True
+        assert client.get_reminder() is None
         _wait_for_pending_reminder(client, ReminderKind.INACTIVE)
 
         count = len(notifier.reminders)

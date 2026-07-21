@@ -15,6 +15,11 @@ _REMINDER_KEYS = {
     "inactive_interval_minutes",
     "active_enabled",
     "active_interval_minutes",
+    "window_enabled",
+    "window_weekdays",
+    "window_start",
+    "window_end",
+    "snooze_minutes",
 }
 
 
@@ -68,14 +73,26 @@ def load_config(path: Path) -> ApplicationConfig:
         30.0,
         path,
     )
-    return ApplicationConfig(
-        reminder_settings=ReminderSettings(
+    window_enabled = _boolean(reminders, "window_enabled", False, path)
+    window_weekdays = _weekdays(reminders, path)
+    window_start = _string(reminders, "window_start", "09:00", path)
+    window_end = _string(reminders, "window_end", "17:00", path)
+    snooze_minutes = _positive_number(reminders, "snooze_minutes", 10.0, path)
+    try:
+        settings = ReminderSettings(
             inactive_enabled=inactive_enabled,
             inactive_interval_minutes=inactive_minutes,
             active_enabled=active_enabled,
             active_interval_minutes=active_minutes,
+            window_enabled=window_enabled,
+            window_weekdays=window_weekdays,
+            window_start=window_start,
+            window_end=window_end,
+            snooze_minutes=snooze_minutes,
         )
-    )
+    except ValueError as error:
+        raise ConfigurationError(f"invalid configuration at {path}: {error}") from error
+    return ApplicationConfig(reminder_settings=settings)
 
 
 class TomlConfigurationStore:
@@ -116,6 +133,13 @@ def _toml(settings: ReminderSettings) -> str:
         f"active_enabled = {str(settings.active_enabled).lower()}\n"
         "active_interval_minutes = "
         f"{_format_number(settings.active_interval_minutes)}\n"
+        f"window_enabled = {str(settings.window_enabled).lower()}\n"
+        "window_weekdays = ["
+        + ", ".join(str(day) for day in settings.window_weekdays)
+        + "]\n"
+        f'window_start = "{settings.window_start}"\n'
+        f'window_end = "{settings.window_end}"\n'
+        f"snooze_minutes = {_format_number(settings.snooze_minutes)}\n"
     )
 
 
@@ -150,3 +174,24 @@ def _positive_number(
             f"reminders.{name} must be a positive number"
         )
     return float(value)
+
+
+def _string(values: dict[str, object], name: str, default: str, path: Path) -> str:
+    value = values.get(name, default)
+    if not isinstance(value, str):
+        raise ConfigurationError(
+            f"invalid configuration at {path}: reminders.{name} must be a string"
+        )
+    return value
+
+
+def _weekdays(values: dict[str, object], path: Path) -> tuple[int, ...]:
+    value = values.get("window_weekdays", [0, 1, 2, 3, 4])
+    if not isinstance(value, list) or any(
+        isinstance(day, bool) or not isinstance(day, int) for day in value
+    ):
+        raise ConfigurationError(
+            f"invalid configuration at {path}: "
+            "reminders.window_weekdays must be an integer array"
+        )
+    return tuple(value)

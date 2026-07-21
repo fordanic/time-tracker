@@ -10,6 +10,7 @@ from time_tracker.application.reminders import (
     ReminderIntervals,
     ReminderKind,
     ReminderSchedule,
+    ReminderWindow,
 )
 from time_tracker.application.tracking import TrackingService
 from time_tracker.domain.models import ActiveTimer
@@ -26,10 +27,14 @@ class ReminderCoordinator:
         service: TrackingService,
         notifier: NotificationService,
         intervals: ReminderIntervals | None = None,
+        *,
+        window: ReminderWindow | None = None,
+        snooze_seconds: float = 10 * 60,
     ) -> None:
         self._service = service
         self._notifier = notifier
-        self._schedule = ReminderSchedule(intervals)
+        self._schedule = ReminderSchedule(intervals, window=window)
+        self._snooze_seconds = snooze_seconds
         self._changed = asyncio.Event()
         self._generation = 0
         self._pending: Reminder | None = None
@@ -55,9 +60,16 @@ class ReminderCoordinator:
                 activity=active.activity,
             )
 
-    def reload_intervals(self, intervals: ReminderIntervals) -> None:
+    def reload_settings(
+        self,
+        intervals: ReminderIntervals,
+        window: ReminderWindow | None,
+        snooze_seconds: float,
+    ) -> None:
         """Apply durable settings and reset the current state's deadline."""
         self._schedule.replace_intervals(intervals)
+        self._schedule.replace_window(window)
+        self._snooze_seconds = snooze_seconds
         self._pending = None
         self._generation += 1
         self._changed.set()
@@ -68,6 +80,15 @@ class ReminderCoordinator:
             return False
         self._pending = None
         self._generation += 1
+        self._changed.set()
+        return True
+
+    def snooze(self) -> bool:
+        """Clear any pending prompt and defer it without changing timer state."""
+        if self._pending is None:
+            return False
+        self._pending = None
+        self._schedule.snooze(self._snooze_seconds)
         self._changed.set()
         return True
 
@@ -101,7 +122,7 @@ class ReminderCoordinator:
                     except Exception:
                         logger.exception("native reminder delivery failed")
             else:
-                if not self._stopping:
+                if not self._stopping and self._generation != seen_generation:
                     await self._reset_from_storage()
                     seen_generation = self._generation
 
