@@ -17,7 +17,8 @@ endif
 
 .PHONY: help prepare-venv sync run stop-agent format format-check lint typecheck test \
 	test-unit test-integration test-e2e check ci build smoke-packaged \
-	smoke-notification clean clear-local
+	smoke-notification set-version release-artifact publish-release-candidate \
+	publish-release clean clear-local
 
 help:
 	@printf '%s\n' \
@@ -41,6 +42,12 @@ help:
 		'  make build             Build a native executable in dist/' \
 		'  make smoke-packaged    Test the complete packaged timer lifecycle' \
 		'  make smoke-notification Dispatch a native notification from the package' \
+		'  make set-version VERSION=X.Y.Z[rcN]' \
+		'                         Set the canonical version and refresh uv.lock' \
+		'  make release-artifact  Check, build, smoke, archive, and checksum locally' \
+		'  make publish-release-candidate' \
+		'                         Publish this rc version as a GitHub prerelease' \
+		'  make publish-release   Publish this final version as a GitHub release' \
 		'  make clean             Remove repository build and check artifacts' \
 		'  make clear-local CONFIRM=1' \
 		'                         Stop the agent and delete local app data'
@@ -98,6 +105,18 @@ smoke-packaged: prepare-venv
 
 smoke-notification: prepare-venv
 	$(UV) run python scripts/run_notification_smoke.py
+
+set-version: sync
+	$(UV) run python scripts/release.py set-version "$(VERSION)"
+
+release-artifact: sync check build smoke-packaged
+	$(UV) run python scripts/release.py package
+
+publish-release-candidate: release-artifact
+	$(UV) run python scripts/release.py publish candidate
+
+publish-release: release-artifact
+	$(UV) run python scripts/release.py publish final
 
 clean:
 	rm -rf build dist .mypy_cache .pytest_cache .ruff_cache \

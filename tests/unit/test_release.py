@@ -1,0 +1,215 @@
+from __future__ import annotations
+
+import hashlib
+import tarfile
+import zipfile
+from pathlib import Path
+
+import pytest
+
+from scripts import build, release
+
+
+def _minimal_repository(root: Path, version: str = "0.1.0") -> None:
+    package = root / "src/time_tracker"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text(
+        f'"""Test package."""\n\n__version__ = "{version}"\n',
+        encoding="utf-8",
+    )
+    (root / "uv.lock").write_text(
+        f'version = 1\n\n[[package]]\nname = "time-tracker"\nversion = "{version}"\n',
+        encoding="utf-8",
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "candidate"),
+    [
+        ("0.1.0", None),
+        ("1.2.3", None),
+        ("1.2.3rc1", 1),
+        ("10.20.30rc42", 42),
+    ],
+)
+def test_parse_version_accepts_supported_versions(
+    value: str,
+    candidate: int | None,
+) -> None:
+    parsed = release.parse_version(value)
+
+    assert parsed.value == value
+    assert parsed.candidate == candidate
+    assert parsed.tag == f"v{value}"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "",
+        "1",
+        "1.2",
+        "01.2.3",
+        "1.02.3",
+        "1.2.03",
+        "1.2.3-rc.1",
+        "1.2.3rc0",
+        "1.2.3beta1",
+        "v1.2.3",
+    ],
+)
+def test_parse_version_rejects_unsupported_versions(value: str) -> None:
+    with pytest.raises(release.ReleaseError, match="version must be"):
+        release.parse_version(value)
+
+
+def test_set_version_updates_source_and_refreshes_lockfile(
+    tmp_path: Path,
+) -> None:
+    _minimal_repository(tmp_path)
+
+    refreshed: list[tuple[str, Path]] = []
+
+    def fake_uv_lock(uv: str, root: Path) -> None:
+        refreshed.append((uv, root))
+
+    updated = release.set_version(
+        tmp_path,
+        "0.2.0rc1",
+        lock_refresher=fake_uv_lock,
+    )
+
+    assert updated.value == "0.2.0rc1"
+    assert release.read_version(tmp_path) == updated
+    assert refreshed == [("uv", tmp_path)]
+
+
+def test_target_labels_normalize_supported_platform_names() -> None:
+    assert release.target_labels("Darwin", "arm64") == ("macos", "arm64")
+    assert release.target_labels("Linux", "AMD64") == ("linux", "x86_64")
+    assert release.target_labels("Windows", "aarch64") == ("windows", "arm64")
+
+
+def test_native_version_metadata_supports_finals_and_candidates() -> None:
+    assert build.version_components("1.2.3") == (1, 2, 3, 0)
+    assert build.version_components("1.2.3rc4") == (1, 2, 3, 4)
+
+    resource = build.windows_version_resource("1.2.3rc4")
+    assert "filevers=(1, 2, 3, 4)" in resource
+    assert "StringStruct('ProductVersion', '1.2.3rc4')" in resource
+
+
+def test_linux_release_archive_and_checksum(tmp_path: Path) -> None:
+    _minimal_repository(tmp_path, "1.2.3rc2")
+    executable = tmp_path / "dist/time-tracker"
+    executable.parent.mkdir()
+    executable.write_bytes(b"native executable")
+
+    artifact = release.package_release_artifact(
+        tmp_path,
+        system="Linux",
+        machine="x86_64",
+        version_reader=lambda _: "time-tracker 1.2.3rc2",
+    )
+
+    assert artifact.archive.name == "time-tracker-1.2.3rc2-linux-x86_64.tar.gz"
+    with tarfile.open(artifact.archive, "r:gz") as archive:
+        assert "time-tracker" in archive.getnames()
+    digest = hashlib.sha256(artifact.archive.read_bytes()).hexdigest()
+    assert artifact.checksum.read_text(encoding="utf-8") == (
+        f"{digest}  {artifact.archive.name}\n"
+    )
+    release.validate_checksum(artifact)
+
+
+def test_windows_release_archive_contains_executable(tmp_path: Path) -> None:
+    _minimal_repository(tmp_path)
+    executable = tmp_path / "dist/time-tracker.exe"
+    executable.parent.mkdir()
+    executable.write_bytes(b"native executable")
+
+    artifact = release.package_release_artifact(
+        tmp_path,
+        system="Windows",
+        machine="AMD64",
+        version_reader=lambda _: "time-tracker 0.1.0",
+    )
+
+    assert artifact.archive.name == "time-tracker-0.1.0-windows-x86_64.zip"
+    with zipfile.ZipFile(artifact.archive) as archive:
+        assert archive.namelist() == ["time-tracker.exe"]
+
+
+def test_packaging_rejects_a_mismatched_frozen_version(tmp_path: Path) -> None:
+    _minimal_repository(tmp_path)
+    executable = tmp_path / "dist/time-tracker"
+    executable.parent.mkdir()
+    executable.write_bytes(b"native executable")
+
+    with pytest.raises(release.ReleaseError, match="packaged executable reported"):
+        release.package_release_artifact(
+            tmp_path,
+            system="Linux",
+            machine="x86_64",
+            version_reader=lambda _: "time-tracker 9.9.9",
+        )
+
+
+def test_publication_kind_must_match_version() -> None:
+    with pytest.raises(release.ReleaseError, match="final version"):
+        release.validate_publish_kind(release.parse_version("1.2.3"), "candidate")
+    with pytest.raises(release.ReleaseError, match="release candidate"):
+        release.validate_publish_kind(release.parse_version("1.2.3rc1"), "final")
+
+
+def test_publication_requires_clean_checkout() -> None:
+    release.require_clean_status("")
+
+    with pytest.raises(release.ReleaseError, match="clean Git checkout"):
+        release.require_clean_status(" M README.md\n")
+
+
+def test_existing_tag_must_identify_current_commit() -> None:
+    release.require_matching_tag(
+        "v1.2.3",
+        head_commit="abc123",
+        tag_commit=None,
+    )
+    release.require_matching_tag(
+        "v1.2.3",
+        head_commit="abc123",
+        tag_commit="abc123",
+    )
+
+    with pytest.raises(release.ReleaseError, match="not current commit"):
+        release.require_matching_tag(
+            "v1.2.3",
+            head_commit="abc123",
+            tag_commit="def456",
+        )
+
+
+def test_existing_tag_must_be_annotated() -> None:
+    release.require_annotated_tag("v1.2.3", annotated=True)
+
+    with pytest.raises(release.ReleaseError, match="not an annotated tag"):
+        release.require_annotated_tag("v1.2.3", annotated=False)
+
+
+def test_remote_tag_listing_prefers_annotated_tag_commit() -> None:
+    output = (
+        "111111 refs/tags/v1.2.3\n222222 refs/tags/v1.2.3^{}\n333333 refs/tags/v9.9.9\n"
+    )
+
+    assert release.remote_tag_reference_from_ls_remote(
+        output,
+        "v1.2.3",
+    ) == release.TagReference(commit="222222", annotated=True)
+    assert release.remote_tag_reference_from_ls_remote("", "v1.2.3") is None
+
+
+def test_remote_tag_listing_identifies_a_lightweight_tag() -> None:
+    assert release.remote_tag_reference_from_ls_remote(
+        "111111 refs/tags/v1.2.3\n",
+        "v1.2.3",
+    ) == release.TagReference(commit="111111", annotated=False)

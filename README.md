@@ -37,6 +37,8 @@ business logic independent of Textual presentation code.
   desktop and terminal time-tracking UX patterns and the recommended TUI roadmap.
 - [Agent guidance](AGENTS.md) — repository working rules.
 - [Commit guidelines](docs/commits.md) — commit preparation and message format.
+- [Release guide](docs/releases.md) — versioning, local release builds, and
+  GitHub publication without hosted Actions.
 
 ## Status
 
@@ -117,13 +119,17 @@ The CI workflow is configured to build and exercise the packaged lifecycle on
 Linux, Windows, and macOS. A local macOS arm64 app-bundle lifecycle and
 Notification Center dispatch were validated on July 19, 2026. The macOS Core
 Graphics idle-duration adapter was validated interactively on July 22, 2026.
+A versioned, ad-hoc-signed macOS arm64 release archive, checksum, and packaged
+lifecycle were validated locally on July 24, 2026.
 
 Known outstanding validation:
 
 - run the updated packaged-lifecycle workflow successfully on Linux and Windows;
 - run the native-notification smoke on interactive Linux and Windows desktops;
 - validate idle-duration detection on supported interactive Linux X11 and
-  Windows desktop sessions; and
+  Windows desktop sessions;
+- validate versioned release archives and native version metadata on Linux and
+  Windows; and
 - record any additional unmet acceptance criteria here when identified.
 
 ## Development
@@ -318,3 +324,22 @@ The GitHub Actions workflow is configured to run the checks, native build, and
 packaged lifecycle smoke on Python 3.14 across Linux, Windows, and macOS; see
 [Status](#status) for current validation results. Native notification delivery
 requires an interactive desktop session and is therefore a manual platform smoke.
+
+## Releases
+
+Versions use `X.Y.Z` for final releases and `X.Y.ZrcN` for release candidates.
+Set the one canonical version and refresh the lockfile with:
+
+```shell
+make set-version VERSION=0.2.0rc1
+```
+
+After committing that version, `make release-artifact` runs the complete local
+checks, native build, and packaged lifecycle smoke, then creates a versioned
+target-platform archive and SHA-256 file in `dist/release/`.
+`make publish-release-candidate` publishes an `rc` build as a GitHub prerelease;
+`make publish-release` publishes a final version. Each operating system builds
+and uploads its own asset from the same tagged commit. These commands use local
+Git and authenticated GitHub CLI operations and do not use GitHub Actions
+minutes. See the [release guide](docs/releases.md) for the complete procedure and
+failure safeguards.

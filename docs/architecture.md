@@ -39,6 +39,7 @@ behavior independent of Textual presentation code.
 | Platform paths | `platformdirs` |
 | Notifications | Narrow native adapter: `desktop-notifier` on Linux/Windows, `osascript` on macOS |
 | Local binaries | PyInstaller, run separately on each target OS |
+| Release publication | Local Python tooling, Git tags, and GitHub CLI |
 | Quality tools | pytest, pytest-asyncio, Ruff, and mypy |
 
 An ORM, dependency-injection framework, network service, and external migration
@@ -214,6 +215,27 @@ delivery fails or the TUI disconnects.
 - Build with PyInstaller on the target OS; it is not used for cross-compilation.
 - Linux and Windows builds are one-file executables. macOS builds are ad-hoc-signed
   `.app` bundles, with the TUI executable inside the bundle.
+- Windows file-version resources and macOS bundle-version metadata are generated
+  from the canonical application version. Updating a macOS bundle property is
+  followed by another ad-hoc signature so release packaging does not invalidate
+  the bundle.
+- `src/time_tracker/__init__.py` is the single application-version source.
+  Hatch reads the same value for project metadata, and the CLI and frozen
+  executable import it at runtime. Final versions use `X.Y.Z`; release candidates
+  use the PEP 440 form `X.Y.ZrcN`. The corresponding Git tag is `v<version>`.
+- A target-platform release build runs the complete repository checks, builds the
+  native package, exercises the packaged lifecycle, verifies the frozen
+  executable's version, and creates a versioned operating-system/architecture
+  archive plus a SHA-256 checksum in `dist/release/`.
+- Release publication runs from a clean checkout at the version commit. It creates
+  or verifies one annotated version tag, pushes that tag, and uses the authenticated
+  GitHub CLI to create a non-draft prerelease for an `rc` version or a final
+  release for a final version. Other target platforms may upload their
+  independently validated assets to the same GitHub release.
+- Release publication is deliberately local and does not dispatch GitHub Actions.
+  The branch and pull-request check workflow remains useful when Actions capacity
+  is available, but tag pushes do not trigger it and release correctness never
+  depends on hosted Actions minutes.
 
 ## Testing and platform validation
 
@@ -240,6 +262,9 @@ stop it, and shut down the agent. The GitHub Actions workflow is configured to
 build and execute this lifecycle on Linux, Windows, and macOS. Native delivery is
 checked separately on an interactive desktop with `make smoke-notification`,
 since hosted CI runners do not provide a reliable signed-in notification session.
+Release builds repeat the canonical checks and packaged lifecycle locally on each
+target operating system before creating or uploading an asset, so they remain
+available when hosted Actions cannot run.
 Current platform results and outstanding validation are recorded only in the
 [README Status](../README.md#status) section.
 
