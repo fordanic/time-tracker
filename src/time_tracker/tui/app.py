@@ -258,7 +258,7 @@ class ShortcutHelpScreen(ModalScreen[None]):
 
     BINDINGS = [
         Binding("escape", "close", "Close", show=False),
-        Binding("ctrl+g", "close", "Close", show=False, priority=True),
+        Binding("ctrl+k", "close", "Close", show=False, priority=True),
         Binding("?", "close", "Close", show=False),
     ]
     CSS = """
@@ -295,7 +295,7 @@ class ShortcutHelpScreen(ModalScreen[None]):
                 "F5 Start / switch / restart · F6 Stop · F7 Export\n"
                 "F8 Archive project · F9 Archive activity\n"
                 "F10 Still active · F11 Update active · F12 Snooze\n"
-                "Ctrl+Q Quit · Ctrl+G or Esc Close this help",
+                "Ctrl+C Quit · Ctrl+K or Esc Close this help",
                 id="shortcut-help-text",
             )
 
@@ -322,9 +322,15 @@ class TimeTrackerApp(App[None]):
         Binding("f10", "confirm_active_reminder", "Still active", show=False),
         Binding("f11", "edit_active", "Update active", show=False),
         Binding("f12", "snooze_reminder", "Snooze", show=False),
-        Binding("ctrl+q", "quit", "Quit", show=False),
+        Binding("ctrl+c", "quit", "Quit", show=False, priority=True),
         Binding(
-            "ctrl+g",
+            "ctrl+q",
+            "ignore_terminal_control",
+            show=False,
+            priority=True,
+        ),
+        Binding(
+            "ctrl+k",
             "show_shortcuts",
             "Shortcuts",
             show=False,
@@ -924,7 +930,7 @@ class TimeTrackerApp(App[None]):
                     yield Static("", id="settings-path")
             yield Static("", id="message")
         yield Static(
-            "Ctrl+G Shortcuts · F5 Timer · F6 Stop · F11 Update",
+            "Ctrl+K Shortcuts · F5 Timer · F6 Stop · F11 Update",
             id="shortcut-summary",
         )
 
@@ -1219,6 +1225,9 @@ class TimeTrackerApp(App[None]):
     def action_show_shortcuts(self) -> None:
         """Show every binding without changing workflow state."""
         self.push_screen(ShortcutHelpScreen())
+
+    def action_ignore_terminal_control(self) -> None:
+        """Override Textual's terminal flow-control quit binding."""
 
     async def action_start_timer(self) -> None:
         """Start or switch the timer from the F5 binding."""
@@ -1561,6 +1570,12 @@ class TimeTrackerApp(App[None]):
             tabs.focus()
         else:
             self.query_one(focus_selector).focus()
+        if tab_id == "manage-tab":
+            self.run_worker(
+                self._refresh_manage_items(),
+                group="manage-refresh",
+                exclusive=True,
+            )
         self._render_shortcut_summary()
 
     def _render_shortcut_summary(self) -> None:
@@ -1571,7 +1586,7 @@ class TimeTrackerApp(App[None]):
             "settings-tab": "Settings",
         }
         active_tab = self.query_one("#view-tabs", Tabs).active or "track-tab"
-        parts = ["Ctrl+G Shortcuts", summaries.get(active_tab, "")]
+        parts = ["Ctrl+K Shortcuts", summaries.get(active_tab, "")]
         reminder = self.pending_reminder
         if reminder is not None:
             if reminder.kind is ReminderKind.ACTIVE:

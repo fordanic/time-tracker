@@ -196,8 +196,8 @@ activities; Review owns history, summaries, and CSV export; Manage owns archive
 actions; and Settings edits TOML-backed reminder and export preferences and
 applies them live. The active timer and any pending reminder stay visible while
 moving between them. `F5` through `F11` retain their documented actions from
-every view, and `F12` snoozes any pending reminder. `Ctrl+G` opens the complete
-shortcut overlay.
+every view, and `F12` snoozes any pending reminder. `Ctrl+K` opens the complete
+shortcut overlay, and `Ctrl+C` exits the application.
 
 In Review (`F2`), completed time is grouped by local date with compact `HH:MM`
 times and a total after each day. An entry crossing midnight has one display

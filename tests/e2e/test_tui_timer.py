@@ -75,12 +75,18 @@ async def test_narrow_footer_keeps_complete_shortcut_help_discoverable(
             project = app.query_one("#project", Input)
             activity = app.query_one("#activity", Input)
 
-            assert summary.startswith("Ctrl+G Shortcuts")
+            assert summary.startswith("Ctrl+K Shortcuts")
             assert "F5 Timer" in summary
             assert "F8 Archive project" not in summary
             assert project.region.y < activity.region.y
+            assert app.active_bindings["ctrl+k"].binding.action == "show_shortcuts"
+            assert app.active_bindings["ctrl+c"].binding.action == "quit"
+            assert (
+                app.active_bindings["ctrl+q"].binding.action
+                == "ignore_terminal_control"
+            )
 
-            await pilot.press("ctrl+g")
+            await pilot.press("ctrl+k")
 
             assert isinstance(app.screen, ShortcutHelpScreen)
             help_text = str(
@@ -615,14 +621,25 @@ async def test_user_navigates_focused_views_without_losing_workflow_state(
             assert app.query_one("#inactive-reminders-enabled", Switch).has_focus
             assert "Website / Review" in str(active.render())
 
+            client.archive_activity("Website", "Review")
             await pilot.press("f1")
             assert app.query_one("#note", TextArea).text == "Draft replacement"
             await pilot.press("f2")
             assert app.query_one("#export-path", Input).value.endswith("review.csv")
             assert app.query_one("#summary-mode", Switch).value is True
             await pilot.press("f3")
-            assert manage_tree.cursor_node is not None
-            assert str(manage_tree.cursor_node.label) == "Review"
+            await _wait_for_ui(
+                pilot,
+                lambda: any(
+                    str(activity.label).startswith("Review")
+                    for project in app.query_one(
+                        "#archived-targets", Tree
+                    ).root.children
+                    for activity in project.children
+                ),
+                "Manage trees did not refresh when the view was selected",
+            )
+            assert len(manage_tree.root.children[0].children) == 0
     finally:
         client.shutdown()
         thread.join(timeout=2)

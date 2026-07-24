@@ -996,6 +996,8 @@ terminals, while retaining the existing F-key accelerators.
 #### Required behavior
 
 - Retain F1 through F12 with their existing actions.
+- Use `Ctrl+K` for the complete shortcut overlay and `Ctrl+C` to quit; avoid
+  terminal flow-control and bell combinations such as `Ctrl+Q` and `Ctrl+G`.
 - Replace the always-expanded global shortcut row with a compact,
   context-relevant summary for the selected view.
 - Keep an always-visible shortcut-help action at the start of the summary and
@@ -1043,6 +1045,8 @@ activity names.
   and restores the selected exact node.
 - F8 and F9 retain project-archive and activity-archive behavior for the
   corresponding selected node.
+- Refresh both trees whenever Manage is selected so changes made while another
+  view is active are visible immediately.
 - Refresh both trees after every successful archive or restore and keep a
   sensible neighboring selection when possible.
 
