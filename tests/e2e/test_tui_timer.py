@@ -315,9 +315,13 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
             restore_button.focus()
             await pilot.pause()
             restore_button.press()
-            await pilot.pause()
-            assert "Restored activity Website / Implementation" in str(
-                recovered_app.query_one("#message", Static).render()
+            await _wait_for_ui(
+                pilot,
+                lambda: (
+                    "Restored activity Website / Implementation"
+                    in str(recovered_app.query_one("#message", Static).render())
+                ),
+                "archived activity was not restored",
             )
             assert client.list_activities("Website") == ["Implementation"]
 
