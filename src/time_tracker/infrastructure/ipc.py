@@ -81,6 +81,14 @@ class AgentClient:
         )
         return _settings_from_object(result)
 
+    def get_theme(self) -> str:
+        """Return the persisted TUI theme name."""
+        return _object_str(self._request("get_theme", {}))
+
+    def save_theme(self, theme: str) -> str:
+        """Persist the selected TUI theme name."""
+        return _object_str(self._request("save_theme", {"theme": theme}))
+
     def get_idle_detection_status(self) -> IdleDetectionStatus:
         """Return whether idle-duration detection is available this session."""
         data = _object_dict(self._request("get_idle_detection_status", {}))

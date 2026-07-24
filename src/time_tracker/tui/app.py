@@ -14,6 +14,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.suggester import SuggestFromList
+from textual.theme import Theme
 from textual.widgets import (
     Button,
     ContentSwitcher,
@@ -73,6 +74,14 @@ class TrackerGateway(Protocol):
 
     def save_configuration(self, settings: ReminderSettings) -> ReminderSettings:
         """Persist and live-reload reminder settings."""
+        ...
+
+    def get_theme(self) -> str:
+        """Return the persisted TUI theme name."""
+        ...
+
+    def save_theme(self, theme: str) -> str:
+        """Persist the selected TUI theme name."""
         ...
 
     def get_idle_detection_status(self) -> IdleDetectionStatus:
@@ -645,6 +654,8 @@ class TimeTrackerApp(App[None]):
         self._pending_archive_project: tuple[str, str] | None = None
         self._pending_archive_activity: tuple[str, str, str, str] | None = None
         self._idle_detection_available = False
+        self._theme_persistence_ready = False
+        self._saved_theme: str | None = None
 
     def compose(self) -> ComposeResult:
         """Compose focused workflows around one persistent active-timer strip."""
@@ -896,6 +907,7 @@ class TimeTrackerApp(App[None]):
 
     async def on_mount(self) -> None:
         """Recover any persisted active timer when the TUI reconnects."""
+        self.theme_changed_signal.subscribe(self, self._handle_theme_changed)
         self.set_interval(1.0, self._render_active)
         self.set_interval(1.0, self._refresh_reminder)
         self.set_interval(5.0, self._refresh_idle_status)
@@ -918,10 +930,19 @@ class TimeTrackerApp(App[None]):
                 self.client.list_archived_activities
             )
             settings = await asyncio.to_thread(self.client.get_configuration)
+            persisted_theme = await asyncio.to_thread(self.client.get_theme)
             idle_status = await asyncio.to_thread(self.client.get_idle_detection_status)
         except Exception as error:
             self._show_message(str(error), error=True)
         else:
+            selected_theme = (
+                persisted_theme
+                if persisted_theme in self.available_themes
+                else "textual-dark"
+            )
+            self._saved_theme = selected_theme
+            self.theme = selected_theme
+            self._theme_persistence_ready = True
             self._set_project_suggestions(projects)
             self._render_history(completed)
             self._render_recent_activities(recent)
@@ -938,10 +959,26 @@ class TimeTrackerApp(App[None]):
                 self.query_one("#note", TextArea).load_text(
                     self.active_timer.note or ""
                 )
+            if selected_theme != persisted_theme:
+                try:
+                    await asyncio.to_thread(self.client.save_theme, selected_theme)
+                except Exception as error:
+                    self._show_message(str(error), error=True)
         self._render_active()
         await self._refresh_start_action()
         await self._refresh_reminder()
         self._select_view("track-tab")
+
+    async def _handle_theme_changed(self, theme: Theme) -> None:
+        """Persist a theme selected through Textual's theme picker."""
+        if not self._theme_persistence_ready or theme.name == self._saved_theme:
+            return
+        try:
+            saved = await asyncio.to_thread(self.client.save_theme, theme.name)
+        except Exception as error:
+            self._show_message(str(error), error=True)
+            return
+        self._saved_theme = saved
 
     @on(Tabs.TabActivated, "#view-tabs")
     def handle_view_activated(self, event: Tabs.TabActivated) -> None:

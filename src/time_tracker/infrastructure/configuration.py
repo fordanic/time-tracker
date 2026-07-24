@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import tomllib
 from pathlib import Path
 from typing import cast
 
-from time_tracker.application.configuration import ApplicationConfig, ReminderSettings
+from time_tracker.application.configuration import (
+    ApplicationConfig,
+    ReminderSettings,
+    UiSettings,
+)
 
 _REMINDER_KEYS = {
     "inactive_enabled",
@@ -23,6 +28,7 @@ _REMINDER_KEYS = {
     "idle_enabled",
     "idle_threshold_minutes",
 }
+_UI_KEYS = {"theme"}
 
 
 class ConfigurationError(ValueError):
@@ -41,7 +47,7 @@ def load_config(path: Path) -> ApplicationConfig:
     except (UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
         raise ConfigurationError(f"invalid configuration at {path}: {error}") from error
 
-    unknown_sections = set(decoded) - {"reminders"}
+    unknown_sections = set(decoded) - {"reminders", "ui"}
     if unknown_sections:
         names = ", ".join(sorted(unknown_sections))
         raise ConfigurationError(
@@ -59,6 +65,17 @@ def load_config(path: Path) -> ApplicationConfig:
         names = ", ".join(sorted(unknown_reminders))
         raise ConfigurationError(
             f"invalid configuration at {path}: unknown reminders key(s): {names}"
+        )
+
+    ui_value = decoded.get("ui", {})
+    if not isinstance(ui_value, dict):
+        raise ConfigurationError(f"invalid configuration at {path}: ui must be a table")
+    ui = cast(dict[str, object], ui_value)
+    unknown_ui = set(ui) - _UI_KEYS
+    if unknown_ui:
+        names = ", ".join(sorted(unknown_ui))
+        raise ConfigurationError(
+            f"invalid configuration at {path}: unknown ui key(s): {names}"
         )
 
     inactive_enabled = _boolean(reminders, "inactive_enabled", True, path)
@@ -98,9 +115,12 @@ def load_config(path: Path) -> ApplicationConfig:
             idle_enabled=idle_enabled,
             idle_threshold_minutes=idle_threshold_minutes,
         )
+        ui_settings = UiSettings(
+            theme=_string(ui, "theme", "textual-dark", path, section="ui")
+        )
     except ValueError as error:
         raise ConfigurationError(f"invalid configuration at {path}: {error}") from error
-    return ApplicationConfig(reminder_settings=settings)
+    return ApplicationConfig(reminder_settings=settings, ui_settings=ui_settings)
 
 
 class TomlConfigurationStore:
@@ -109,9 +129,9 @@ class TomlConfigurationStore:
     def __init__(self, path: Path) -> None:
         self._path = path
 
-    def save(self, settings: ReminderSettings) -> None:
+    def save(self, config: ApplicationConfig) -> None:
         """Replace the destination only after a complete file is durable."""
-        payload = _toml(settings).encode("utf-8")
+        payload = _toml(config).encode("utf-8")
         self._path.parent.mkdir(parents=True, exist_ok=True)
         temporary_path: Path | None = None
         try:
@@ -132,7 +152,8 @@ class TomlConfigurationStore:
                 temporary_path.unlink(missing_ok=True)
 
 
-def _toml(settings: ReminderSettings) -> str:
+def _toml(config: ApplicationConfig) -> str:
+    settings = config.reminder_settings
     return (
         "[reminders]\n"
         f"inactive_enabled = {str(settings.inactive_enabled).lower()}\n"
@@ -151,6 +172,8 @@ def _toml(settings: ReminderSettings) -> str:
         f"idle_enabled = {str(settings.idle_enabled).lower()}\n"
         "idle_threshold_minutes = "
         f"{_format_number(settings.idle_threshold_minutes)}\n"
+        "\n[ui]\n"
+        f"theme = {json.dumps(config.ui_settings.theme, ensure_ascii=False)}\n"
     )
 
 
@@ -187,11 +210,18 @@ def _positive_number(
     return float(value)
 
 
-def _string(values: dict[str, object], name: str, default: str, path: Path) -> str:
+def _string(
+    values: dict[str, object],
+    name: str,
+    default: str,
+    path: Path,
+    *,
+    section: str = "reminders",
+) -> str:
     value = values.get(name, default)
     if not isinstance(value, str):
         raise ConfigurationError(
-            f"invalid configuration at {path}: reminders.{name} must be a string"
+            f"invalid configuration at {path}: {section}.{name} must be a string"
         )
     return value
 

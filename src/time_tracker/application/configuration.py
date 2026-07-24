@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import time
 from typing import Protocol
 
@@ -119,11 +119,35 @@ class ReminderSettings:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class UiSettings:
+    """Durable user-interface preferences."""
+
+    theme: str = "textual-dark"
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.theme, str) or not self.theme.strip():
+            raise ValueError("UI theme must be a non-empty string")
+
+
+@dataclass(frozen=True, slots=True)
+class ApplicationConfig:
+    """Configuration consumed by application and background-process services."""
+
+    reminder_settings: ReminderSettings = field(default_factory=ReminderSettings)
+    ui_settings: UiSettings = field(default_factory=UiSettings)
+
+    @property
+    def reminder_intervals(self) -> ReminderIntervals:
+        """Return the scheduler representation of configured reminders."""
+        return self.reminder_settings.intervals
+
+
 class ConfigurationStore(Protocol):
     """Port for durable human-readable application configuration."""
 
-    def save(self, settings: ReminderSettings) -> None:
-        """Atomically persist validated reminder settings."""
+    def save(self, config: ApplicationConfig) -> None:
+        """Atomically persist the complete validated configuration."""
         ...
 
 
@@ -133,32 +157,32 @@ class ConfigurationService:
     def __init__(
         self,
         store: ConfigurationStore,
-        settings: ReminderSettings | None = None,
+        config: ApplicationConfig | None = None,
     ) -> None:
         self._store = store
-        self._settings = settings or ReminderSettings()
+        self._config = config or ApplicationConfig()
 
     def get(self) -> ReminderSettings:
         """Return the settings currently used by the running agent."""
-        return self._settings
+        return self._config.reminder_settings
 
     def save(self, settings: ReminderSettings) -> ReminderSettings:
         """Persist first, then publish the replacement settings."""
-        self._store.save(settings)
-        self._settings = settings
+        config = replace(self._config, reminder_settings=settings)
+        self._store.save(config)
+        self._config = config
         return settings
 
+    def get_theme(self) -> str:
+        """Return the currently configured Textual theme name."""
+        return self._config.ui_settings.theme
 
-@dataclass(frozen=True, slots=True)
-class ApplicationConfig:
-    """Configuration consumed by application and background-process services."""
-
-    reminder_settings: ReminderSettings = field(default_factory=ReminderSettings)
-
-    @property
-    def reminder_intervals(self) -> ReminderIntervals:
-        """Return the scheduler representation of configured reminders."""
-        return self.reminder_settings.intervals
+    def save_theme(self, theme: str) -> str:
+        """Persist first, then publish a replacement theme preference."""
+        config = replace(self._config, ui_settings=UiSettings(theme))
+        self._store.save(config)
+        self._config = config
+        return theme
 
 
 def _parse_clock(value: str) -> time:

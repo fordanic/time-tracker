@@ -23,10 +23,17 @@ from textual.widgets import (
 )
 
 from time_tracker.agent.server import serve
-from time_tracker.application.configuration import ReminderSettings
+from time_tracker.application.configuration import (
+    ApplicationConfig,
+    ReminderSettings,
+    UiSettings,
+)
 from time_tracker.application.reminders import Reminder, ReminderIntervals, ReminderKind
 from time_tracker.application.tracking import RecentActivity
-from time_tracker.infrastructure.configuration import load_config
+from time_tracker.infrastructure.configuration import (
+    TomlConfigurationStore,
+    load_config,
+)
 from time_tracker.infrastructure.ipc import AgentClient, AgentUnavailableError
 from time_tracker.infrastructure.paths import AgentPaths
 from time_tracker.infrastructure.sqlite_repository import SQLiteTimerRepository
@@ -1199,6 +1206,12 @@ async def test_user_edits_and_live_applies_reminder_settings(tmp_path: Path) -> 
             assert inactive_minutes.value == "5"
             assert inactive_minutes.region.height == 3
             assert inactive_minutes.content_region.height == 1
+            app.theme = "nord"
+            await _wait_for_ui(
+                pilot,
+                lambda: client.get_theme() == "nord",
+                "selected theme was not persisted",
+            )
 
             app.query_one("#inactive-reminders-enabled", Switch).value = True
             app.query_one("#inactive-reminder-minutes", Input).value = "2.5"
@@ -1249,6 +1262,7 @@ async def test_user_edits_and_live_applies_reminder_settings(tmp_path: Path) -> 
         async with reopened.run_test() as pilot:
             await pilot.press("f4")
             await pilot.pause()
+            assert reopened.theme == "nord"
             assert reopened.query_one("#inactive-reminder-minutes", Input).value == (
                 "2.5"
             )
@@ -1263,6 +1277,33 @@ async def test_user_edits_and_live_applies_reminder_settings(tmp_path: Path) -> 
             assert "Idle detection:" in str(
                 reopened.query_one("#idle-status", Static).render()
             )
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+
+
+@pytest.mark.asyncio
+async def test_removed_persisted_theme_falls_back_safely(tmp_path: Path) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    TomlConfigurationStore(paths.config).save(
+        ApplicationConfig(ui_settings=UiSettings("removed-theme"))
+    )
+    thread = threading.Thread(target=serve, args=(paths,), daemon=True)
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        app = TimeTrackerApp(client)
+        async with app.run_test() as pilot:
+            await _wait_for_ui(
+                pilot,
+                lambda: client.get_theme() == "textual-dark",
+                "fallback theme was not made durable",
+            )
+            assert app.theme == "textual-dark"
     finally:
         client.shutdown()
         thread.join(timeout=2)

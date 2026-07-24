@@ -703,6 +703,9 @@ def test_agent_persists_and_live_reloads_reminder_settings(tmp_path: Path) -> No
         active_interval_minutes=9.5,
     )
     try:
+        assert client.get_theme() == "textual-dark"
+        assert client.save_theme("nord") == "nord"
+        assert client.get_theme() == "nord"
         assert client.save_configuration(enabled) == enabled
         assert client.get_configuration() == enabled
         _wait_for_pending_reminder(client, ReminderKind.INACTIVE)
@@ -718,6 +721,7 @@ def test_agent_persists_and_live_reloads_reminder_settings(tmp_path: Path) -> No
 
         assert client.save_configuration(durable) == durable
         assert load_config(paths.config).reminder_settings == durable
+        assert load_config(paths.config).ui_settings.theme == "nord"
     finally:
         client.shutdown()
         thread.join(timeout=2)
@@ -733,6 +737,7 @@ def test_agent_persists_and_live_reloads_reminder_settings(tmp_path: Path) -> No
     _wait_until_ready(recovered_client)
     try:
         assert recovered_client.get_configuration() == durable
+        assert recovered_client.get_theme() == "nord"
     finally:
         recovered_client.shutdown()
         restarted.join(timeout=2)
