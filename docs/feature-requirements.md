@@ -986,7 +986,7 @@ idle awareness addresses the distinct remaining forgotten-stop risk.
 
 ### Responsive shortcut discovery
 
-**Status:** Approved
+**Status:** Implemented
 
 #### Purpose
 
@@ -1027,7 +1027,7 @@ terminals, while retaining the existing F-key accelerators.
 
 ### Hierarchical project and activity management
 
-**Status:** Approved
+**Status:** Implemented
 
 #### Purpose
 
@@ -1072,7 +1072,7 @@ activity names.
 
 ### Review selection and action layout
 
-**Status:** Approved
+**Status:** Implemented
 
 #### Purpose
 
@@ -1114,7 +1114,7 @@ typing known project and activity names.
 
 ### Track capture layout and note reset
 
-**Status:** Approved
+**Status:** Implemented
 
 #### Purpose
 
@@ -1156,7 +1156,7 @@ selected target.
 
 ### Theme-safe visual spacing
 
-**Status:** Approved
+**Status:** Implemented
 
 #### Purpose
 
@@ -1192,7 +1192,7 @@ Textual themes.
 
 ### Persistent theme and export preferences
 
-**Status:** Approved
+**Status:** Implemented
 
 #### Purpose
 
