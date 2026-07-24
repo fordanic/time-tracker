@@ -125,6 +125,9 @@ internet connection. The current product interface is a TUI.
 - Both reminder intervals are configurable and independently disableable.
 - Allow an optional shared weekly local-time window for reminder delivery and a
   configurable explicit snooze duration.
+- Allow opt-in local input-idle detection to request an active-timer reminder
+  early. Idle detection is advisory and content-free: it must not record input
+  details or silently change tracked time.
 - A reminder due outside its window waits for the next opening without producing
   catch-up notifications. Snoozing defers the pending reminder without changing
   timer state or its configured recurring interval.
@@ -240,5 +243,4 @@ feature changes a top-level requirement.
 - Behavior during computer sleep, system-clock changes, and time-zone changes.
 - Whether the background process starts at login.
 - Reminder windows, snooze persistence, and live configuration reload.
-- Whether favorites, defaults, or local prompt-only idle detection are needed
-  after the planned usability work.
+- Whether favorites or defaults are needed after dogfooding derived recent work.
