@@ -84,6 +84,14 @@ class TrackerGateway(Protocol):
         """Persist the selected TUI theme name."""
         ...
 
+    def get_export_delimiter(self) -> str:
+        """Return the persisted export delimiter."""
+        ...
+
+    def save_export_delimiter(self, delimiter: str) -> str:
+        """Persist the selected export delimiter."""
+        ...
+
     def get_idle_detection_status(self) -> IdleDetectionStatus:
         """Return whether idle-duration detection is available this session."""
         ...
@@ -598,6 +606,10 @@ class TimeTrackerApp(App[None]):
         height: 3;
     }
 
+    .settings-row Select {
+        width: 24;
+    }
+
     #save-settings-button {
         width: 28;
         margin-top: 1;
@@ -853,8 +865,8 @@ class TimeTrackerApp(App[None]):
                     )
                 with VerticalScroll(id="settings-view", classes="view"):
                     yield Static(
-                        "Configure reminders below. Saving updates the TOML file "
-                        "and applies the new schedule immediately.",
+                        "Configure reminders and export formatting below. Saving "
+                        "updates the TOML file and applies changes immediately.",
                         id="settings-info",
                     )
                     with Horizontal(classes="settings-row"):
@@ -892,9 +904,20 @@ class TimeTrackerApp(App[None]):
                             placeholder="Idle threshold minutes",
                             id="idle-reminder-minutes",
                         )
+                    with Horizontal(classes="settings-row"):
+                        yield Static("Export delimiter")
+                        yield Select(
+                            [
+                                ("Comma (CSV)", ","),
+                                ("Pipe", "|"),
+                            ],
+                            value=",",
+                            allow_blank=False,
+                            id="export-delimiter",
+                        )
                     yield Static("Idle detection: checking…", id="idle-status")
                     yield Button(
-                        "Save reminder settings",
+                        "Save settings",
                         id="save-settings-button",
                         variant="primary",
                     )
@@ -931,6 +954,7 @@ class TimeTrackerApp(App[None]):
             )
             settings = await asyncio.to_thread(self.client.get_configuration)
             persisted_theme = await asyncio.to_thread(self.client.get_theme)
+            export_delimiter = await asyncio.to_thread(self.client.get_export_delimiter)
             idle_status = await asyncio.to_thread(self.client.get_idle_detection_status)
         except Exception as error:
             self._show_message(str(error), error=True)
@@ -952,7 +976,7 @@ class TimeTrackerApp(App[None]):
                 archived_activities,
             )
             self._idle_detection_available = idle_status.available
-            self._render_settings(settings)
+            self._render_settings(settings, export_delimiter)
             if self.active_timer is not None:
                 self.query_one("#project", Input).value = self.active_timer.project
                 self.query_one("#activity", Input).value = self.active_timer.activity
@@ -1304,16 +1328,23 @@ class TimeTrackerApp(App[None]):
                     "Idle reminder threshold",
                 ),
             )
+            delimiter_value = self.query_one("#export-delimiter", Select).value
+            if not isinstance(delimiter_value, str):
+                raise ValueError("Select an export delimiter.")
             saved = await asyncio.to_thread(self.client.save_configuration, settings)
+            saved_delimiter = await asyncio.to_thread(
+                self.client.save_export_delimiter,
+                delimiter_value,
+            )
             idle_status = await asyncio.to_thread(self.client.get_idle_detection_status)
         except Exception as error:
             self._show_message(str(error), error=True)
             return
         self._idle_detection_available = idle_status.available
-        self._render_settings(saved)
+        self._render_settings(saved, saved_delimiter)
         self.pending_reminder = None
         self._render_reminder()
-        self._show_message("Reminder settings saved and applied.")
+        self._show_message("Settings saved and applied.")
 
     async def _edit_active(self) -> None:
         button = self.query_one("#edit-active-button", Button)
@@ -2270,7 +2301,11 @@ class TimeTrackerApp(App[None]):
         message_widget.update(message)
         self._render_shortcut_summary()
 
-    def _render_settings(self, settings: ReminderSettings) -> None:
+    def _render_settings(
+        self,
+        settings: ReminderSettings,
+        export_delimiter: str,
+    ) -> None:
         self.query_one("#settings-path", Static).update(
             f"Configuration file: {self.client.configuration_path}"
         )
@@ -2301,6 +2336,7 @@ class TimeTrackerApp(App[None]):
         self.query_one("#idle-reminder-minutes", Input).value = _format_minutes(
             settings.idle_threshold_minutes
         )
+        self.query_one("#export-delimiter", Select).value = export_delimiter
         self._render_idle_status()
 
     def _render_idle_status(self) -> None:

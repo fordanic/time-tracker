@@ -26,7 +26,7 @@ from time_tracker.application.tracking import (
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
 from time_tracker.infrastructure.paths import AgentPaths
 
-PROTOCOL_VERSION = 3
+PROTOCOL_VERSION = 4
 _WINDOWS_DETACHED_PROCESS_FLAGS = 0x00000208
 
 
@@ -88,6 +88,16 @@ class AgentClient:
     def save_theme(self, theme: str) -> str:
         """Persist the selected TUI theme name."""
         return _object_str(self._request("save_theme", {"theme": theme}))
+
+    def get_export_delimiter(self) -> str:
+        """Return the persisted export delimiter."""
+        return _object_str(self._request("get_export_delimiter", {}))
+
+    def save_export_delimiter(self, delimiter: str) -> str:
+        """Persist the selected export delimiter."""
+        return _object_str(
+            self._request("save_export_delimiter", {"delimiter": delimiter})
+        )
 
     def get_idle_detection_status(self) -> IdleDetectionStatus:
         """Return whether idle-duration detection is available this session."""

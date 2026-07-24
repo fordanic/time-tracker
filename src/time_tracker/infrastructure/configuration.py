@@ -11,6 +11,7 @@ from typing import cast
 
 from time_tracker.application.configuration import (
     ApplicationConfig,
+    ExportSettings,
     ReminderSettings,
     UiSettings,
 )
@@ -29,6 +30,7 @@ _REMINDER_KEYS = {
     "idle_threshold_minutes",
 }
 _UI_KEYS = {"theme"}
+_EXPORT_KEYS = {"delimiter"}
 
 
 class ConfigurationError(ValueError):
@@ -47,7 +49,7 @@ def load_config(path: Path) -> ApplicationConfig:
     except (UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
         raise ConfigurationError(f"invalid configuration at {path}: {error}") from error
 
-    unknown_sections = set(decoded) - {"reminders", "ui"}
+    unknown_sections = set(decoded) - {"reminders", "ui", "export"}
     if unknown_sections:
         names = ", ".join(sorted(unknown_sections))
         raise ConfigurationError(
@@ -76,6 +78,19 @@ def load_config(path: Path) -> ApplicationConfig:
         names = ", ".join(sorted(unknown_ui))
         raise ConfigurationError(
             f"invalid configuration at {path}: unknown ui key(s): {names}"
+        )
+
+    export_value = decoded.get("export", {})
+    if not isinstance(export_value, dict):
+        raise ConfigurationError(
+            f"invalid configuration at {path}: export must be a table"
+        )
+    export = cast(dict[str, object], export_value)
+    unknown_export = set(export) - _EXPORT_KEYS
+    if unknown_export:
+        names = ", ".join(sorted(unknown_export))
+        raise ConfigurationError(
+            f"invalid configuration at {path}: unknown export key(s): {names}"
         )
 
     inactive_enabled = _boolean(reminders, "inactive_enabled", True, path)
@@ -118,9 +133,22 @@ def load_config(path: Path) -> ApplicationConfig:
         ui_settings = UiSettings(
             theme=_string(ui, "theme", "textual-dark", path, section="ui")
         )
+        export_settings = ExportSettings(
+            delimiter=_string(
+                export,
+                "delimiter",
+                ",",
+                path,
+                section="export",
+            )
+        )
     except ValueError as error:
         raise ConfigurationError(f"invalid configuration at {path}: {error}") from error
-    return ApplicationConfig(reminder_settings=settings, ui_settings=ui_settings)
+    return ApplicationConfig(
+        reminder_settings=settings,
+        ui_settings=ui_settings,
+        export_settings=export_settings,
+    )
 
 
 class TomlConfigurationStore:
@@ -174,6 +202,9 @@ def _toml(config: ApplicationConfig) -> str:
         f"{_format_number(settings.idle_threshold_minutes)}\n"
         "\n[ui]\n"
         f"theme = {json.dumps(config.ui_settings.theme, ensure_ascii=False)}\n"
+        "\n[export]\n"
+        "delimiter = "
+        f"{json.dumps(config.export_settings.delimiter, ensure_ascii=False)}\n"
     )
 
 

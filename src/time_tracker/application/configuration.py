@@ -131,11 +131,23 @@ class UiSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class ExportSettings:
+    """Durable export-format preferences."""
+
+    delimiter: str = ","
+
+    def __post_init__(self) -> None:
+        if self.delimiter not in {",", "|"}:
+            raise ValueError("export delimiter must be comma or pipe")
+
+
+@dataclass(frozen=True, slots=True)
 class ApplicationConfig:
     """Configuration consumed by application and background-process services."""
 
     reminder_settings: ReminderSettings = field(default_factory=ReminderSettings)
     ui_settings: UiSettings = field(default_factory=UiSettings)
+    export_settings: ExportSettings = field(default_factory=ExportSettings)
 
     @property
     def reminder_intervals(self) -> ReminderIntervals:
@@ -183,6 +195,20 @@ class ConfigurationService:
         self._store.save(config)
         self._config = config
         return theme
+
+    def get_export_delimiter(self) -> str:
+        """Return the currently configured export delimiter."""
+        return self._config.export_settings.delimiter
+
+    def save_export_delimiter(self, delimiter: str) -> str:
+        """Persist first, then publish a replacement export delimiter."""
+        config = replace(
+            self._config,
+            export_settings=ExportSettings(delimiter),
+        )
+        self._store.save(config)
+        self._config = config
+        return delimiter
 
 
 def _parse_clock(value: str) -> time:

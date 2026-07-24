@@ -5,6 +5,7 @@ import pytest
 from time_tracker.application.configuration import (
     ApplicationConfig,
     ConfigurationService,
+    ExportSettings,
     ReminderSettings,
     UiSettings,
 )
@@ -63,6 +64,8 @@ active_interval_minutes = 12
         "[reminders]\nactve_enabled = false",
         "[ui]\ntheme = 1",
         "[ui]\nunknown = true",
+        '[export]\ndelimiter = ";"',
+        "[export]\nunknown = true",
     ],
 )
 def test_invalid_configuration_is_rejected_without_rewriting(
@@ -99,6 +102,7 @@ def test_configuration_store_atomically_replaces_complete_toml(tmp_path: Path) -
     config = ApplicationConfig(
         reminder_settings=settings,
         ui_settings=UiSettings(theme="nord"),
+        export_settings=ExportSettings(delimiter="|"),
     )
     TomlConfigurationStore(path).save(config)
 
@@ -118,6 +122,8 @@ def test_configuration_store_atomically_replaces_complete_toml(tmp_path: Path) -
         "idle_threshold_minutes = 22.5\n"
         "\n[ui]\n"
         'theme = "nord"\n'
+        "\n[export]\n"
+        'delimiter = "|"\n'
     )
     assert list(tmp_path.glob(".config.toml.*.tmp")) == []
 
@@ -137,6 +143,7 @@ def test_failed_persistence_does_not_publish_new_settings() -> None:
 
     assert service.get() == original
     assert service.get_theme() == "textual-dark"
+    assert service.get_export_delimiter() == ","
 
 
 def test_saving_one_configuration_section_preserves_the_other(
@@ -147,10 +154,12 @@ def test_saving_one_configuration_section_preserves_the_other(
     reminders = ReminderSettings(active_interval_minutes=12)
 
     assert service.save_theme("nord") == "nord"
+    assert service.save_export_delimiter("|") == "|"
     assert service.save(reminders) == reminders
     assert load_config(path) == ApplicationConfig(
         reminder_settings=reminders,
         ui_settings=UiSettings(theme="nord"),
+        export_settings=ExportSettings(delimiter="|"),
     )
 
 

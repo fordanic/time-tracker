@@ -71,6 +71,29 @@ def test_csv_export_requires_confirmation_before_overwrite(tmp_path: Path) -> No
         assert list(csv.reader(exported)) == [list(CSV_COLUMNS)]
 
 
+def test_pipe_delimiter_uses_standard_quoting(tmp_path: Path) -> None:
+    repository = SQLiteTimerRepository(tmp_path / "tracker.sqlite3")
+    service = ExportService(
+        repository,
+        CsvCompletedEntryWriter(),
+        CsvDailySummaryWriter(),
+        UTC,
+        delimiter=lambda: "|",
+    )
+    started_at = datetime(2026, 7, 19, 8, 30, tzinfo=UTC)
+    note = "Comma, pipe | and\nnewline"
+    repository.start("Client", "Review", started_at, note)
+    repository.stop(started_at + timedelta(minutes=30))
+    destination = tmp_path / "entries.psv"
+
+    assert service.export_completed(destination) == 1
+
+    with destination.open(encoding="utf-8", newline="") as exported:
+        rows = list(csv.reader(exported, delimiter="|"))
+    assert rows[0] == list(CSV_COLUMNS)
+    assert rows[1][5] == note
+
+
 def test_daily_summary_csv_groups_and_splits_completed_entries(tmp_path: Path) -> None:
     repository = SQLiteTimerRepository(tmp_path / "tracker.sqlite3")
     service = ExportService(

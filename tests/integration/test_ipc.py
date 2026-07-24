@@ -67,6 +67,13 @@ def test_authenticated_json_ipc_persists_and_recovers_active_timer(
         assert destination.read_text(encoding="utf-8").startswith(
             "project,activity,start_time,stop_time,duration_seconds,note"
         )
+        assert reconnected_client.save_export_delimiter("|") == "|"
+        pipe_destination = tmp_path / "ipc-export.psv"
+        assert reconnected_client.export_completed(pipe_destination) == 1
+        assert pipe_destination.read_text(encoding="utf-8").startswith(
+            "project|activity|start_time|stop_time|duration_seconds|note"
+        )
+        assert reconnected_client.save_export_delimiter(",") == ","
         summary_destination = tmp_path / "ipc-daily-summary.csv"
         assert reconnected_client.export_daily_summaries(summary_destination) == 1
         assert summary_destination.read_text(encoding="utf-8").startswith(
@@ -706,6 +713,9 @@ def test_agent_persists_and_live_reloads_reminder_settings(tmp_path: Path) -> No
         assert client.get_theme() == "textual-dark"
         assert client.save_theme("nord") == "nord"
         assert client.get_theme() == "nord"
+        assert client.get_export_delimiter() == ","
+        assert client.save_export_delimiter("|") == "|"
+        assert client.get_export_delimiter() == "|"
         assert client.save_configuration(enabled) == enabled
         assert client.get_configuration() == enabled
         _wait_for_pending_reminder(client, ReminderKind.INACTIVE)
@@ -722,6 +732,7 @@ def test_agent_persists_and_live_reloads_reminder_settings(tmp_path: Path) -> No
         assert client.save_configuration(durable) == durable
         assert load_config(paths.config).reminder_settings == durable
         assert load_config(paths.config).ui_settings.theme == "nord"
+        assert load_config(paths.config).export_settings.delimiter == "|"
     finally:
         client.shutdown()
         thread.join(timeout=2)
@@ -738,6 +749,7 @@ def test_agent_persists_and_live_reloads_reminder_settings(tmp_path: Path) -> No
     try:
         assert recovered_client.get_configuration() == durable
         assert recovered_client.get_theme() == "nord"
+        assert recovered_client.get_export_delimiter() == "|"
     finally:
         recovered_client.shutdown()
         restarted.join(timeout=2)

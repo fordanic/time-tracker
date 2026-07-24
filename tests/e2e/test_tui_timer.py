@@ -1206,6 +1206,7 @@ async def test_user_edits_and_live_applies_reminder_settings(tmp_path: Path) -> 
             assert inactive_minutes.value == "5"
             assert inactive_minutes.region.height == 3
             assert inactive_minutes.content_region.height == 1
+            assert app.query_one("#export-delimiter", Select).value == ","
             app.theme = "nord"
             await _wait_for_ui(
                 pilot,
@@ -1224,6 +1225,7 @@ async def test_user_edits_and_live_applies_reminder_settings(tmp_path: Path) -> 
             app.query_one("#reminder-snooze-minutes", Input).value = "7.5"
             app.query_one("#idle-reminders-enabled", Switch).value = True
             app.query_one("#idle-reminder-minutes", Input).value = "22.5"
+            app.query_one("#export-delimiter", Select).value = "|"
             app.query_one("#save-settings-button", Button).press()
             await pilot.pause()
 
@@ -1242,7 +1244,9 @@ async def test_user_edits_and_live_applies_reminder_settings(tmp_path: Path) -> 
             )
             assert client.get_configuration() == expected
             assert load_config(paths.config).reminder_settings == expected
-            assert "Reminder settings saved and applied" in str(
+            assert client.get_export_delimiter() == "|"
+            assert load_config(paths.config).export_settings.delimiter == "|"
+            assert "Settings saved and applied" in str(
                 app.query_one("#message", Static).render()
             )
             assert app.query_one("#message", Static).has_class("message-success")
@@ -1274,6 +1278,7 @@ async def test_user_edits_and_live_applies_reminder_settings(tmp_path: Path) -> 
             assert reopened.query_one("#reminder-snooze-minutes", Input).value == "7.5"
             assert reopened.query_one("#idle-reminders-enabled", Switch).value is True
             assert reopened.query_one("#idle-reminder-minutes", Input).value == "22.5"
+            assert reopened.query_one("#export-delimiter", Select).value == "|"
             assert "Idle detection:" in str(
                 reopened.query_one("#idle-status", Static).render()
             )
