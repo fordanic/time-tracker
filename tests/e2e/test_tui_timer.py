@@ -824,7 +824,7 @@ async def test_review_filters_range_totals_and_export_share_one_selection(
             app.query_one("#date-preset", Select).value = "custom"
             app.query_one("#filter-start-date", Input).value = "2026-07-20"
             app.query_one("#filter-end-date", Input).value = "2026-07-20"
-            app.query_one("#filter-project", Input).value = "client"
+            app.query_one("#filter-project", Select).value = "Client"
             await pilot.pause()
 
             history = app.query_one("#history", DataTable)
@@ -833,9 +833,17 @@ async def test_review_filters_range_totals_and_export_share_one_selection(
             assert history.get_row_at(0)[1:3] == ["Client", "Research"]
             assert history.get_row_at(1)[1:3] == ["Client", "Writing"]
             assert history.get_row_at(2)[1] == "Day total"
-            assert "2026-07-20 · client · all activities" in str(
+            assert "2026-07-20 · Client · all activities" in str(
                 app.query_one("#active-filter", Static).render()
             )
+
+            activity_select = app.query_one("#filter-activity", Select)
+            activity_select.value = "Writing"
+            await pilot.pause()
+            assert history.row_count == 2
+            assert history.get_row_at(0)[1:3] == ["Client", "Writing"]
+            activity_select.value = ""
+            await pilot.pause()
 
             range_switch = app.query_one("#range-summary-mode", Switch)
             range_switch.focus()
@@ -875,7 +883,8 @@ async def test_review_filters_range_totals_and_export_share_one_selection(
             )
 
             app.query_one("#filter-end-date", Input).value = "2026-07-20"
-            app.query_one("#filter-activity", Input).value = "Missing"
+            app.query_one("#filter-start-date", Input).value = "2026-07-21"
+            app.query_one("#filter-end-date", Input).value = "2026-07-21"
             await pilot.pause()
 
             assert history.row_count == 0

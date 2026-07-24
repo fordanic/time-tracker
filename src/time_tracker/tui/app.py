@@ -491,9 +491,13 @@ class TimeTrackerApp(App[None]):
         border: none;
     }
 
+    #summary-mode {
+        margin-right: 4;
+    }
+
     #history-options, #representation-options {
         height: 3;
-        align-horizontal: right;
+        align-horizontal: left;
     }
 
     #load-correction-button, #add-manual-entry-button {
@@ -680,12 +684,16 @@ class TimeTrackerApp(App[None]):
                             allow_blank=False,
                             id="date-preset",
                         )
-                        yield Input(
-                            placeholder="Any project",
+                        yield Select(
+                            [("Any project", "")],
+                            value="",
+                            allow_blank=False,
                             id="filter-project",
                         )
-                        yield Input(
-                            placeholder="Any activity",
+                        yield Select(
+                            [("Any activity", "")],
+                            value="",
+                            allow_blank=False,
                             id="filter-activity",
                         )
                     with Horizontal(id="custom-filter-dates"):
@@ -701,15 +709,6 @@ class TimeTrackerApp(App[None]):
                         "All time · all projects · all activities",
                         id="active-filter",
                     )
-                    with Horizontal(id="history-options"):
-                        yield Button(
-                            "Load selected entry",
-                            id="load-correction-button",
-                        )
-                        yield Button(
-                            "Add missed entry",
-                            id="add-manual-entry-button",
-                        )
                     with Horizontal(id="representation-options"):
                         yield Static("Daily summaries", id="summary-mode-label")
                         yield Switch(id="summary-mode")
@@ -725,6 +724,15 @@ class TimeTrackerApp(App[None]):
                         cursor_type="row",
                         zebra_stripes=True,
                     )
+                    with Horizontal(id="history-options"):
+                        yield Button(
+                            "Load selected entry",
+                            id="load-correction-button",
+                        )
+                        yield Button(
+                            "Add missed entry",
+                            id="add-manual-entry-button",
+                        )
                     yield Static("Correct selected entry", id="correction-title")
                     with Horizontal(id="correction-target"):
                         yield Input(
@@ -1052,15 +1060,19 @@ class TimeTrackerApp(App[None]):
         self.query_one("#custom-filter-dates", Horizontal).display = custom
         self._apply_review_filter()
 
-    @on(Input.Changed, "#filter-project")
+    @on(Select.Changed, "#filter-project")
     def handle_filter_project_changed(self) -> None:
         """Update historical activity choices and apply the target filter."""
-        self._set_review_filter_suggestions()
+        if not self.query("#filter-activity") or not self.query("#history"):
+            return
+        self._set_review_activity_options()
         self._apply_review_filter()
 
-    @on(Input.Changed, "#filter-activity")
+    @on(Select.Changed, "#filter-activity")
     def handle_filter_activity_changed(self) -> None:
         """Apply the historical activity filter."""
+        if not self.query("#history"):
+            return
         self._apply_review_filter()
 
     @on(Input.Changed, "#filter-start-date")
@@ -1792,24 +1804,37 @@ class TimeTrackerApp(App[None]):
             today=datetime.now().astimezone().date(),
             custom_start=custom_start,
             custom_end=custom_end,
-            project=self.query_one("#filter-project", Input).value,
-            activity=self.query_one("#filter-activity", Input).value,
+            project=self._selected_review_value("#filter-project"),
+            activity=self._selected_review_value("#filter-activity"),
         )
 
-    def _set_review_filter_suggestions(self) -> None:
-        project_input = self.query_one("#filter-project", Input)
-        activity_input = self.query_one("#filter-activity", Input)
-        project_input.suggester = SuggestFromList(
-            review_filter_projects(self._completed_entries),
-            case_sensitive=False,
+    def _selected_review_value(self, selector: str) -> str:
+        value = self.query_one(selector, Select).value
+        return value if isinstance(value, str) else ""
+
+    def _set_review_filter_options(self) -> None:
+        project_select = self.query_one("#filter-project", Select)
+        project_value = (
+            project_select.value if isinstance(project_select.value, str) else ""
         )
-        activity_input.suggester = SuggestFromList(
-            review_filter_activities(
-                self._completed_entries,
-                project_input.value,
-            ),
-            case_sensitive=False,
+        projects = review_filter_projects(self._completed_entries)
+        project_select.set_options(
+            [("Any project", ""), *((project, project) for project in projects)]
         )
+        project_select.value = project_value if project_value in projects else ""
+        self._set_review_activity_options()
+
+    def _set_review_activity_options(self) -> None:
+        activity_select = self.query_one("#filter-activity", Select)
+        activity_value = (
+            activity_select.value if isinstance(activity_select.value, str) else ""
+        )
+        project = self._selected_review_value("#filter-project")
+        activities = review_filter_activities(self._completed_entries, project)
+        activity_select.set_options(
+            [("Any activity", ""), *((activity, activity) for activity in activities)]
+        )
+        activity_select.value = activity_value if activity_value in activities else ""
 
     def _review_summary_mode(self) -> bool:
         return (
@@ -1895,9 +1920,11 @@ class TimeTrackerApp(App[None]):
         *,
         preferred_entry_id: int | None = None,
     ) -> None:
+        entries_changed = entries is not self._completed_entries
         self._completed_entries = entries
         self._render_today_total(entries)
-        self._set_review_filter_suggestions()
+        if entries_changed:
+            self._set_review_filter_options()
         table = self.query_one("#history", DataTable)
         table.clear(columns=True)
         self._history_row_entry_ids = []
