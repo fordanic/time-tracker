@@ -1,9 +1,21 @@
 UV ?= uv
+UV_CACHE_DIR ?= $(CURDIR)/.uv-cache
+UV_PYTHON_INSTALL_DIR ?= $(CURDIR)/.uv-python
+PYINSTALLER_CONFIG_DIR ?= $(CURDIR)/.pyinstaller-cache
+export UV_CACHE_DIR
+export UV_PYTHON_INSTALL_DIR
+export PYINSTALLER_CONFIG_DIR
+
 APP_NAME := time-tracker
+ifeq ($(OS),Windows_NT)
+VENV_PYTHON := .venv/Scripts/python.exe
+else
+VENV_PYTHON := .venv/bin/python
+endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help sync run stop-agent format format-check lint typecheck test \
+.PHONY: help prepare-venv sync run stop-agent format format-check lint typecheck test \
 	test-unit test-integration test-e2e check ci build smoke-packaged \
 	smoke-notification clean clear-local
 
@@ -24,37 +36,46 @@ help:
 		'  make clear-local CONFIRM=1' \
 		'                         Stop the agent and delete local app data'
 
-sync:
+prepare-venv:
+	@if [ -d ".venv" ]; then \
+		if [ ! -x "$(VENV_PYTHON)" ] || \
+			! "$(VENV_PYTHON)" -c 'import encodings' >/dev/null 2>&1; then \
+			echo "Removing unusable .venv"; \
+			rm -rf .venv; \
+		fi; \
+	fi
+
+sync: prepare-venv
 	$(UV) sync --all-groups --locked
 
 run: sync
 	$(UV) run $(APP_NAME)
 
-stop-agent:
+stop-agent: prepare-venv
 	$(UV) run $(APP_NAME) --stop-agent
 
-format:
+format: prepare-venv
 	$(UV) run ruff format .
 
-format-check:
+format-check: prepare-venv
 	$(UV) run ruff format --check .
 
-lint:
+lint: prepare-venv
 	$(UV) run ruff check .
 
-typecheck:
+typecheck: prepare-venv
 	$(UV) run mypy
 
-test:
+test: prepare-venv
 	$(UV) run pytest
 
-test-unit:
+test-unit: prepare-venv
 	$(UV) run pytest tests/unit
 
-test-integration:
+test-integration: prepare-venv
 	$(UV) run pytest tests/integration
 
-test-e2e:
+test-e2e: prepare-venv
 	$(UV) run pytest tests/e2e
 
 check: format-check lint typecheck test
@@ -64,16 +85,16 @@ ci: sync check
 build: sync
 	$(UV) run python scripts/build.py
 
-smoke-packaged:
+smoke-packaged: prepare-venv
 	$(UV) run python scripts/run_packaged_smoke.py
 
-smoke-notification:
+smoke-notification: prepare-venv
 	$(UV) run python scripts/run_notification_smoke.py
 
 clean:
 	rm -rf build dist .mypy_cache .pytest_cache .ruff_cache \
 		src/time_tracker.egg-info
 
-clear-local:
+clear-local: prepare-venv
 	$(UV) run python -m time_tracker.infrastructure.local_files \
 		$(if $(filter 1,$(CONFIRM)),--yes,)

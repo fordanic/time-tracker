@@ -138,6 +138,13 @@ make check
 make build
 ```
 
+Make stores uv's disposable package cache and managed Python installations in the
+ignored repository-local `.uv-cache/` and `.uv-python/` directories so commands
+do not depend on write access to global user locations. PyInstaller similarly
+uses `.pyinstaller-cache/`. Make also removes an unusable generated `.venv`
+before syncing. Set `UV_CACHE_DIR`, `UV_PYTHON_INSTALL_DIR`, or
+`PYINSTALLER_CONFIG_DIR` explicitly to override those locations.
+
 `make build` creates a native package for the current operating system in
 `dist/`. Linux and Windows use one-file executables. macOS uses an ad-hoc-signed
 `.app` bundle and its built-in notification command. Use
