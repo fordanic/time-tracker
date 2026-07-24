@@ -544,6 +544,14 @@ class TimeTrackerApp(App[None]):
         color: $text-muted;
     }
 
+    #message.message-success {
+        color: $text-success;
+    }
+
+    #message.message-error {
+        color: $text-error;
+    }
+
     #shortcut-summary {
         width: 100%;
         height: 1;
@@ -560,7 +568,7 @@ class TimeTrackerApp(App[None]):
     }
 
     .settings-row {
-        height: 2;
+        height: 4;
         align-vertical: middle;
     }
 
@@ -578,6 +586,7 @@ class TimeTrackerApp(App[None]):
 
     .settings-row Input {
         width: 24;
+        height: 3;
     }
 
     #save-settings-button {
@@ -2266,7 +2275,8 @@ class TimeTrackerApp(App[None]):
     def _show_message(self, message: str, *, error: bool = False) -> None:
         widget = self.query_one("#message", Static)
         widget.update(message)
-        widget.styles.color = self.theme_variables["error" if error else "success"]
+        widget.set_class(not error, "message-success")
+        widget.set_class(error, "message-error")
 
 
 def _format_duration(duration: timedelta) -> str:

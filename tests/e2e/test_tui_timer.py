@@ -1195,7 +1195,10 @@ async def test_user_edits_and_live_applies_reminder_settings(tmp_path: Path) -> 
                 app.query_one("#settings-path", Static).render()
             )
             assert not app.query_one("#inactive-reminders-enabled", Switch).value
-            assert app.query_one("#inactive-reminder-minutes", Input).value == "5"
+            inactive_minutes = app.query_one("#inactive-reminder-minutes", Input)
+            assert inactive_minutes.value == "5"
+            assert inactive_minutes.region.height == 3
+            assert inactive_minutes.content_region.height == 1
 
             app.query_one("#inactive-reminders-enabled", Switch).value = True
             app.query_one("#inactive-reminder-minutes", Input).value = "2.5"
@@ -1229,6 +1232,7 @@ async def test_user_edits_and_live_applies_reminder_settings(tmp_path: Path) -> 
             assert "Reminder settings saved and applied" in str(
                 app.query_one("#message", Static).render()
             )
+            assert app.query_one("#message", Static).has_class("message-success")
 
             original = paths.config.read_bytes()
             app.query_one("#active-reminder-minutes", Input).value = "0"
@@ -1237,6 +1241,7 @@ async def test_user_edits_and_live_applies_reminder_settings(tmp_path: Path) -> 
             assert "positive finite number" in str(
                 app.query_one("#message", Static).render()
             )
+            assert app.query_one("#message", Static).has_class("message-error")
             assert paths.config.read_bytes() == original
             assert client.get_configuration() == expected
 
