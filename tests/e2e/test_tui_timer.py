@@ -18,6 +18,7 @@ from textual.widgets import (
     Static,
     Switch,
     Tabs,
+    Tree,
 )
 
 from time_tracker.agent.server import serve
@@ -99,15 +100,8 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
     try:
         first_app = TimeTrackerApp(client)
         async with first_app.run_test() as pilot:
-            assert (
-                first_app.query_one("#archived-projects", OptionList).option_count == 0
-            )
-            assert first_app.query_one("#archived-projects-empty", Static).display
-            assert (
-                first_app.query_one("#archived-activities", OptionList).option_count
-                == 0
-            )
-            assert first_app.query_one("#archived-activities-empty", Static).display
+            assert first_app.query_one("#active-targets-empty", Static).display
+            assert first_app.query_one("#archived-targets-empty", Static).display
             project_input = first_app.query_one("#project", Input)
             first_app.set_focus(project_input)
             await pilot.press("tab")
@@ -218,16 +212,13 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
             )
 
             await pilot.press("f3")
-            recovered_app.query_one("#manage-project", Input).value = "Website"
-            recovered_app.query_one("#manage-activity", Input).value = "Implementation"
+            active_tree = recovered_app.query_one("#active-targets", Tree)
+            active_tree.move_cursor(active_tree.root.children[0].children[0])
             await pilot.pause()
-            await pilot.click("#archive-activity-button")
+            recovered_app.query_one("#archive-selected-button", Button).focus()
+            await pilot.press("enter")
             await pilot.pause()
 
-            assert (
-                recovered_app.query_one("#manage-activity", Input).value
-                == "Implementation"
-            )
             assert "Any active timer will continue" in str(
                 recovered_app.query_one("#message", Static).render()
             )
@@ -236,14 +227,11 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
             await pilot.press("f9")
             await pilot.pause()
 
-            assert recovered_app.query_one("#manage-activity", Input).value == ""
             assert "Archived activity Website / Implementation" in str(
                 recovered_app.query_one("#message", Static).render()
             )
-            assert (
-                recovered_app.query_one("#archived-activities", OptionList).option_count
-                == 1
-            )
+            archived_tree = recovered_app.query_one("#archived-targets", Tree)
+            assert len(archived_tree.root.children[0].children) == 1
             await pilot.press("f1")
             await pilot.press("f5")
             await pilot.pause()
@@ -256,15 +244,11 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
             )
             assert history.row_count == 1
 
-            recovered_app.query_one("#manage-project", Input).value = "Website"
+            await pilot.press("f3")
+            active_tree = recovered_app.query_one("#active-targets", Tree)
+            active_tree.move_cursor(active_tree.root.children[0])
+            await pilot.pause()
             await pilot.press("f4")
-            await pilot.press("f8")
-            await pilot.pause()
-
-            assert recovered_app.query_one("#manage-project", Input).value == "Website"
-            assert client.list_projects() == ["Website"]
-            recovered_app.query_one("#manage-project", Input).value = "website"
-            await pilot.pause()
             await pilot.press("f8")
             await pilot.pause()
 
@@ -275,30 +259,25 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
             await pilot.press("f8")
             await pilot.pause()
 
-            assert recovered_app.query_one("#manage-project", Input).value == ""
             assert "Archived project Website" in str(
                 recovered_app.query_one("#message", Static).render()
             )
             assert client.list_projects() == []
-            assert "restore project first" in str(
-                recovered_app.query_one("#archived-activities", OptionList)
-                .get_option_at_index(0)
-                .prompt
-            )
 
             await pilot.press("f3")
-            restore_activity = recovered_app.query_one(
-                "#restore-activity-button", Button
-            )
-            restore_activity.focus()
+            archived_tree = recovered_app.query_one("#archived-targets", Tree)
+            project_node = archived_tree.root.children[0]
+            assert "restore project first" in str(project_node.children[0].label)
+            archived_tree.move_cursor(project_node.children[0])
+            recovered_app.query_one("#restore-selected-button", Button).focus()
             await pilot.press("enter")
             await pilot.pause()
             assert "restore project first" in str(
                 recovered_app.query_one("#message", Static).render()
             )
 
-            restore_project = recovered_app.query_one("#restore-project-button", Button)
-            restore_project.focus()
+            archived_tree.move_cursor(project_node)
+            recovered_app.query_one("#restore-selected-button", Button).focus()
             await pilot.press("enter")
             await pilot.pause()
             assert "Restored project Website" in str(
@@ -307,8 +286,14 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
             assert client.list_projects() == ["Website"]
             assert client.list_activities("Website") == []
 
-            restore_activity.focus()
-            await pilot.press("enter")
+            archived_tree = recovered_app.query_one("#archived-targets", Tree)
+            archived_tree.move_cursor(archived_tree.root.children[0].children[0])
+            await pilot.pause()
+            restore_button = recovered_app.query_one("#restore-selected-button", Button)
+            assert restore_button.disabled is False
+            restore_button.focus()
+            await pilot.pause()
+            restore_button.press()
             await pilot.pause()
             assert "Restored activity Website / Implementation" in str(
                 recovered_app.query_one("#message", Static).render()
@@ -339,8 +324,8 @@ async def test_rejected_second_archive_invocation_clears_confirmation(
         app = TimeTrackerApp(client)
         async with app.run_test() as pilot:
             await pilot.press("f3")
-            app.query_one("#manage-project", Input).value = "Website"
-            app.query_one("#manage-activity", Input).value = "Planning"
+            active_tree = app.query_one("#active-targets", Tree)
+            active_tree.move_cursor(active_tree.root.children[0].children[0])
             await pilot.pause()
 
             await pilot.press("f9")
@@ -355,8 +340,9 @@ async def test_rejected_second_archive_invocation_clears_confirmation(
             assert "activity is already archived: Planning" in str(
                 app.query_one("#message", Static).render()
             )
-            assert str(app.query_one("#archive-activity-button", Button).label) == (
-                "Archive activity  F9"
+            assert (
+                str(app.query_one("#archive-selected-button", Button).label)
+                == "Archive selected"
             )
     finally:
         client.shutdown()
@@ -532,8 +518,14 @@ async def test_user_tracks_again_from_recent_activities(tmp_path: Path) -> None:
 
             assert app._recent_activities[0].activity == "Implementation"
             await pilot.press("f3")
-            app.query_one("#manage-project", Input).value = "Website"
-            app.query_one("#manage-activity", Input).value = "Implementation"
+            active_tree = app.query_one("#active-targets", Tree)
+            implementation_node = next(
+                node
+                for node in active_tree.root.children[0].children
+                if str(node.label) == "Implementation"
+            )
+            active_tree.move_cursor(implementation_node)
+            await pilot.pause()
             await pilot.press("f9")
             await pilot.pause()
 
@@ -588,9 +580,9 @@ async def test_user_navigates_focused_views_without_losing_workflow_state(
             await pilot.pause()
             assert tabs.active == "manage-tab"
             assert switcher.current == "manage-view"
-            assert app.focused is app.query_one("#manage-project", Input)
-            app.query_one("#manage-project", Input).value = "Website"
-            app.query_one("#manage-activity", Input).value = "Review"
+            manage_tree = app.query_one("#active-targets", Tree)
+            assert manage_tree.has_focus
+            manage_tree.move_cursor(manage_tree.root.children[0].children[0])
 
             await pilot.press("f4")
             assert tabs.active == "settings-tab"
@@ -604,8 +596,8 @@ async def test_user_navigates_focused_views_without_losing_workflow_state(
             assert app.query_one("#export-path", Input).value.endswith("review.csv")
             assert app.query_one("#summary-mode", Switch).value is True
             await pilot.press("f3")
-            assert app.query_one("#manage-project", Input).value == "Website"
-            assert app.query_one("#manage-activity", Input).value == "Review"
+            assert manage_tree.cursor_node is not None
+            assert str(manage_tree.cursor_node.label) == "Review"
     finally:
         client.shutdown()
         thread.join(timeout=2)

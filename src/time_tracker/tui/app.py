@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
@@ -25,6 +26,7 @@ from textual.widgets import (
     Switch,
     Tab,
     Tabs,
+    Tree,
 )
 from textual.widgets.option_list import Option
 
@@ -225,10 +227,12 @@ class TrackerGateway(Protocol):
         ...
 
 
-class PointerOnlyButton(Button):
-    """A clickable button intentionally omitted from keyboard tab order."""
+@dataclass(frozen=True, slots=True)
+class ManageTarget:
+    """Exact project or activity selected in a Manage tree."""
 
-    can_focus = False
+    project: str
+    activity: str | None = None
 
 
 class ShortcutHelpScreen(ModalScreen[None]):
@@ -318,7 +322,7 @@ class TimeTrackerApp(App[None]):
     _VIEW_FOCUS = {
         "track-tab": "#project",
         "review-tab": "#history",
-        "manage-tab": "#manage-project",
+        "manage-tab": "#active-targets",
         "settings-tab": "#inactive-reminders-enabled",
     }
     CSS = """
@@ -384,30 +388,18 @@ class TimeTrackerApp(App[None]):
         margin-bottom: 0;
     }
 
-    #manage-project-actions, #manage-activity-actions {
-        height: auto;
-    }
-
-    #manage-project, #manage-activity {
-        width: 1fr;
-    }
-
-    #archive-project-button, #archive-activity-button {
-        width: 26;
-        margin-left: 1;
-    }
-
-    #archived-projects, #archived-activities {
-        height: 4;
+    #active-targets, #archived-targets {
+        height: 8;
+        min-height: 4;
         margin-bottom: 0;
     }
 
-    #archived-projects-empty, #archived-activities-empty {
+    #active-targets-empty, #archived-targets-empty {
         height: 1;
         color: $text-muted;
     }
 
-    #restore-project-button, #restore-activity-button {
+    #archive-selected-button, #restore-selected-button {
         width: 30;
         margin-bottom: 1;
     }
@@ -606,8 +598,6 @@ class TimeTrackerApp(App[None]):
         self._review_filter_valid = True
         self._today_total_day: date | None = None
         self._recent_activities: list[RecentActivity] = []
-        self._archived_projects: list[str] = []
-        self._archived_activities: list[ArchivedActivity] = []
         self._start_action: StartAction | None = None
         self._editing_entry_id: int | None = None
         self._creating_manual_entry = False
@@ -772,48 +762,36 @@ class TimeTrackerApp(App[None]):
                         )
                 with VerticalScroll(id="manage-view", classes="view"):
                     yield Static(
-                        "Archive selectable projects and activities after confirming "
-                        "the exact target, or restore an archived item below.",
+                        "Select an active project or activity to archive, or select "
+                        "an archived item to restore.",
                         id="manage-help",
                     )
-                    with Horizontal(id="manage-project-actions"):
-                        yield Input(
-                            placeholder="Project to archive",
-                            id="manage-project",
-                        )
-                        yield PointerOnlyButton(
-                            "Archive project  F8",
-                            id="archive-project-button",
-                        )
-                    with Horizontal(id="manage-activity-actions"):
-                        yield Input(
-                            placeholder="Activity to archive",
-                            id="manage-activity",
-                        )
-                        yield PointerOnlyButton(
-                            "Archive activity  F9",
-                            id="archive-activity-button",
-                        )
-                    yield Static("Archived projects", classes="manage-title")
-                    yield OptionList(id="archived-projects", compact=True)
                     yield Static(
-                        "No archived projects.",
-                        id="archived-projects-empty",
+                        "Active projects and activities",
+                        classes="manage-title",
+                    )
+                    yield Tree("Active", id="active-targets")
+                    yield Static(
+                        "No active projects or activities.",
+                        id="active-targets-empty",
                     )
                     yield Button(
-                        "Restore selected project",
-                        id="restore-project-button",
+                        "Archive selected",
+                        id="archive-selected-button",
                         disabled=True,
                     )
-                    yield Static("Archived activities", classes="manage-title")
-                    yield OptionList(id="archived-activities", compact=True)
                     yield Static(
-                        "No archived activities.",
-                        id="archived-activities-empty",
+                        "Archived projects and activities",
+                        classes="manage-title",
+                    )
+                    yield Tree("Archived", id="archived-targets")
+                    yield Static(
+                        "No archived projects or activities.",
+                        id="archived-targets-empty",
                     )
                     yield Button(
-                        "Restore selected activity",
-                        id="restore-activity-button",
+                        "Restore selected",
+                        id="restore-selected-button",
                         disabled=True,
                     )
                 with VerticalScroll(id="settings-view", classes="view"):
@@ -878,6 +856,13 @@ class TimeTrackerApp(App[None]):
         try:
             self.active_timer = await asyncio.to_thread(self.client.get_active)
             projects = await asyncio.to_thread(self.client.list_projects)
+            active_hierarchy = [
+                (
+                    project,
+                    await asyncio.to_thread(self.client.list_activities, project),
+                )
+                for project in projects
+            ]
             completed = await asyncio.to_thread(self.client.list_completed)
             recent = await asyncio.to_thread(self.client.list_recent_activities)
             archived_projects = await asyncio.to_thread(
@@ -894,7 +879,11 @@ class TimeTrackerApp(App[None]):
             self._set_project_suggestions(projects)
             self._render_history(completed)
             self._render_recent_activities(recent)
-            self._render_archived_items(archived_projects, archived_activities)
+            self._render_manage_items(
+                active_hierarchy,
+                archived_projects,
+                archived_activities,
+            )
             self._idle_detection_available = idle_status.available
             self._render_settings(settings)
             if self.active_timer is not None:
@@ -942,44 +931,6 @@ class TimeTrackerApp(App[None]):
     async def handle_note_changed(self) -> None:
         """Refresh the primary action when the selected note changes."""
         await self._refresh_start_action()
-
-    @on(Input.Changed, "#manage-project")
-    async def handle_manage_project_changed(self, event: Input.Changed) -> None:
-        """Refresh Manage activity suggestions for its selected project."""
-        project = event.value.strip()
-        if (
-            self._pending_archive_project is not None
-            and self._pending_archive_project[0] != project
-        ):
-            self._clear_project_archive_confirmation()
-        if (
-            self._pending_archive_activity is not None
-            and self._pending_archive_activity[0] != project
-        ):
-            self._clear_activity_archive_confirmation()
-        try:
-            activities = await asyncio.to_thread(
-                self.client.list_activities,
-                project,
-            )
-        except Exception as error:
-            self._show_message(str(error), error=True)
-            return
-        if self.query_one("#manage-project", Input).value.strip() != project:
-            return
-        self.query_one("#manage-activity", Input).suggester = SuggestFromList(
-            activities,
-            case_sensitive=False,
-        )
-
-    @on(Input.Changed, "#manage-activity")
-    def handle_manage_activity_changed(self, event: Input.Changed) -> None:
-        """Cancel activity archive confirmation when its target changes."""
-        if (
-            self._pending_archive_activity is not None
-            and self._pending_archive_activity[1] != event.value.strip()
-        ):
-            self._clear_activity_archive_confirmation()
 
     @on(Input.Changed, "#correction-project")
     async def handle_correction_project_changed(self, event: Input.Changed) -> None:
@@ -1050,25 +1001,27 @@ class TimeTrackerApp(App[None]):
         """Persist the correction currently shown in Review."""
         await self._save_correction()
 
-    @on(Button.Pressed, "#archive-project-button")
-    async def handle_archive_project_button(self) -> None:
-        """Handle pointer activation of project archiving."""
-        await self._archive_project()
+    @on(Button.Pressed, "#archive-selected-button")
+    async def handle_archive_selected_button(self) -> None:
+        """Archive the active project or activity selected in Manage."""
+        target = self._selected_manage_target("#active-targets")
+        if target is None:
+            self._show_message("Select a project or activity to archive.", error=True)
+        elif target.activity is None:
+            await self._archive_project()
+        else:
+            await self._archive_activity()
 
-    @on(Button.Pressed, "#archive-activity-button")
-    async def handle_archive_activity_button(self) -> None:
-        """Handle pointer activation of activity archiving."""
-        await self._archive_activity()
-
-    @on(Button.Pressed, "#restore-project-button")
-    async def handle_restore_project_button(self) -> None:
-        """Restore the archived project selected in Manage."""
-        await self._restore_project()
-
-    @on(Button.Pressed, "#restore-activity-button")
-    async def handle_restore_activity_button(self) -> None:
-        """Restore the archived activity selected in Manage."""
-        await self._restore_activity()
+    @on(Button.Pressed, "#restore-selected-button")
+    async def handle_restore_selected_button(self) -> None:
+        """Restore the archived project or activity selected in Manage."""
+        target = self._selected_manage_target("#archived-targets")
+        if target is None:
+            self._show_message("Select an archived item to restore.", error=True)
+        elif target.activity is None:
+            await self._restore_project()
+        else:
+            await self._restore_activity()
 
     @on(Button.Pressed, "#confirm-active-reminder-button")
     async def handle_confirm_active_reminder_button(self) -> None:
@@ -1317,7 +1270,6 @@ class TimeTrackerApp(App[None]):
     async def _refresh_all_activity_suggestions(self) -> None:
         for project_selector, activity_selector in (
             ("#project", "#activity"),
-            ("#manage-project", "#manage-activity"),
             ("#correction-project", "#correction-activity"),
         ):
             await self._refresh_activity_suggestions(
@@ -1326,8 +1278,13 @@ class TimeTrackerApp(App[None]):
             )
 
     async def _archive_project(self) -> None:
-        project_input = self.query_one("#manage-project", Input)
-        project = project_input.value
+        self._clear_activity_archive_confirmation()
+        selected = self._selected_manage_target("#active-targets")
+        if selected is None or selected.activity is not None:
+            self._clear_project_archive_confirmation()
+            self._show_message("Select a project to archive.", error=True)
+            return
+        project = selected.project
         try:
             target = await asyncio.to_thread(
                 self.client.get_archive_project_target,
@@ -1337,11 +1294,11 @@ class TimeTrackerApp(App[None]):
             self._clear_project_archive_confirmation()
             self._show_message(str(error), error=True)
             return
-        pending = (project.strip(), target)
+        pending = (project, target)
         if self._pending_archive_project != pending:
             self._pending_archive_project = pending
             self.query_one(
-                "#archive-project-button", Button
+                "#archive-selected-button", Button
             ).label = "Confirm archive  F8"
             self._show_message(
                 f"Press Archive project again to confirm {target}. "
@@ -1358,18 +1315,21 @@ class TimeTrackerApp(App[None]):
             self._show_message(str(error), error=True)
             return
         self._clear_project_archive_confirmation()
-        project_input.value = ""
-        self.query_one("#manage-activity", Input).value = ""
         await self._refresh_project_suggestions()
         await self._refresh_all_activity_suggestions()
         await self._refresh_recent_activities()
-        await self._refresh_archived_items()
+        await self._refresh_manage_items()
         self._show_message(f"Archived project {archived_project}.")
 
     async def _archive_activity(self) -> None:
-        project = self.query_one("#manage-project", Input).value
-        activity_input = self.query_one("#manage-activity", Input)
-        activity = activity_input.value
+        self._clear_project_archive_confirmation()
+        selected = self._selected_manage_target("#active-targets")
+        if selected is None or selected.activity is None:
+            self._clear_activity_archive_confirmation()
+            self._show_message("Select an activity to archive.", error=True)
+            return
+        project = selected.project
+        activity = selected.activity
         try:
             target = await asyncio.to_thread(
                 self.client.get_archive_activity_target,
@@ -1380,11 +1340,11 @@ class TimeTrackerApp(App[None]):
             self._clear_activity_archive_confirmation()
             self._show_message(str(error), error=True)
             return
-        pending = (project.strip(), activity.strip(), target[0], target[1])
+        pending = (project, activity, target[0], target[1])
         if self._pending_archive_activity != pending:
             self._pending_archive_activity = pending
             self.query_one(
-                "#archive-activity-button", Button
+                "#archive-selected-button", Button
             ).label = "Confirm archive  F9"
             self._show_message(
                 "Press Archive activity again to confirm "
@@ -1401,22 +1361,19 @@ class TimeTrackerApp(App[None]):
             self._show_message(str(error), error=True)
             return
         self._clear_activity_archive_confirmation()
-        self.query_one("#manage-project", Input).value = archived_project
-        activity_input.value = ""
         await self._refresh_all_activity_suggestions()
         await self._refresh_recent_activities()
-        await self._refresh_archived_items()
+        await self._refresh_manage_items()
         self._show_message(
             f"Archived activity {archived_project} / {archived_activity}."
         )
 
     async def _restore_project(self) -> None:
-        option_list = self.query_one("#archived-projects", OptionList)
-        index = option_list.highlighted
-        if index is None or not 0 <= index < len(self._archived_projects):
+        selected = self._selected_manage_target("#archived-targets")
+        if selected is None or selected.activity is not None:
             self._show_message("Select an archived project to restore.", error=True)
             return
-        project = self._archived_projects[index]
+        project = selected.project
         try:
             restored_project = await asyncio.to_thread(
                 self.client.unarchive_project,
@@ -1425,51 +1382,52 @@ class TimeTrackerApp(App[None]):
         except Exception as error:
             self._show_message(str(error), error=True)
             return
-        self.query_one("#manage-project", Input).value = restored_project
-        self.query_one("#manage-activity", Input).value = ""
         await self._refresh_project_suggestions()
         await self._refresh_all_activity_suggestions()
         await self._refresh_recent_activities()
-        await self._refresh_archived_items()
+        await self._refresh_manage_items()
         self._show_message(f"Restored project {restored_project}.")
 
     async def _restore_activity(self) -> None:
-        option_list = self.query_one("#archived-activities", OptionList)
-        index = option_list.highlighted
-        if index is None or not 0 <= index < len(self._archived_activities):
+        selected = self._selected_manage_target("#archived-targets")
+        if selected is None or selected.activity is None:
             self._show_message("Select an archived activity to restore.", error=True)
             return
-        item = self._archived_activities[index]
         try:
             restored_project, restored_activity = await asyncio.to_thread(
                 self.client.unarchive_activity,
-                item.project,
-                item.activity,
+                selected.project,
+                selected.activity,
             )
         except Exception as error:
             self._show_message(str(error), error=True)
             return
-        self.query_one("#manage-project", Input).value = restored_project
-        self.query_one("#manage-activity", Input).value = restored_activity
         await self._refresh_project_suggestions()
         await self._refresh_all_activity_suggestions()
         await self._refresh_recent_activities()
-        await self._refresh_archived_items()
+        await self._refresh_manage_items()
         self._show_message(
             f"Restored activity {restored_project} / {restored_activity}."
         )
 
     def _clear_project_archive_confirmation(self) -> None:
         self._pending_archive_project = None
-        buttons = self.query("#archive-project-button")
+        buttons = self.query("#archive-selected-button")
         if buttons:
-            buttons.first(Button).label = "Archive project  F8"
+            buttons.first(Button).label = "Archive selected"
 
     def _clear_activity_archive_confirmation(self) -> None:
         self._pending_archive_activity = None
-        buttons = self.query("#archive-activity-button")
+        buttons = self.query("#archive-selected-button")
         if buttons:
-            buttons.first(Button).label = "Archive activity  F9"
+            buttons.first(Button).label = "Archive selected"
+
+    def _selected_manage_target(self, selector: str) -> ManageTarget | None:
+        tree = self.query_one(selector, Tree)
+        node = tree.cursor_node
+        if node is None:
+            return None
+        return node.data if isinstance(node.data, ManageTarget) else None
 
     def _select_view(self, tab_id: str) -> None:
         """Select one view without changing any workflow state."""
@@ -1505,7 +1463,7 @@ class TimeTrackerApp(App[None]):
 
     def _set_project_suggestions(self, projects: list[str]) -> None:
         """Apply canonical project suggestions to Track and Manage inputs."""
-        for selector in ("#project", "#manage-project", "#correction-project"):
+        for selector in ("#project", "#correction-project"):
             self.query_one(selector, Input).suggester = SuggestFromList(
                 projects,
                 case_sensitive=False,
@@ -1720,14 +1678,30 @@ class TimeTrackerApp(App[None]):
             return
         self._render_recent_activities(recent)
 
-    async def _refresh_archived_items(self) -> None:
+    async def _refresh_manage_items(self) -> None:
         try:
-            projects = await asyncio.to_thread(self.client.list_archived_projects)
-            activities = await asyncio.to_thread(self.client.list_archived_activities)
+            active_projects = await asyncio.to_thread(self.client.list_projects)
+            active_hierarchy = [
+                (
+                    project,
+                    await asyncio.to_thread(self.client.list_activities, project),
+                )
+                for project in active_projects
+            ]
+            archived_projects = await asyncio.to_thread(
+                self.client.list_archived_projects
+            )
+            archived_activities = await asyncio.to_thread(
+                self.client.list_archived_activities
+            )
         except Exception as error:
             self._show_message(str(error), error=True)
             return
-        self._render_archived_items(projects, activities)
+        self._render_manage_items(
+            active_hierarchy,
+            archived_projects,
+            archived_activities,
+        )
 
     async def _refresh_start_action(self) -> None:
         project = self.query_one("#project", Input).value
@@ -2055,37 +2029,66 @@ class TimeTrackerApp(App[None]):
         option_list.display = bool(recent)
         self.query_one("#recent-empty", Static).display = not recent
 
-    def _render_archived_items(
+    def _render_manage_items(
         self,
-        projects: list[str],
-        activities: list[ArchivedActivity],
+        active_hierarchy: list[tuple[str, list[str]]],
+        archived_projects: list[str],
+        archived_activities: list[ArchivedActivity],
     ) -> None:
-        self._archived_projects = projects
-        self._archived_activities = activities
-
-        project_list = self.query_one("#archived-projects", OptionList)
-        project_list.set_options(
-            Option(project, id=f"archived-project-{index}")
-            for index, project in enumerate(projects)
-        )
-        project_list.highlighted = 0 if projects else None
-        project_list.display = bool(projects)
-        self.query_one("#archived-projects-empty", Static).display = not projects
-        self.query_one("#restore-project-button", Button).disabled = not projects
-
-        activity_list = self.query_one("#archived-activities", OptionList)
-        activity_list.set_options(
-            Option(
-                f"{item.project} / {item.activity}"
-                + (" — restore project first" if item.project_archived else ""),
-                id=f"archived-activity-{index}",
+        active_tree = self.query_one("#active-targets", Tree)
+        active_tree.reset("Active")
+        active_tree.root.expand()
+        first_active = None
+        for project, activities in active_hierarchy:
+            project_node = active_tree.root.add(
+                project,
+                ManageTarget(project),
+                expand=True,
             )
-            for index, item in enumerate(activities)
+            first_active = first_active or project_node
+            for activity in activities:
+                project_node.add_leaf(
+                    activity,
+                    ManageTarget(project, activity),
+                )
+        active_tree.move_cursor(first_active)
+        has_active = bool(active_hierarchy)
+        active_tree.display = has_active
+        self.query_one("#active-targets-empty", Static).display = not has_active
+        self.query_one("#archive-selected-button", Button).disabled = not has_active
+
+        archived_tree = self.query_one("#archived-targets", Tree)
+        archived_tree.reset("Archived")
+        archived_tree.root.expand()
+        archived_project_names = set(archived_projects)
+        grouped: dict[str, list[ArchivedActivity]] = {
+            project: [] for project in archived_projects
+        }
+        for item in archived_activities:
+            grouped.setdefault(item.project, []).append(item)
+        first_archived = None
+        for project in sorted(grouped, key=str.casefold):
+            project_node = archived_tree.root.add(
+                project,
+                (ManageTarget(project) if project in archived_project_names else None),
+                expand=True,
+            )
+            if first_archived is None and project_node.data is not None:
+                first_archived = project_node
+            for item in grouped[project]:
+                activity_node = project_node.add_leaf(
+                    item.activity
+                    + (" — restore project first" if item.project_archived else ""),
+                    ManageTarget(item.project, item.activity),
+                )
+                first_archived = first_archived or activity_node
+        archived_tree.move_cursor(first_archived)
+        has_archived = bool(grouped)
+        archived_tree.display = has_archived
+        self.query_one("#archived-targets-empty", Static).display = not has_archived
+        self.query_one("#restore-selected-button", Button).disabled = (
+            first_archived is None
         )
-        activity_list.highlighted = 0 if activities else None
-        activity_list.display = bool(activities)
-        self.query_one("#archived-activities-empty", Static).display = not activities
-        self.query_one("#restore-activity-button", Button).disabled = not activities
 
     def _render_active(self) -> None:
         active_widgets = self.query("#active-timer")
