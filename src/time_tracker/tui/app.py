@@ -26,6 +26,7 @@ from textual.widgets import (
     Switch,
     Tab,
     Tabs,
+    TextArea,
     Tree,
 )
 from textual.widgets.option_list import Option
@@ -290,6 +291,7 @@ class TimeTrackerApp(App[None]):
 
     TITLE = "Time Tracker"
     SUB_TITLE = "Local, persistent time tracking"
+    HORIZONTAL_BREAKPOINTS = [(0, "-narrow"), (70, "-wide")]
     BINDINGS = [
         Binding("f1", "show_track", "Track", show=False),
         Binding("f2", "show_review", "Review", show=False),
@@ -386,6 +388,32 @@ class TimeTrackerApp(App[None]):
 
     Input {
         margin-bottom: 0;
+    }
+
+    #track-target {
+        height: 3;
+    }
+
+    #project, #activity {
+        width: 1fr;
+    }
+
+    #project {
+        margin-right: 1;
+    }
+
+    #note {
+        height: 4;
+        margin-bottom: 0;
+    }
+
+    Screen.-narrow #track-target {
+        layout: vertical;
+        height: 6;
+    }
+
+    Screen.-narrow #project {
+        margin-right: 0;
     }
 
     #active-targets, #archived-targets {
@@ -632,15 +660,16 @@ class TimeTrackerApp(App[None]):
             )
             with ContentSwitcher(initial="track-view", id="view-switcher"):
                 with Vertical(id="track-view", classes="view"):
-                    yield Input(
-                        placeholder="Project (type to reuse existing)",
-                        id="project",
-                    )
-                    yield Input(
-                        placeholder="Activity (type to reuse existing)",
-                        id="activity",
-                    )
-                    yield Input(placeholder="Optional note", id="note")
+                    with Horizontal(id="track-target"):
+                        yield Input(
+                            placeholder="Project (type to reuse existing)",
+                            id="project",
+                        )
+                        yield Input(
+                            placeholder="Activity (type to reuse existing)",
+                            id="activity",
+                        )
+                    yield TextArea(placeholder="Optional note", id="note")
                     with Horizontal(id="track-context"):
                         yield Static(
                             "Today's completed time: 00:00:00",
@@ -897,7 +926,9 @@ class TimeTrackerApp(App[None]):
             if self.active_timer is not None:
                 self.query_one("#project", Input).value = self.active_timer.project
                 self.query_one("#activity", Input).value = self.active_timer.activity
-                self.query_one("#note", Input).value = self.active_timer.note or ""
+                self.query_one("#note", TextArea).load_text(
+                    self.active_timer.note or ""
+                )
         self._render_active()
         await self._refresh_start_action()
         await self._refresh_reminder()
@@ -935,7 +966,7 @@ class TimeTrackerApp(App[None]):
         """Refresh the primary action when the selected activity changes."""
         await self._refresh_start_action()
 
-    @on(Input.Changed, "#note")
+    @on(TextArea.Changed, "#note")
     async def handle_note_changed(self) -> None:
         """Refresh the primary action when the selected note changes."""
         await self._refresh_start_action()
@@ -975,8 +1006,8 @@ class TimeTrackerApp(App[None]):
         pair = self._recent_activities[event.option_index]
         self.query_one("#project", Input).value = pair.project
         self.query_one("#activity", Input).value = pair.activity
-        note_input = self.query_one("#note", Input)
-        note_input.value = ""
+        note_input = self.query_one("#note", TextArea)
+        note_input.load_text("")
         note_input.focus()
 
     @on(Button.Pressed, "#stop-button")
@@ -1156,7 +1187,7 @@ class TimeTrackerApp(App[None]):
             return
         project = self.query_one("#project", Input).value
         activity = self.query_one("#activity", Input).value
-        note = self.query_one("#note", Input).value
+        note = self.query_one("#note", TextArea).text
         requested_action = self._start_action
         try:
             self.active_timer = await asyncio.to_thread(
@@ -1185,7 +1216,7 @@ class TimeTrackerApp(App[None]):
         self._show_message(message)
         self.query_one("#project", Input).value = self.active_timer.project
         self.query_one("#activity", Input).value = self.active_timer.activity
-        self.query_one("#note", Input).value = self.active_timer.note or ""
+        self.query_one("#note", TextArea).load_text(self.active_timer.note or "")
         await self._refresh_project_suggestions()
         await self._refresh_history()
         await self._refresh_recent_activities()
@@ -1247,7 +1278,7 @@ class TimeTrackerApp(App[None]):
                 self.client.edit_active,
                 self.query_one("#project", Input).value,
                 self.query_one("#activity", Input).value,
-                self.query_one("#note", Input).value,
+                self.query_one("#note", TextArea).text,
             )
         except Exception as error:
             self._show_message(str(error), error=True)
@@ -1255,7 +1286,7 @@ class TimeTrackerApp(App[None]):
         active = self.active_timer
         self.query_one("#project", Input).value = active.project
         self.query_one("#activity", Input).value = active.activity
-        self.query_one("#note", Input).value = active.note or ""
+        self.query_one("#note", TextArea).load_text(active.note or "")
         await self._refresh_project_suggestions()
         self._render_active()
         await self._refresh_start_action()
@@ -1718,7 +1749,7 @@ class TimeTrackerApp(App[None]):
     async def _refresh_start_action(self) -> None:
         project = self.query_one("#project", Input).value
         activity = self.query_one("#activity", Input).value
-        note = self.query_one("#note", Input).value
+        note = self.query_one("#note", TextArea).text
         selection = (project, activity, note)
         button = self.query_one("#start-button", Button)
         edit_button = self.query_one("#edit-active-button", Button)
@@ -1739,7 +1770,7 @@ class TimeTrackerApp(App[None]):
         current_selection = (
             self.query_one("#project", Input).value,
             self.query_one("#activity", Input).value,
-            self.query_one("#note", Input).value,
+            self.query_one("#note", TextArea).text,
         )
         if current_selection != selection:
             return
