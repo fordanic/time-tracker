@@ -28,7 +28,7 @@ from time_tracker.infrastructure.configuration import load_config
 from time_tracker.infrastructure.ipc import AgentClient, AgentUnavailableError
 from time_tracker.infrastructure.paths import AgentPaths
 from time_tracker.infrastructure.sqlite_repository import SQLiteTimerRepository
-from time_tracker.tui.app import TimeTrackerApp
+from time_tracker.tui.app import ShortcutHelpScreen, TimeTrackerApp
 
 
 class SilentNotifier:
@@ -45,6 +45,45 @@ class MonotonicIdleDetector:
 
     def idle_seconds(self) -> float:
         return time.monotonic() - self._started
+
+
+@pytest.mark.asyncio
+async def test_narrow_footer_keeps_complete_shortcut_help_discoverable(
+    tmp_path: Path,
+) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    thread = threading.Thread(target=serve, args=(paths,), daemon=True)
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        app = TimeTrackerApp(client)
+        async with app.run_test(size=(40, 24)) as pilot:
+            await pilot.pause()
+            base_screen = app.screen
+            summary = str(app.query_one("#shortcut-summary", Static).render())
+
+            assert summary.startswith("Ctrl+G Shortcuts")
+            assert "F5 Timer" in summary
+            assert "F8 Archive project" not in summary
+
+            await pilot.press("ctrl+g")
+
+            assert isinstance(app.screen, ShortcutHelpScreen)
+            help_text = str(
+                app.screen.query_one("#shortcut-help-text", Static).render()
+            )
+            assert "F1 Track" in help_text
+            assert "F12 Snooze" in help_text
+
+            await pilot.press("escape")
+            assert app.screen is base_screen
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
 
 
 @pytest.mark.asyncio

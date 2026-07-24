@@ -11,12 +11,12 @@ from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.screen import ModalScreen
 from textual.suggester import SuggestFromList
 from textual.widgets import (
     Button,
     ContentSwitcher,
     DataTable,
-    Footer,
     Header,
     Input,
     OptionList,
@@ -231,25 +231,83 @@ class PointerOnlyButton(Button):
     can_focus = False
 
 
+class ShortcutHelpScreen(ModalScreen[None]):
+    """Read-only overlay containing every application shortcut."""
+
+    BINDINGS = [
+        Binding("escape", "close", "Close", show=False),
+        Binding("ctrl+g", "close", "Close", show=False, priority=True),
+        Binding("?", "close", "Close", show=False),
+    ]
+    CSS = """
+    ShortcutHelpScreen {
+        align: center middle;
+        background: $background 70%;
+    }
+
+    #shortcut-help {
+        width: 64;
+        max-width: 95%;
+        height: auto;
+        padding: 1 2;
+        border: round $accent;
+        background: $panel;
+    }
+
+    #shortcut-help-title {
+        height: 1;
+        margin-bottom: 1;
+        text-style: bold;
+    }
+
+    #shortcut-help-text {
+        height: auto;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="shortcut-help"):
+            yield Static("Keyboard shortcuts", id="shortcut-help-title")
+            yield Static(
+                "F1 Track · F2 Review · F3 Manage · F4 Settings\n"
+                "F5 Start / switch / restart · F6 Stop · F7 Export\n"
+                "F8 Archive project · F9 Archive activity\n"
+                "F10 Still active · F11 Update active · F12 Snooze\n"
+                "Ctrl+Q Quit · Ctrl+G or Esc Close this help",
+                id="shortcut-help-text",
+            )
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
 class TimeTrackerApp(App[None]):
     """Keyboard-first focused workflows backed by the local agent."""
 
     TITLE = "Time Tracker"
     SUB_TITLE = "Local, persistent time tracking"
     BINDINGS = [
-        Binding("f1", "show_track", "Track"),
-        Binding("f2", "show_review", "Review"),
-        Binding("f3", "show_manage", "Manage"),
-        Binding("f4", "show_settings", "Settings"),
-        Binding("f5", "start_timer", "Timer action"),
-        Binding("f6", "stop_timer", "Stop"),
-        Binding("f7", "export_csv", "Export CSV"),
-        Binding("f8", "archive_project", "Archive project"),
-        Binding("f9", "archive_activity", "Archive activity"),
-        Binding("f10", "confirm_active_reminder", "Still active"),
-        Binding("f11", "edit_active", "Update active"),
-        Binding("f12", "snooze_reminder", "Snooze"),
-        Binding("ctrl+q", "quit", "Quit"),
+        Binding("f1", "show_track", "Track", show=False),
+        Binding("f2", "show_review", "Review", show=False),
+        Binding("f3", "show_manage", "Manage", show=False),
+        Binding("f4", "show_settings", "Settings", show=False),
+        Binding("f5", "start_timer", "Timer action", show=False),
+        Binding("f6", "stop_timer", "Stop", show=False),
+        Binding("f7", "export_csv", "Export CSV", show=False),
+        Binding("f8", "archive_project", "Archive project", show=False),
+        Binding("f9", "archive_activity", "Archive activity", show=False),
+        Binding("f10", "confirm_active_reminder", "Still active", show=False),
+        Binding("f11", "edit_active", "Update active", show=False),
+        Binding("f12", "snooze_reminder", "Snooze", show=False),
+        Binding("ctrl+q", "quit", "Quit", show=False),
+        Binding(
+            "ctrl+g",
+            "show_shortcuts",
+            "Shortcuts",
+            show=False,
+            priority=True,
+        ),
+        Binding("?", "show_shortcuts", "Shortcuts", show=False),
     ]
     _VIEW_CONTENT = {
         "track-tab": "track-view",
@@ -460,6 +518,15 @@ class TimeTrackerApp(App[None]):
         height: 2;
         margin-top: 1;
         color: $text-muted;
+    }
+
+    #shortcut-summary {
+        width: 100%;
+        height: 1;
+        padding: 0 1;
+        color: $footer-foreground;
+        background: $footer-background;
+        text-overflow: ellipsis;
     }
 
     #manage-help, #settings-info, #settings-path {
@@ -798,7 +865,10 @@ class TimeTrackerApp(App[None]):
                     )
                     yield Static("", id="settings-path")
             yield Static("", id="message")
-        yield Footer()
+        yield Static(
+            "Ctrl+G Shortcuts · F5 Timer · F6 Stop · F11 Update",
+            id="shortcut-summary",
+        )
 
     async def on_mount(self) -> None:
         """Recover any persisted active timer when the TUI reconnects."""
@@ -1079,6 +1149,10 @@ class TimeTrackerApp(App[None]):
     def action_show_settings(self) -> None:
         """Select the Settings view from the F4 binding."""
         self._select_view("settings-tab")
+
+    def action_show_shortcuts(self) -> None:
+        """Show every binding without changing workflow state."""
+        self.push_screen(ShortcutHelpScreen())
 
     async def action_start_timer(self) -> None:
         """Start or switch the timer from the F5 binding."""
@@ -1409,6 +1483,25 @@ class TimeTrackerApp(App[None]):
             tabs.focus()
         else:
             self.query_one(focus_selector).focus()
+        self._render_shortcut_summary()
+
+    def _render_shortcut_summary(self) -> None:
+        summaries = {
+            "track-tab": "F5 Timer · F6 Stop · F11 Update",
+            "review-tab": "F7 Export",
+            "manage-tab": "F8 Archive project · F9 Archive activity",
+            "settings-tab": "Settings",
+        }
+        active_tab = self.query_one("#view-tabs", Tabs).active or "track-tab"
+        parts = ["Ctrl+G Shortcuts", summaries.get(active_tab, "")]
+        reminder = self.pending_reminder
+        if reminder is not None:
+            if reminder.kind is ReminderKind.ACTIVE:
+                parts.append("F10 Still active")
+            parts.append("F12 Snooze")
+        self.query_one("#shortcut-summary", Static).update(
+            " · ".join(part for part in parts if part)
+        )
 
     def _set_project_suggestions(self, projects: list[str]) -> None:
         """Apply canonical project suggestions to Track and Manage inputs."""
@@ -2047,6 +2140,7 @@ class TimeTrackerApp(App[None]):
         snooze_button.display = reminder is not None
         if reminder is None:
             message_widget.update("")
+            self._render_shortcut_summary()
             return
         if reminder.kind is ReminderKind.ACTIVE:
             timer_name = " / ".join(
@@ -2067,6 +2161,7 @@ class TimeTrackerApp(App[None]):
         else:
             message = "No timer is running. Start one if you are working."
         message_widget.update(message)
+        self._render_shortcut_summary()
 
     def _render_settings(self, settings: ReminderSettings) -> None:
         self.query_one("#settings-path", Static).update(
