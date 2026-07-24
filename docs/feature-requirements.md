@@ -984,6 +984,262 @@ idle awareness addresses the distinct remaining forgotten-stop risk.
   operating-system adapter and agent-owned advisory polling boundary. No database
   migration is required.
 
+### Responsive shortcut discovery
+
+**Status:** Approved
+
+#### Purpose
+
+Keep keyboard actions discoverable without overflowing the bottom row in narrow
+terminals, while retaining the existing F-key accelerators.
+
+#### Required behavior
+
+- Retain F1 through F12 with their existing actions.
+- Replace the always-expanded global shortcut row with a compact,
+  context-relevant summary for the selected view.
+- Keep an always-visible shortcut-help action at the start of the summary and
+  present every binding in a dedicated overlay.
+- Include reminder actions in the compact summary only while a reminder is
+  pending.
+
+#### Invariants and error handling
+
+- Hiding a binding from the compact row does not disable it.
+- The shortcut overlay is read-only, keyboard dismissible, and does not mutate or
+  clear any workflow state.
+- At narrow widths the shortcut-help action remains visible even when later
+  context actions are clipped.
+
+#### Acceptance criteria
+
+1. F1 through F12 retain their documented actions.
+2. Track, Review, Manage, and Settings show only their relevant action summary.
+3. Shortcut help lists all view, timer, reminder, archive, export, update, and
+   quit bindings and can be opened and closed without changing app state.
+4. A narrow-terminal Textual test verifies that shortcut help remains
+   discoverable and the full global binding list is not rendered in the footer.
+
+#### Documentation impact
+
+- Neither top-level requirements nor architecture changes. This refines the TUI
+  presentation of existing keyboard behavior.
+
+### Hierarchical project and activity management
+
+**Status:** Approved
+
+#### Purpose
+
+Let users browse and select archive targets instead of retyping exact project and
+activity names.
+
+#### Required behavior
+
+- Manage displays all selectable projects and their activities in one
+  hierarchical tree.
+- Selecting a project or activity enables one archive action for that exact node.
+- Manage displays archived projects and activities in a second hierarchical tree
+  and restores the selected exact node.
+- F8 and F9 retain project-archive and activity-archive behavior for the
+  corresponding selected node.
+- Refresh both trees after every successful archive or restore and keep a
+  sensible neighboring selection when possible.
+
+#### Invariants and error handling
+
+- Archiving still requires a second explicit confirmation naming the canonical
+  target and warning that a running timer continues.
+- An activity cannot be restored while its parent project is archived.
+- Restoring a project does not change independent child archive flags.
+- Tree selection and expansion are presentation-only and never change storage.
+
+#### Acceptance criteria
+
+1. Active projects and activities are visible without typing and either node kind
+   can be selected and archived after confirmation.
+2. Archived projects and activities are visible with parent context and either
+   node kind can be selected for restore.
+3. Parent restore ordering, active-timer preservation, exact-target
+   confirmation, and reserved-name behavior remain unchanged.
+4. Textual tests cover project and activity selection, confirmation, refresh,
+   restore ordering, empty states, and F8/F9.
+
+#### Documentation impact
+
+- Neither top-level requirements nor architecture changes. Existing archive
+  behavior is presented through a safer TUI selection model.
+
+### Review selection and action layout
+
+**Status:** Approved
+
+#### Purpose
+
+Make Review filtering and entry actions easier to understand and operate without
+typing known project and activity names.
+
+#### Required behavior
+
+- Replace Review's project and activity free-text filters with Select controls.
+- Include explicit all-projects and all-activities options.
+- Populate projects from completed history, including archived historical names,
+  and limit activity choices to the selected project when one is selected.
+- Place Load selected entry and Add missed entry directly below the history
+  table, aligned to the left.
+- Left-align Daily summaries and Range totals with visible spacing between them.
+
+#### Invariants and error handling
+
+- Date, project, and activity filtering remains case-insensitive and shared by
+  detail, summaries, totals, and export.
+- Refreshing history preserves a still-valid selection and otherwise falls back
+  to the corresponding unfiltered option.
+- Summary modes retain their existing mutual exclusion and continue disabling
+  completed-entry editing.
+
+#### Acceptance criteria
+
+1. A user can select unfiltered, active, or archived historical targets without
+   entering free text.
+2. Selecting a project updates the activity choices and rendered results.
+3. Entry buttons appear below the table and summary switches are left-aligned
+   with separation at supported widths.
+4. Textual tests cover selection, refresh, archived choices, layout order,
+   summary interaction, and export consistency.
+
+#### Documentation impact
+
+- Neither top-level requirements nor architecture changes.
+
+### Track capture layout and note reset
+
+**Status:** Approved
+
+#### Purpose
+
+Use horizontal space efficiently, support short multiline notes, and prevent a
+note from an earlier target being unintentionally carried to an explicitly
+selected target.
+
+#### Required behavior
+
+- Place project and activity inputs on one row when space permits and stack them
+  in narrow terminals.
+- Use a two-line multiline note editor with soft wrapping and normal Tab focus
+  traversal.
+- Preserve line breaks as plain-text note content.
+- Clear the note only when the user explicitly selects a target from recent work
+  or another selection control. Typing or correcting project/activity text does
+  not clear it.
+
+#### Invariants and error handling
+
+- Multiline notes follow the existing trim/empty normalization rules.
+- Selecting a target never starts, switches, restarts, or edits a timer by
+  itself.
+- Responsive layout changes do not discard field values or change focus order.
+
+#### Acceptance criteria
+
+1. Project and activity share a row at the normal supported width and stack at a
+   defined narrow width.
+2. The note editor shows two lines, accepts line breaks, and Tab advances focus.
+3. Explicit recent-target selection clears the note, while typed target edits do
+   not.
+4. Start, switch, restart, active-detail edit, recovery, and CSV quoting preserve
+   multiline notes.
+
+#### Documentation impact
+
+- Neither top-level requirements nor architecture changes.
+
+### Theme-safe visual spacing
+
+**Status:** Approved
+
+#### Purpose
+
+Improve form readability and ensure application styling remains legible across
+Textual themes.
+
+#### Required behavior
+
+- Remove unintended colored gutters between vertically stacked inputs while
+  retaining clear field boundaries.
+- Increase vertical separation between Settings rows.
+- Vertically center Settings input text without clipping borders or focus state.
+- Use semantic Textual theme variables for foreground, background, status, focus,
+  and selection colors instead of component-specific literal colors.
+
+#### Invariants and error handling
+
+- Layout remains scrollable in short terminals and usable in narrow terminals.
+- Styling does not change business behavior, focus order, or enabled state.
+- Success and error messages remain distinguishable and legible in both light
+  and dark built-in themes.
+
+#### Acceptance criteria
+
+1. Settings rows have consistent vertical rhythm and centered input content.
+2. Stacked inputs use the parent background between controls.
+3. Light and dark theme tests verify readable messages, focus, selection, and
+   reminder state without hard-coded palette values.
+
+#### Documentation impact
+
+- Neither top-level requirements nor architecture changes.
+
+### Persistent theme and export preferences
+
+**Status:** Approved
+
+#### Purpose
+
+Restore the user's selected theme across launches and support pipe-delimited
+exports without making them the default.
+
+#### Required behavior
+
+- Persist a selected built-in Textual theme in the human-readable configuration
+  and apply it on the next TUI launch.
+- Fall back to the built-in default when the saved theme is not available and
+  persist the fallback when possible.
+- Expose comma and pipe as export-delimiter choices in Settings, with comma as
+  the default.
+- Apply the configured delimiter to detailed, daily-summary, and range-total
+  exports.
+- Preserve reminder, theme, and export settings when any one area is saved.
+
+#### Invariants and error handling
+
+- Theme selection is presentation-only and never changes timer or reminder
+  state.
+- Configuration remains strict and atomically replaced; invalid values do not
+  overwrite the prior file or live settings.
+- Export quoting preserves commas, pipes, quotes, Unicode, and line breaks in
+  notes for either delimiter.
+- Existing configuration files containing only `[reminders]` continue to load
+  with the default theme and comma delimiter.
+
+#### Acceptance criteria
+
+1. Selecting another built-in theme, closing the TUI, and reopening it applies
+   the same theme.
+2. An unknown saved theme falls back safely without preventing launch.
+3. Settings round-trip comma and pipe values through TOML and IPC without
+   restarting the background process.
+4. All three export representations use the chosen delimiter, while comma
+   remains the default for existing and absent configurations.
+5. Unit, integration, IPC, and Textual tests cover persistence, partial settings
+   preservation, fallback, live delimiter changes, and quoted multiline notes.
+
+#### Documentation impact
+
+- Top-level requirements authorize persistent theme and delimiter preferences.
+  Architecture records the additional TOML tables and per-export writer setting.
+  No database migration is required.
+
 ## Feature specification template
 
 Use this structure when a feature is selected. Replace the placeholder rather

@@ -166,6 +166,16 @@ delivery fails or the TUI disconnects.
   is loaded when the background process starts. A successful agent-owned TUI save
   reloads it immediately, clears a prompt created by the replaced schedule, and
   resets the current timer state's monotonic deadline from the save time.
+- The same strict TOML file may contain `[ui]` and `[export]` tables. The UI table
+  stores the selected Textual theme name, and the export table stores one
+  validated delimiter (`comma` or `pipe`). Comma remains the default. Saving one
+  settings area atomically preserves the other tables. The TUI applies an
+  available saved theme on launch and durably replaces it when the user selects
+  another theme; an unavailable saved theme falls back to the built-in default.
+- Export writers receive the currently configured delimiter through the
+  application boundary for each request. Python's CSV writer remains responsible
+  for quoting delimiters, quotes, and line breaks, so changing the delimiter does
+  not introduce presentation or escaping rules into the agent or TUI.
 - Use `platformdirs` for per-user configuration, data, state, runtime, and log
   locations.
 - Use simple native notifications. Native notification action buttons are
