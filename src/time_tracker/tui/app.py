@@ -30,7 +30,8 @@ from textual.widgets.option_list import Option
 
 from time_tracker.application.configuration import ReminderSettings
 from time_tracker.application.exporting import ExportDestinationExistsError
-from time_tracker.application.reminders import Reminder, ReminderKind
+from time_tracker.application.idle import IdleDetectionStatus
+from time_tracker.application.reminders import Reminder, ReminderKind, ReminderReason
 from time_tracker.application.reporting import (
     DatePreset,
     ReviewFilter,
@@ -69,6 +70,10 @@ class TrackerGateway(Protocol):
 
     def save_configuration(self, settings: ReminderSettings) -> ReminderSettings:
         """Persist and live-reload reminder settings."""
+        ...
+
+    def get_idle_detection_status(self) -> IdleDetectionStatus:
+        """Return whether idle-duration detection is available this session."""
         ...
 
     def get_reminder(self) -> Reminder | None:
@@ -541,6 +546,7 @@ class TimeTrackerApp(App[None]):
         self._creating_manual_entry = False
         self._pending_archive_project: tuple[str, str] | None = None
         self._pending_archive_activity: tuple[str, str, str, str] | None = None
+        self._idle_detection_available = False
 
     def compose(self) -> ComposeResult:
         """Compose focused workflows around one persistent active-timer strip."""
@@ -777,6 +783,14 @@ class TimeTrackerApp(App[None]):
                     with Horizontal(classes="settings-row"):
                         yield Static("Snooze minutes")
                         yield Input(placeholder="10", id="reminder-snooze-minutes")
+                    with Horizontal(classes="settings-row"):
+                        yield Static("Idle-triggered reminders")
+                        yield Switch(id="idle-reminders-enabled")
+                        yield Input(
+                            placeholder="Idle threshold minutes",
+                            id="idle-reminder-minutes",
+                        )
+                    yield Static("Idle detection: checking…", id="idle-status")
                     yield Button(
                         "Save reminder settings",
                         id="save-settings-button",
@@ -790,6 +804,7 @@ class TimeTrackerApp(App[None]):
         """Recover any persisted active timer when the TUI reconnects."""
         self.set_interval(1.0, self._render_active)
         self.set_interval(1.0, self._refresh_reminder)
+        self.set_interval(5.0, self._refresh_idle_status)
         try:
             self.active_timer = await asyncio.to_thread(self.client.get_active)
             projects = await asyncio.to_thread(self.client.list_projects)
@@ -802,6 +817,7 @@ class TimeTrackerApp(App[None]):
                 self.client.list_archived_activities
             )
             settings = await asyncio.to_thread(self.client.get_configuration)
+            idle_status = await asyncio.to_thread(self.client.get_idle_detection_status)
         except Exception as error:
             self._show_message(str(error), error=True)
         else:
@@ -809,6 +825,7 @@ class TimeTrackerApp(App[None]):
             self._render_history(completed)
             self._render_recent_activities(recent)
             self._render_archived_items(archived_projects, archived_activities)
+            self._idle_detection_available = idle_status.available
             self._render_settings(settings)
             if self.active_timer is not None:
                 self.query_one("#project", Input).value = self.active_timer.project
@@ -1165,11 +1182,18 @@ class TimeTrackerApp(App[None]):
                     self.query_one("#reminder-snooze-minutes", Input).value,
                     "Snooze duration",
                 ),
+                idle_enabled=self.query_one("#idle-reminders-enabled", Switch).value,
+                idle_threshold_minutes=_parse_positive_minutes(
+                    self.query_one("#idle-reminder-minutes", Input).value,
+                    "Idle reminder threshold",
+                ),
             )
             saved = await asyncio.to_thread(self.client.save_configuration, settings)
+            idle_status = await asyncio.to_thread(self.client.get_idle_detection_status)
         except Exception as error:
             self._show_message(str(error), error=True)
             return
+        self._idle_detection_available = idle_status.available
         self._render_settings(saved)
         self.pending_reminder = None
         self._render_reminder()
@@ -1424,6 +1448,16 @@ class TimeTrackerApp(App[None]):
             return
         self.pending_reminder = reminder
         self._render_reminder()
+
+    async def _refresh_idle_status(self) -> None:
+        try:
+            status = await asyncio.to_thread(self.client.get_idle_detection_status)
+        except Exception:
+            return
+        if status.available == self._idle_detection_available:
+            return
+        self._idle_detection_available = status.available
+        self._render_idle_status()
 
     async def _confirm_active_reminder(self) -> None:
         try:
@@ -2018,10 +2052,18 @@ class TimeTrackerApp(App[None]):
             timer_name = " / ".join(
                 part for part in (reminder.project, reminder.activity) if part
             )
-            message = (
-                f"Still tracking {timer_name}? Confirm to restart the reminder "
-                "interval, or stop the timer."
-            )
+            if reminder.reason is ReminderReason.IDLE:
+                threshold = _format_minutes(reminder.idle_threshold_minutes or 0)
+                message = (
+                    f"Still tracking {timer_name}? The computer was idle for at "
+                    f"least {threshold} minutes. Confirm to keep tracking, snooze, "
+                    "or stop the timer; use Review to remove idle time."
+                )
+            else:
+                message = (
+                    f"Still tracking {timer_name}? Confirm to restart the reminder "
+                    "interval, or stop the timer."
+                )
         else:
             message = "No timer is running. Start one if you are working."
         message_widget.update(message)
@@ -2052,6 +2094,17 @@ class TimeTrackerApp(App[None]):
         self.query_one("#reminder-window-end", Input).value = settings.window_end
         self.query_one("#reminder-snooze-minutes", Input).value = _format_minutes(
             settings.snooze_minutes
+        )
+        self.query_one("#idle-reminders-enabled", Switch).value = settings.idle_enabled
+        self.query_one("#idle-reminder-minutes", Input).value = _format_minutes(
+            settings.idle_threshold_minutes
+        )
+        self._render_idle_status()
+
+    def _render_idle_status(self) -> None:
+        availability = "available" if self._idle_detection_available else "unavailable"
+        self.query_one("#idle-status", Static).update(
+            f"Idle detection: {availability} in this platform session"
         )
 
     def _show_message(self, message: str, *, error: bool = False) -> None:

@@ -10,7 +10,12 @@ import pytest
 
 from time_tracker.agent.server import serve
 from time_tracker.application.configuration import ReminderSettings
-from time_tracker.application.reminders import Reminder, ReminderIntervals, ReminderKind
+from time_tracker.application.reminders import (
+    Reminder,
+    ReminderIntervals,
+    ReminderKind,
+    ReminderReason,
+)
 from time_tracker.application.reporting import ReviewFilter
 from time_tracker.application.tracking import (
     ArchivedActivity,
@@ -345,6 +350,22 @@ class FailingNotifier:
         raise RuntimeError(f"simulated {reminder.kind.value} delivery failure")
 
 
+class MonotonicIdleDetector:
+    def __init__(self) -> None:
+        self.reset()
+
+    def reset(self) -> None:
+        self._started = time.monotonic()
+
+    def idle_seconds(self) -> float:
+        return time.monotonic() - self._started
+
+
+class FailingIdleDetector:
+    def idle_seconds(self) -> float:
+        raise OSError("simulated idle detector failure")
+
+
 def test_agent_sends_reminders_after_the_tui_disconnects(tmp_path: Path) -> None:
     paths = AgentPaths.in_directory(tmp_path)
     notifier = RecordingNotifier()
@@ -393,6 +414,116 @@ def test_agent_dispatches_notification_smoke(tmp_path: Path) -> None:
     try:
         client.send_test_notification()
         assert notifier.reminders == [Reminder(ReminderKind.INACTIVE)]
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+
+
+def test_idle_detection_triggers_active_reminder_without_mutating_timer(
+    tmp_path: Path,
+) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    notifier = RecordingNotifier()
+    detector = MonotonicIdleDetector()
+    thread = threading.Thread(
+        target=serve,
+        args=(paths,),
+        kwargs={
+            "notifier": notifier,
+            "idle_detector": detector,
+            "idle_poll_seconds": 0.01,
+        },
+        daemon=True,
+    )
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        assert client.get_idle_detection_status().available is True
+        client.save_configuration(
+            ReminderSettings(
+                inactive_enabled=False,
+                active_enabled=False,
+                idle_enabled=True,
+                idle_threshold_minutes=0.001,
+                snooze_minutes=0.001,
+            )
+        )
+        started = client.start("Idle", "Reminder")
+        detector.reset()
+
+        reminder = _wait_for_pending_reminder(client, ReminderKind.ACTIVE)
+
+        assert reminder.reason is ReminderReason.IDLE
+        assert reminder.idle_threshold_minutes == 0.001
+        assert client.get_active() == started
+        assert client.list_completed() == []
+        assert notifier.reminders[-1] == reminder
+
+        edited = client.edit_active("Idle", "Updated")
+        pending_after_edit = client.get_reminder()
+        assert pending_after_edit is not None
+        assert pending_after_edit.reason is ReminderReason.IDLE
+        assert pending_after_edit.activity == "Updated"
+        assert edited.entry_id == started.entry_id
+        assert edited.started_at == started.started_at
+
+        assert client.snooze_reminder() is True
+        snoozed = _wait_for_pending_reminder(client, ReminderKind.ACTIVE)
+        assert snoozed.reason is ReminderReason.IDLE
+        assert client.get_active() == edited
+
+        assert client.confirm_active_reminder() is True
+        detector.reset()
+        repeated = _wait_for_pending_reminder(client, ReminderKind.ACTIVE)
+        assert repeated.reason is ReminderReason.IDLE
+        assert client.get_active() == edited
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+
+
+def test_idle_detector_failure_reports_unavailable_without_timer_mutation(
+    tmp_path: Path,
+) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    thread = threading.Thread(
+        target=serve,
+        args=(paths,),
+        kwargs={
+            "notifier": RecordingNotifier(),
+            "idle_detector": FailingIdleDetector(),
+            "idle_poll_seconds": 0.01,
+        },
+        daemon=True,
+    )
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        client.save_configuration(
+            ReminderSettings(
+                inactive_enabled=False,
+                active_enabled=False,
+                idle_enabled=True,
+                idle_threshold_minutes=0.001,
+            )
+        )
+        started = client.start("Idle", "Failure")
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            if not client.get_idle_detection_status().available:
+                break
+            time.sleep(0.01)
+        assert client.get_idle_detection_status().available is False
+        assert client.get_active() == started
+        assert client.get_reminder() is None
     finally:
         client.shutdown()
         thread.join(timeout=2)

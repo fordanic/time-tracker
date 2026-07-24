@@ -22,6 +22,7 @@ from time_tracker.application.exporting import (
     ExportDestinationExistsError,
     ExportService,
 )
+from time_tracker.application.idle import IdleDetectionStatus, IdleDetector
 from time_tracker.application.reminders import Reminder, ReminderIntervals, ReminderKind
 from time_tracker.application.reporting import ReviewFilter
 from time_tracker.application.tracking import TrackingService
@@ -35,6 +36,7 @@ from time_tracker.infrastructure.csv_export import (
     CsvDailySummaryWriter,
     CsvRangeSummaryWriter,
 )
+from time_tracker.infrastructure.idle_detection import create_idle_detector
 from time_tracker.infrastructure.instance_lock import instance_lock
 from time_tracker.infrastructure.ipc import PROTOCOL_VERSION
 from time_tracker.infrastructure.notifications import (
@@ -50,17 +52,27 @@ def serve(
     *,
     notifier: NotificationService | None = None,
     reminder_intervals: ReminderIntervals | None = None,
+    idle_detector: IdleDetector | None = None,
+    idle_poll_seconds: float = 15.0,
 ) -> None:
     """Serve one authenticated foreground connection at a time."""
     paths.prepare()
     with instance_lock(paths.lock):
-        _serve_locked(paths, notifier, reminder_intervals)
+        _serve_locked(
+            paths,
+            notifier,
+            reminder_intervals,
+            idle_detector,
+            idle_poll_seconds,
+        )
 
 
 def _serve_locked(
     paths: AgentPaths,
     notifier: NotificationService | None,
     reminder_intervals: ReminderIntervals | None,
+    idle_detector: IdleDetector | None,
+    idle_poll_seconds: float,
 ) -> None:
     """Own the endpoint and database while the instance lock is held."""
     settings = (
@@ -105,6 +117,8 @@ def _serve_locked(
                 configuration_service,
                 notification_service,
                 settings,
+                idle_detector,
+                idle_poll_seconds,
             )
         )
     finally:
@@ -122,6 +136,8 @@ async def _serve_connections(
     configuration_service: ConfigurationService,
     notifier: NotificationService,
     reminder_settings: ReminderSettings,
+    idle_detector: IdleDetector | None,
+    idle_poll_seconds: float,
 ) -> None:
     """Keep reminder scheduling responsive while IPC and SQLite block in threads."""
     coordinator = ReminderCoordinator(
@@ -130,6 +146,13 @@ async def _serve_connections(
         reminder_settings.intervals,
         window=reminder_settings.window,
         snooze_seconds=reminder_settings.snooze_seconds,
+        idle_enabled=reminder_settings.idle_enabled,
+        idle_threshold_minutes=reminder_settings.idle_threshold_minutes,
+        idle_detector=idle_detector,
+        idle_detector_factory=(
+            None if idle_detector is not None else create_idle_detector
+        ),
+        idle_poll_seconds=idle_poll_seconds,
     )
     reminder_task = asyncio.create_task(coordinator.run())
     running = True
@@ -157,12 +180,15 @@ async def _serve_connections(
                     export_service,
                     configuration_service,
                     coordinator.pending_reminder(),
+                    coordinator.idle_detection_status(),
                 )
                 if reloaded_settings is not None:
                     coordinator.reload_settings(
                         reloaded_settings.intervals,
                         reloaded_settings.window,
                         reloaded_settings.snooze_seconds,
+                        reloaded_settings.idle_enabled,
+                        reloaded_settings.idle_threshold_minutes,
                     )
                 if active_confirmed:
                     coordinator.confirm_active()
@@ -204,6 +230,7 @@ def _handle_request(
     export_service: ExportService,
     configuration_service: ConfigurationService,
     pending_reminder: Reminder | None = None,
+    idle_detection_status: IdleDetectionStatus | None = None,
 ) -> tuple[
     dict[str, object],
     bool,
@@ -247,6 +274,8 @@ def _handle_request(
             result = pending_reminder is not None
         elif method == "get_configuration":
             result = _settings_dict(configuration_service.get())
+        elif method == "get_idle_detection_status":
+            result = asdict(idle_detection_status or IdleDetectionStatus(False))
         elif method == "save_configuration":
             settings = configuration_service.save(
                 ReminderSettings(
@@ -263,6 +292,10 @@ def _handle_request(
                     window_start=_required_str(params, "window_start"),
                     window_end=_required_str(params, "window_end"),
                     snooze_minutes=_required_number(params, "snooze_minutes"),
+                    idle_enabled=_required_bool(params, "idle_enabled"),
+                    idle_threshold_minutes=_required_number(
+                        params, "idle_threshold_minutes"
+                    ),
                 )
             )
             result = _settings_dict(settings)
@@ -456,6 +489,8 @@ def _reminder_dict(reminder: Reminder | None) -> object:
         "kind": reminder.kind.value,
         "project": reminder.project,
         "activity": reminder.activity,
+        "reason": reminder.reason.value,
+        "idle_threshold_minutes": reminder.idle_threshold_minutes,
     }
 
 

@@ -855,7 +855,7 @@ state.
 
 ### Opt-in idle-triggered active reminder
 
-**Status:** Approved
+**Status:** Implemented
 
 #### Purpose
 

@@ -23,6 +23,8 @@ class ReminderSettings:
     window_start: str = "09:00"
     window_end: str = "17:00"
     snooze_minutes: float = 10.0
+    idle_enabled: bool = False
+    idle_threshold_minutes: float = 15.0
 
     def __post_init__(self) -> None:
         if any(
@@ -31,6 +33,7 @@ class ReminderSettings:
                 self.inactive_enabled,
                 self.active_enabled,
                 self.window_enabled,
+                self.idle_enabled,
             )
         ):
             raise ValueError("reminder enabled values must be booleans")
@@ -38,6 +41,7 @@ class ReminderSettings:
             self.inactive_interval_minutes,
             self.active_interval_minutes,
             self.snooze_minutes,
+            self.idle_threshold_minutes,
         ):
             if (
                 isinstance(interval, bool)
@@ -94,6 +98,11 @@ class ReminderSettings:
     def snooze_seconds(self) -> float:
         """Return the configured in-memory snooze duration in seconds."""
         return float(self.snooze_minutes) * 60
+
+    @property
+    def idle_threshold_seconds(self) -> float:
+        """Return the configured content-free idle threshold in seconds."""
+        return float(self.idle_threshold_minutes) * 60
 
     @classmethod
     def from_intervals(cls, intervals: ReminderIntervals) -> ReminderSettings:

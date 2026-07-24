@@ -8,7 +8,7 @@ from typing import Protocol
 
 from desktop_notifier import DesktopNotifier
 
-from time_tracker.application.reminders import Reminder, ReminderKind
+from time_tracker.application.reminders import Reminder, ReminderKind, ReminderReason
 
 
 class NotificationService(Protocol):
@@ -35,8 +35,22 @@ class NativeNotificationService:
             target = " / ".join(
                 part for part in (reminder.project, reminder.activity) if part
             )
-            title = f"Still tracking {target}?" if target else "Still tracking time?"
-            message = "The timer is still running. Open Time Tracker to stop or switch."
+            if reminder.reason is ReminderReason.IDLE:
+                threshold = _format_minutes(reminder.idle_threshold_minutes or 0)
+                title = (
+                    f"Still tracking {target}?" if target else "Still tracking time?"
+                )
+                message = (
+                    f"The computer was idle for at least {threshold} minutes. "
+                    "Open Time Tracker to confirm, snooze, or stop."
+                )
+            else:
+                title = (
+                    f"Still tracking {target}?" if target else "Still tracking time?"
+                )
+                message = (
+                    "The timer is still running. Open Time Tracker to stop or switch."
+                )
         else:
             title = "No timer is running"
             message = "Start a timer when you begin working."
@@ -63,6 +77,10 @@ class NativeNotificationService:
         )
         if not dispatched:
             raise RuntimeError("the desktop notification service rejected delivery")
+
+
+def _format_minutes(value: float) -> str:
+    return format(float(value), ".15g")
 
 
 async def _send_macos_notification(title: str, message: str) -> None:

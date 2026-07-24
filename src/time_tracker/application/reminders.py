@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -17,6 +18,13 @@ class ReminderKind(Enum):
     ACTIVE = "active"
 
 
+class ReminderReason(Enum):
+    """Why an active reminder was requested."""
+
+    SCHEDULED = "scheduled"
+    IDLE = "idle"
+
+
 @dataclass(frozen=True, slots=True)
 class Reminder:
     """A reminder ready for presentation by an infrastructure adapter."""
@@ -24,6 +32,24 @@ class Reminder:
     kind: ReminderKind
     project: str | None = None
     activity: str | None = None
+    reason: ReminderReason = ReminderReason.SCHEDULED
+    idle_threshold_minutes: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.reason is ReminderReason.IDLE:
+            threshold = self.idle_threshold_minutes
+            if (
+                self.kind is not ReminderKind.ACTIVE
+                or threshold is None
+                or not math.isfinite(threshold)
+                or threshold <= 0
+            ):
+                raise ValueError(
+                    "idle-triggered reminders require an active timer and a "
+                    "positive finite threshold"
+                )
+        elif self.idle_threshold_minutes is not None:
+            raise ValueError("scheduled reminders cannot include an idle threshold")
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +126,8 @@ class ReminderSchedule:
         self._project: str | None = None
         self._activity: str | None = None
         self._due_at: float | None = None
+        self._reason = ReminderReason.SCHEDULED
+        self._idle_threshold_minutes: float | None = None
 
     def reset(
         self,
@@ -112,6 +140,8 @@ class ReminderSchedule:
         self._kind = kind
         self._project = project
         self._activity = activity
+        self._reason = ReminderReason.SCHEDULED
+        self._idle_threshold_minutes = None
         interval = self._interval(kind)
         self._due_at = None if interval is None else self._monotonic() + interval
 
@@ -123,17 +153,40 @@ class ReminderSchedule:
         """Replace the local presentation window before the owner resets state."""
         self._window = window
 
-    def snooze(self, seconds: float) -> None:
+    def snooze(
+        self,
+        seconds: float,
+        *,
+        reason: ReminderReason = ReminderReason.SCHEDULED,
+        idle_threshold_minutes: float | None = None,
+    ) -> None:
         """Replace the current deadline with an in-memory monotonic snooze."""
         if seconds <= 0:
             raise ValueError("snooze duration must be positive")
+        self._reason = reason
+        self._idle_threshold_minutes = idle_threshold_minutes
         self._due_at = self._monotonic() + seconds
+
+    def request_idle(self, threshold_minutes: float) -> None:
+        """Request the current active reminder immediately for detected idleness."""
+        if self._kind is not ReminderKind.ACTIVE:
+            raise ValueError("idle reminders require an active timer")
+        if not math.isfinite(threshold_minutes) or threshold_minutes <= 0:
+            raise ValueError("idle threshold must be positive")
+        self._reason = ReminderReason.IDLE
+        self._idle_threshold_minutes = threshold_minutes
+        self._due_at = self._monotonic()
 
     def seconds_until_due(self) -> float | None:
         """Return the non-negative wait until the next enabled reminder."""
         if self._due_at is None:
             return None
         return max(0.0, self._due_at - self._monotonic())
+
+    @property
+    def reason(self) -> ReminderReason:
+        """Return the reason attached to the current deadline."""
+        return self._reason
 
     def update_active_details(self, project: str, activity: str) -> None:
         """Update active reminder text without changing its existing deadline."""
@@ -150,13 +203,18 @@ class ReminderSchedule:
             if not self._window.contains(now):
                 self._due_at = self._monotonic() + self._window.seconds_until_open(now)
                 return None
-        interval = self._interval(self._kind)
-        self._due_at = None if interval is None else self._monotonic() + interval
-        return Reminder(
+        reminder = Reminder(
             kind=self._kind,
             project=self._project,
             activity=self._activity,
+            reason=self._reason,
+            idle_threshold_minutes=self._idle_threshold_minutes,
         )
+        interval = self._interval(self._kind)
+        self._due_at = None if interval is None else self._monotonic() + interval
+        self._reason = ReminderReason.SCHEDULED
+        self._idle_threshold_minutes = None
+        return reminder
 
     def _interval(self, kind: ReminderKind) -> float | None:
         if kind is ReminderKind.ACTIVE:

@@ -100,16 +100,24 @@ the next selected opening. Any pending reminder can be snoozed for the configure
 duration with its button or `F12` without changing timer state; snooze is
 in-memory and timer transitions, confirmation, settings reload, or agent restart
 restore the normal interval.
+Optional local input-idle detection can request the existing active reminder
+early after 15 minutes by default, including when periodic active reminders are
+disabled. It observes only an operating-system idle duration, never input
+content, and never changes tracked time automatically. The prompt can be
+confirmed, snoozed, or followed by an explicit Stop; unwanted idle time remains
+correctable in Review.
 
 The CI workflow is configured to build and exercise the packaged lifecycle on
 Linux, Windows, and macOS. A local macOS arm64 app-bundle lifecycle and
-Notification Center dispatch were validated on July 19, 2026.
+Notification Center dispatch were validated on July 19, 2026. The macOS Core
+Graphics idle-duration adapter was validated interactively on July 22, 2026.
 
 Known outstanding validation:
 
 - run the updated packaged-lifecycle workflow successfully on Linux and Windows;
 - run the native-notification smoke on interactive Linux and Windows desktops;
-  and
+- validate idle-duration detection on supported interactive Linux X11 and
+  Windows desktop sessions; and
 - record any additional unmet acceptance criteria here when identified.
 
 ## Development
@@ -231,10 +239,12 @@ timer running; use Stop or `F6` when the timer should end.
 
 Use Settings (`F4`) to enable or disable each reminder independently, edit its
 positive interval in minutes, optionally restrict delivery to selected local
-weekdays and `HH:MM` hours, and choose a positive snooze duration. An end earlier
-than the start makes an overnight window. Saving creates or atomically replaces
-the optional TOML file and applies the schedule immediately; no
-background-process restart is needed. Run `uv run time-tracker --config-path` to
+weekdays and `HH:MM` hours, choose a positive snooze duration, and optionally
+enable an idle-triggered active reminder with a positive threshold. Settings
+reports whether idle detection is available in the current platform session. An
+end earlier than the start makes an overnight window. Saving creates or
+atomically replaces the optional TOML file and applies the schedule immediately;
+no background-process restart is needed. Run `uv run time-tracker --config-path` to
 locate the same user-editable file. When it does not exist, both reminders use
 their built-in defaults and the window is disabled. The complete supported
 configuration is:
@@ -250,12 +260,19 @@ window_weekdays = [0, 1, 2, 3, 4]
 window_start = "09:00"
 window_end = "17:00"
 snooze_minutes = 10
+idle_enabled = false
+idle_threshold_minutes = 15
 ```
 
 Each reminder can be disabled independently. Intervals must be positive numbers.
 Weekdays use Monday `0` through Sunday `6`; values must be unique, and start and
 end must differ. Snoozing clears the current prompt and defers the next reminder
 without modifying the timer or recurring interval.
+Idle detection polls only while enabled and a timer is active. It requests the
+same active reminder early, honors the weekly delivery window, and remains
+available when the periodic active reminder is disabled. A detector failure
+leaves timer and normal reminder state unchanged and is shown as unavailable in
+Settings.
 Direct edits made outside the TUI still require restarting the background process
 with `uv run time-tracker --stop-agent`, then reopening the TUI. Invalid TOML,
 unknown keys, and invalid values are reported without changing the file.

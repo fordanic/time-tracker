@@ -20,6 +20,8 @@ _REMINDER_KEYS = {
     "window_start",
     "window_end",
     "snooze_minutes",
+    "idle_enabled",
+    "idle_threshold_minutes",
 }
 
 
@@ -78,6 +80,10 @@ def load_config(path: Path) -> ApplicationConfig:
     window_start = _string(reminders, "window_start", "09:00", path)
     window_end = _string(reminders, "window_end", "17:00", path)
     snooze_minutes = _positive_number(reminders, "snooze_minutes", 10.0, path)
+    idle_enabled = _boolean(reminders, "idle_enabled", False, path)
+    idle_threshold_minutes = _positive_number(
+        reminders, "idle_threshold_minutes", 15.0, path
+    )
     try:
         settings = ReminderSettings(
             inactive_enabled=inactive_enabled,
@@ -89,6 +95,8 @@ def load_config(path: Path) -> ApplicationConfig:
             window_start=window_start,
             window_end=window_end,
             snooze_minutes=snooze_minutes,
+            idle_enabled=idle_enabled,
+            idle_threshold_minutes=idle_threshold_minutes,
         )
     except ValueError as error:
         raise ConfigurationError(f"invalid configuration at {path}: {error}") from error
@@ -140,6 +148,9 @@ def _toml(settings: ReminderSettings) -> str:
         f'window_start = "{settings.window_start}"\n'
         f'window_end = "{settings.window_end}"\n'
         f"snooze_minutes = {_format_number(settings.snooze_minutes)}\n"
+        f"idle_enabled = {str(settings.idle_enabled).lower()}\n"
+        "idle_threshold_minutes = "
+        f"{_format_number(settings.idle_threshold_minutes)}\n"
     )
 
 
