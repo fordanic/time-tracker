@@ -1223,8 +1223,11 @@ class TimeTrackerApp(App[None]):
         self._select_view("settings-tab")
 
     def action_show_shortcuts(self) -> None:
-        """Show every binding without changing workflow state."""
-        self.push_screen(ShortcutHelpScreen())
+        """Toggle every binding without changing workflow state."""
+        if isinstance(self.screen, ShortcutHelpScreen):
+            self.screen.dismiss(None)
+        else:
+            self.push_screen(ShortcutHelpScreen())
 
     def action_ignore_terminal_control(self) -> None:
         """Override Textual's terminal flow-control quit binding."""

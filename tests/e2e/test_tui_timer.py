@@ -95,6 +95,11 @@ async def test_narrow_footer_keeps_complete_shortcut_help_discoverable(
             assert "F1 Track" in help_text
             assert "F12 Snooze" in help_text
 
+            await pilot.press("ctrl+k")
+            assert app.screen is base_screen
+
+            await pilot.press("ctrl+k")
+            assert isinstance(app.screen, ShortcutHelpScreen)
             await pilot.press("escape")
             assert app.screen is base_screen
     finally:
