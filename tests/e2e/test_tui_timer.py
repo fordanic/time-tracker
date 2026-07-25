@@ -1253,7 +1253,14 @@ async def test_user_edits_and_live_applies_reminder_settings(tmp_path: Path) -> 
             app.query_one("#idle-reminder-minutes", Input).value = "22.5"
             app.query_one("#export-delimiter", Select).value = "|"
             app.query_one("#save-settings-button", Button).press()
-            await pilot.pause()
+            await _wait_for_ui(
+                pilot,
+                lambda: (
+                    "Settings saved and applied"
+                    in str(app.query_one("#message", Static).render())
+                ),
+                "settings success message was not shown",
+            )
 
             expected = ReminderSettings(
                 inactive_enabled=True,
@@ -1280,7 +1287,14 @@ async def test_user_edits_and_live_applies_reminder_settings(tmp_path: Path) -> 
             original = paths.config.read_bytes()
             app.query_one("#active-reminder-minutes", Input).value = "0"
             app.query_one("#save-settings-button", Button).press()
-            await pilot.pause()
+            await _wait_for_ui(
+                pilot,
+                lambda: (
+                    "positive finite number"
+                    in str(app.query_one("#message", Static).render())
+                ),
+                "settings validation error was not shown",
+            )
             assert "positive finite number" in str(
                 app.query_one("#message", Static).render()
             )

@@ -188,6 +188,11 @@ internet connection. The current product interface is a TUI.
 
 - Support Linux, Windows, and macOS; develop primarily on Linux and validate all
   three.
+- Give every build one application version. Use three-part final versions and
+  numbered release candidates, and report the same version from source metadata,
+  the CLI, native release artifacts, and Git tags.
+- Validate a native release artifact on its target operating system before
+  publication and publish its SHA-256 checksum with it.
 - Keep common tracking actions fast and keyboard-driven.
 - Do not require telemetry, a remote service, or an account.
 - Use explicit database migrations and prevent more than one active entry at the
@@ -234,8 +239,9 @@ The following are not part of the current product direction:
 - Plugins, third-party integrations, imports, and public automation APIs.
 - Screenshots, GPS tracking, and employee-surveillance features.
 
-Prebuilt downloads, installers, package-manager publishing, and automatic updates
-are not currently required; binaries are built locally.
+Native release-candidate and final-release downloads may be published on GitHub
+after local target-platform validation. Installers, package-manager publishing,
+and automatic updates are not currently required.
 
 Features absent from this list are not automatically approved. Record approved
 additional feature behavior in [Feature Requirements](feature-requirements.md)

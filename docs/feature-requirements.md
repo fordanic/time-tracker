@@ -1244,6 +1244,75 @@ exports without making them the default.
   Architecture records the additional TOML tables and per-export writer setting.
   No database migration is required.
 
+### Versioned release candidates and releases
+
+**Status:** Implemented
+
+#### Purpose
+
+Make a reviewed build identifiable and repeatable, and allow release
+candidates and final releases to be published from target-platform development
+machines when GitHub Actions minutes are unavailable.
+
+#### Required behavior
+
+- Keep one canonical application version. Use `X.Y.Z` for a final version and
+  `X.Y.ZrcN`, where `N` starts at one, for a release candidate.
+- Derive Python project metadata and `time-tracker --version` from that canonical
+  value. Use it for Windows file-version resources and macOS bundle metadata, and
+  use `v<version>` as the corresponding Git tag.
+- Provide one command to set and validate the canonical version and refresh the
+  lockfile for the dynamic project metadata.
+- Provide a local target-platform command that runs the complete checks, builds
+  the native package, runs the packaged lifecycle smoke, verifies the frozen
+  executable reports the canonical version, and creates a versioned archive plus
+  SHA-256 checksum.
+- Name release assets with the application version, operating system, and CPU
+  architecture so independently built platform assets can coexist in one GitHub
+  release.
+- Provide separate local publication commands for release candidates and final
+  releases. The first platform creates the annotated tag and GitHub release;
+  later platforms upload their independently validated assets to the same tag.
+- Publish a candidate as a visible GitHub prerelease and a final version as a
+  visible GitHub release. Generate release notes from Git history through GitHub.
+
+#### Invariants and error handling
+
+- Reject malformed versions, a candidate publication for a final version, and a
+  final publication for a candidate version before changing Git or GitHub state.
+- Refuse publication from a dirty checkout, when an existing version tag points
+  to another commit, when the packaged executable reports another version, or
+  when the expected archive or checksum is absent.
+- Authenticate GitHub CLI access before creating or pushing a tag. Re-running
+  publication at the same version commit is resumable: reuse the exact tag and
+  release, but refuse to overwrite an existing asset silently.
+- Build each native artifact on its target operating system; do not present
+  PyInstaller as a cross-compiler. A GitHub release may be populated by multiple
+  machines, but every uploaded asset follows the same local validation path.
+- Tag pushes do not trigger the hosted check workflow. No release or
+  release-candidate operation depends on GitHub Actions.
+
+#### Acceptance criteria
+
+1. Project metadata, the source CLI, and the frozen executable report the same
+   canonical final or release-candidate version.
+2. A target-platform release build produces the documented versioned archive
+   and a checksum that verifies its exact bytes.
+3. Candidate publication creates or reuses `vX.Y.ZrcN` and a GitHub prerelease;
+   final publication creates or reuses `vX.Y.Z` and a non-prerelease release.
+4. A second target platform can upload a differently named asset to the same
+   release without replacing an existing asset.
+5. Unit tests cover version validation and replacement, platform/architecture
+   naming, version verification, archive contents, checksums, and publication
+   precondition failures.
+
+#### Documentation impact
+
+- Top-level requirements now require consistent build identity and permit
+  locally validated GitHub downloads. Architecture records the version source,
+  native artifact format, and local GitHub CLI publication boundary. No product
+  data or protocol migration is required.
+
 ## Feature specification template
 
 Use this structure when a feature is selected. Replace the placeholder rather
