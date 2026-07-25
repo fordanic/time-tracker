@@ -15,7 +15,8 @@ from typing import cast
 
 from time_tracker.application.configuration import ReminderSettings
 from time_tracker.application.exporting import ExportDestinationExistsError
-from time_tracker.application.reminders import Reminder, ReminderKind
+from time_tracker.application.idle import IdleDetectionStatus
+from time_tracker.application.reminders import Reminder, ReminderKind, ReminderReason
 from time_tracker.application.reporting import ReviewFilter
 from time_tracker.application.tracking import (
     ArchivedActivity,
@@ -25,7 +26,7 @@ from time_tracker.application.tracking import (
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
 from time_tracker.infrastructure.paths import AgentPaths
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 3
 _WINDOWS_DETACHED_PROCESS_FLAGS = 0x00000208
 
 
@@ -69,9 +70,21 @@ class AgentClient:
                 "inactive_interval_minutes": settings.inactive_interval_minutes,
                 "active_enabled": settings.active_enabled,
                 "active_interval_minutes": settings.active_interval_minutes,
+                "window_enabled": settings.window_enabled,
+                "window_weekdays": list(settings.window_weekdays),
+                "window_start": settings.window_start,
+                "window_end": settings.window_end,
+                "snooze_minutes": settings.snooze_minutes,
+                "idle_enabled": settings.idle_enabled,
+                "idle_threshold_minutes": settings.idle_threshold_minutes,
             },
         )
         return _settings_from_object(result)
+
+    def get_idle_detection_status(self) -> IdleDetectionStatus:
+        """Return whether idle-duration detection is available this session."""
+        data = _object_dict(self._request("get_idle_detection_status", {}))
+        return IdleDetectionStatus(available=_object_bool(data.get("available")))
 
     def get_active(self) -> ActiveTimer | None:
         """Return the active timer recovered by the background process."""
@@ -88,6 +101,13 @@ class AgentClient:
         result = self._request("confirm_active_reminder", {})
         if not isinstance(result, bool):
             raise AgentRequestError("the agent returned malformed confirmation data")
+        return result
+
+    def snooze_reminder(self) -> bool:
+        """Defer the pending reminder without changing timer state."""
+        result = self._request("snooze_reminder", {})
+        if not isinstance(result, bool):
+            raise AgentRequestError("the agent returned malformed snooze data")
         return result
 
     def list_projects(self) -> list[str]:
@@ -350,16 +370,27 @@ class AgentClient:
 
     def shutdown(self) -> None:
         """Ask the background process to stop without closing an active entry."""
-        self._request("shutdown", {})
+        try:
+            self._request("shutdown", {})
+        except AgentRequestError as error:
+            if not _is_protocol_version_error(error):
+                raise
+            self._request("shutdown", {}, version=PROTOCOL_VERSION - 1)
 
     def send_test_notification(self) -> None:
         """Ask the agent to dispatch a native smoke-test notification."""
         self._request("notification_smoke", {})
 
-    def _request(self, method: str, params: dict[str, object]) -> object:
+    def _request(
+        self,
+        method: str,
+        params: dict[str, object],
+        *,
+        version: int = PROTOCOL_VERSION,
+    ) -> object:
         request_id = str(uuid.uuid4())
         request = {
-            "version": PROTOCOL_VERSION,
+            "version": version,
             "request_id": request_id,
             "method": method,
             "params": params,
@@ -413,6 +444,11 @@ def ensure_agent_running(
         return client
     except AgentUnavailableError:
         pass
+    except AgentRequestError as error:
+        if not _is_protocol_version_error(error):
+            raise
+        client.shutdown()
+        _wait_for_agent_exit(client, timeout_seconds)
 
     paths.prepare()
     command = _agent_command(paths)
@@ -443,6 +479,24 @@ def ensure_agent_running(
         except AgentUnavailableError:
             time.sleep(0.05)
     raise AgentUnavailableError("the Time Tracker agent did not start")
+
+
+def _is_protocol_version_error(error: AgentRequestError) -> bool:
+    return "unsupported protocol version" in str(error)
+
+
+def _wait_for_agent_exit(client: AgentClient, timeout_seconds: float) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        try:
+            client.ping()
+        except AgentUnavailableError:
+            return
+        except AgentRequestError as error:
+            if not _is_protocol_version_error(error):
+                raise
+        time.sleep(0.05)
+    raise AgentUnavailableError("the incompatible Time Tracker agent did not stop")
 
 
 def _agent_command(paths: AgentPaths, *, frozen: bool | None = None) -> list[str]:
@@ -489,15 +543,21 @@ def _reminder_from_object(value: object) -> Reminder:
     data = _object_dict(value)
     try:
         kind = ReminderKind(_object_str(data.get("kind")))
+        reason = ReminderReason(_object_str(data.get("reason")))
     except ValueError as error:
         raise AgentRequestError(
-            "the agent returned an unknown reminder kind"
+            "the agent returned an unknown reminder kind or reason"
         ) from error
-    return Reminder(
-        kind=kind,
-        project=_optional_str(data.get("project")),
-        activity=_optional_str(data.get("activity")),
-    )
+    try:
+        return Reminder(
+            kind=kind,
+            project=_optional_str(data.get("project")),
+            activity=_optional_str(data.get("activity")),
+            reason=reason,
+            idle_threshold_minutes=_optional_number(data.get("idle_threshold_minutes")),
+        )
+    except ValueError as error:
+        raise AgentRequestError("the agent returned malformed reminder data") from error
 
 
 def _settings_from_object(value: object) -> ReminderSettings:
@@ -511,6 +571,13 @@ def _settings_from_object(value: object) -> ReminderSettings:
         inactive_interval_minutes=_object_number(data.get("inactive_interval_minutes")),
         active_enabled=active_enabled,
         active_interval_minutes=_object_number(data.get("active_interval_minutes")),
+        window_enabled=_object_bool(data.get("window_enabled")),
+        window_weekdays=tuple(_object_int_list(data.get("window_weekdays"))),
+        window_start=_object_str(data.get("window_start")),
+        window_end=_object_str(data.get("window_end")),
+        snooze_minutes=_object_number(data.get("snooze_minutes")),
+        idle_enabled=_object_bool(data.get("idle_enabled")),
+        idle_threshold_minutes=_object_number(data.get("idle_threshold_minutes")),
     )
 
 
@@ -588,6 +655,26 @@ def _object_number(value: object) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise AgentRequestError("the agent returned malformed numeric data")
     return float(value)
+
+
+def _optional_number(value: object) -> float | None:
+    if value is None:
+        return None
+    return _object_number(value)
+
+
+def _object_bool(value: object) -> bool:
+    if not isinstance(value, bool):
+        raise AgentRequestError("the agent returned malformed boolean data")
+    return value
+
+
+def _object_int_list(value: object) -> list[int]:
+    if not isinstance(value, list) or any(
+        isinstance(item, bool) or not isinstance(item, int) for item in value
+    ):
+        raise AgentRequestError("the agent returned a malformed integer list")
+    return cast(list[int], value)
 
 
 def _string_list(value: object) -> list[str]:

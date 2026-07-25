@@ -2,7 +2,7 @@ from collections.abc import Callable
 
 import pytest
 
-from time_tracker.application.reminders import Reminder, ReminderKind
+from time_tracker.application.reminders import Reminder, ReminderKind, ReminderReason
 from time_tracker.infrastructure import notifications
 from time_tracker.infrastructure.notifications import (
     NativeNotificationService,
@@ -26,6 +26,8 @@ class FakeDesktopNotifier:
     def __init__(self, *, dispatch: bool) -> None:
         self._backend = object()
         self.dispatch = dispatch
+        self.title = ""
+        self.message = ""
 
     async def request_authorisation(self) -> bool:
         return True
@@ -37,6 +39,8 @@ class FakeDesktopNotifier:
         message: str,
         on_dispatched: Callable[[], None],
     ) -> str:
+        self.title = title
+        self.message = message
         if self.dispatch:
             on_dispatched()
         return f"{title}: {message}"
@@ -69,3 +73,28 @@ async def test_desktop_delivery_callback_confirms_success(
     service = NativeNotificationService()
 
     await service.send(Reminder(ReminderKind.INACTIVE))
+
+
+@pytest.mark.asyncio
+async def test_idle_triggered_notification_identifies_threshold(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeDesktopNotifier(dispatch=True)
+    monkeypatch.setattr(
+        "time_tracker.infrastructure.notifications.sys.platform", "linux"
+    )
+    monkeypatch.setattr(notifications, "DesktopNotifier", lambda **_: fake)
+    service = NativeNotificationService()
+
+    await service.send(
+        Reminder(
+            ReminderKind.ACTIVE,
+            project="Website",
+            activity="Planning",
+            reason=ReminderReason.IDLE,
+            idle_threshold_minutes=15,
+        )
+    )
+
+    assert fake.title == "Still tracking Website / Planning?"
+    assert "idle for at least 15 minutes" in fake.message

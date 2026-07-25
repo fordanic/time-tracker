@@ -22,6 +22,7 @@ from time_tracker.application.exporting import (
     ExportDestinationExistsError,
     ExportService,
 )
+from time_tracker.application.idle import IdleDetectionStatus, IdleDetector
 from time_tracker.application.reminders import Reminder, ReminderIntervals, ReminderKind
 from time_tracker.application.reporting import ReviewFilter
 from time_tracker.application.tracking import TrackingService
@@ -35,6 +36,7 @@ from time_tracker.infrastructure.csv_export import (
     CsvDailySummaryWriter,
     CsvRangeSummaryWriter,
 )
+from time_tracker.infrastructure.idle_detection import create_idle_detector
 from time_tracker.infrastructure.instance_lock import instance_lock
 from time_tracker.infrastructure.ipc import PROTOCOL_VERSION
 from time_tracker.infrastructure.notifications import (
@@ -50,17 +52,27 @@ def serve(
     *,
     notifier: NotificationService | None = None,
     reminder_intervals: ReminderIntervals | None = None,
+    idle_detector: IdleDetector | None = None,
+    idle_poll_seconds: float = 15.0,
 ) -> None:
     """Serve one authenticated foreground connection at a time."""
     paths.prepare()
     with instance_lock(paths.lock):
-        _serve_locked(paths, notifier, reminder_intervals)
+        _serve_locked(
+            paths,
+            notifier,
+            reminder_intervals,
+            idle_detector,
+            idle_poll_seconds,
+        )
 
 
 def _serve_locked(
     paths: AgentPaths,
     notifier: NotificationService | None,
     reminder_intervals: ReminderIntervals | None,
+    idle_detector: IdleDetector | None,
+    idle_poll_seconds: float,
 ) -> None:
     """Own the endpoint and database while the instance lock is held."""
     settings = (
@@ -104,7 +116,9 @@ def _serve_locked(
                 export_service,
                 configuration_service,
                 notification_service,
-                settings.intervals,
+                settings,
+                idle_detector,
+                idle_poll_seconds,
             )
         )
     finally:
@@ -121,10 +135,25 @@ async def _serve_connections(
     export_service: ExportService,
     configuration_service: ConfigurationService,
     notifier: NotificationService,
-    reminder_intervals: ReminderIntervals | None,
+    reminder_settings: ReminderSettings,
+    idle_detector: IdleDetector | None,
+    idle_poll_seconds: float,
 ) -> None:
     """Keep reminder scheduling responsive while IPC and SQLite block in threads."""
-    coordinator = ReminderCoordinator(service, notifier, reminder_intervals)
+    coordinator = ReminderCoordinator(
+        service,
+        notifier,
+        reminder_settings.intervals,
+        window=reminder_settings.window,
+        snooze_seconds=reminder_settings.snooze_seconds,
+        idle_enabled=reminder_settings.idle_enabled,
+        idle_threshold_minutes=reminder_settings.idle_threshold_minutes,
+        idle_detector=idle_detector,
+        idle_detector_factory=(
+            None if idle_detector is not None else create_idle_detector
+        ),
+        idle_poll_seconds=idle_poll_seconds,
+    )
     reminder_task = asyncio.create_task(coordinator.run())
     running = True
     try:
@@ -141,8 +170,9 @@ async def _serve_connections(
                     timer_changed,
                     notification_smoke,
                     active_confirmed,
+                    reminder_snoozed,
                     active_edited,
-                    reloaded_intervals,
+                    reloaded_settings,
                 ) = await asyncio.to_thread(
                     _handle_request,
                     request_bytes,
@@ -150,11 +180,20 @@ async def _serve_connections(
                     export_service,
                     configuration_service,
                     coordinator.pending_reminder(),
+                    coordinator.idle_detection_status(),
                 )
-                if reloaded_intervals is not None:
-                    coordinator.reload_intervals(reloaded_intervals)
+                if reloaded_settings is not None:
+                    coordinator.reload_settings(
+                        reloaded_settings.intervals,
+                        reloaded_settings.window,
+                        reloaded_settings.snooze_seconds,
+                        reloaded_settings.idle_enabled,
+                        reloaded_settings.idle_threshold_minutes,
+                    )
                 if active_confirmed:
                     coordinator.confirm_active()
+                if reminder_snoozed:
+                    coordinator.snooze()
                 if active_edited:
                     edited_active = await asyncio.to_thread(service.get_active)
                     if edited_active is not None:
@@ -191,6 +230,7 @@ def _handle_request(
     export_service: ExportService,
     configuration_service: ConfigurationService,
     pending_reminder: Reminder | None = None,
+    idle_detection_status: IdleDetectionStatus | None = None,
 ) -> tuple[
     dict[str, object],
     bool,
@@ -198,10 +238,11 @@ def _handle_request(
     bool,
     bool,
     bool,
-    ReminderIntervals | None,
+    bool,
+    ReminderSettings | None,
 ]:
     request_id: object = None
-    reloaded_intervals: ReminderIntervals | None = None
+    reloaded_settings: ReminderSettings | None = None
     try:
         decoded: object = json.loads(payload.decode("utf-8"))
         if not isinstance(decoded, dict):
@@ -229,8 +270,12 @@ def _handle_request(
                 pending_reminder is not None
                 and pending_reminder.kind is ReminderKind.ACTIVE
             )
+        elif method == "snooze_reminder":
+            result = pending_reminder is not None
         elif method == "get_configuration":
             result = _settings_dict(configuration_service.get())
+        elif method == "get_idle_detection_status":
+            result = asdict(idle_detection_status or IdleDetectionStatus(False))
         elif method == "save_configuration":
             settings = configuration_service.save(
                 ReminderSettings(
@@ -242,10 +287,19 @@ def _handle_request(
                     active_interval_minutes=_required_number(
                         params, "active_interval_minutes"
                     ),
+                    window_enabled=_required_bool(params, "window_enabled"),
+                    window_weekdays=_required_int_tuple(params, "window_weekdays"),
+                    window_start=_required_str(params, "window_start"),
+                    window_end=_required_str(params, "window_end"),
+                    snooze_minutes=_required_number(params, "snooze_minutes"),
+                    idle_enabled=_required_bool(params, "idle_enabled"),
+                    idle_threshold_minutes=_required_number(
+                        params, "idle_threshold_minutes"
+                    ),
                 )
             )
             result = _settings_dict(settings)
-            reloaded_intervals = settings.intervals
+            reloaded_settings = settings
         elif method == "list_projects":
             result = service.list_projects()
         elif method == "list_activities":
@@ -370,6 +424,7 @@ def _handle_request(
                 False,
                 False,
                 False,
+                False,
                 None,
             )
         else:
@@ -383,8 +438,9 @@ def _handle_request(
             method in {"start", "stop"},
             method == "notification_smoke",
             method == "confirm_active_reminder" and result is True,
+            method == "snooze_reminder" and result is True,
             method == "edit_active",
-            reloaded_intervals,
+            reloaded_settings,
         )
     except ExportDestinationExistsError as error:
         return (
@@ -393,6 +449,7 @@ def _handle_request(
                 "error": {"code": "destination_exists", "message": str(error)},
             },
             True,
+            False,
             False,
             False,
             False,
@@ -406,6 +463,7 @@ def _handle_request(
                 "error": {"code": "invalid_request", "message": str(error)},
             },
             True,
+            False,
             False,
             False,
             False,
@@ -431,6 +489,8 @@ def _reminder_dict(reminder: Reminder | None) -> object:
         "kind": reminder.kind.value,
         "project": reminder.project,
         "activity": reminder.activity,
+        "reason": reminder.reason.value,
+        "idle_threshold_minutes": reminder.idle_threshold_minutes,
     }
 
 
@@ -466,6 +526,15 @@ def _required_int(params: dict[str, object], name: str) -> int:
     if not isinstance(value, int):
         raise ValueError(f"{name} must be an integer")
     return value
+
+
+def _required_int_tuple(params: dict[str, object], name: str) -> tuple[int, ...]:
+    value = params.get(name)
+    if not isinstance(value, list) or any(
+        isinstance(item, bool) or not isinstance(item, int) for item in value
+    ):
+        raise ValueError(f"{name} must be an integer array")
+    return tuple(value)
 
 
 def _required_number(params: dict[str, object], name: str) -> float:

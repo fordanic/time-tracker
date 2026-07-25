@@ -4,7 +4,10 @@ __pycache__/
 *.egg-info/
 .mypy_cache/
 .pytest_cache/
+.pyinstaller-cache/
 .ruff_cache/
+.uv-cache/
+.uv-python/
 .venv/
 
 # Coverage and build output

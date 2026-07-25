@@ -160,8 +160,10 @@ delivery fails or the TUI disconnects.
   failure leaves the prior file and live schedule unchanged.
 - The optional TOML file has one `[reminders]` table with independent
   `inactive_enabled`/`active_enabled` booleans and positive
-  `inactive_interval_minutes`/`active_interval_minutes` numbers. Configuration is
-  loaded when the background process starts. A successful agent-owned TUI save
+  `inactive_interval_minutes`/`active_interval_minutes` numbers, an optional
+  weekly local-time delivery window, a positive snooze duration, and independent
+  opt-in idle-reminder state with a positive threshold in minutes. Configuration
+  is loaded when the background process starts. A successful agent-owned TUI save
   reloads it immediately, clears a prompt created by the replaced schedule, and
   resets the current timer state's monotonic deadline from the save time.
 - Use `platformdirs` for per-user configuration, data, state, runtime, and log
@@ -182,6 +184,23 @@ delivery fails or the TUI disconnects.
   resets the relevant deadline, as does explicit confirmation of an active
   reminder; closing the TUI does not affect it. The default schedule is five
   minutes without a timer and 30 minutes with one.
+- Optional idle-triggered active reminders use an agent-owned poller and a narrow,
+  injected operating-system adapter that reports only elapsed local input-idle
+  duration. The adapter never exposes input content. Detector state is advisory
+  and in memory, may request the existing active-reminder channel early, and
+  cannot mutate persisted timer state. Adapter failure leaves normal reminder
+  scheduling and authoritative timer state unchanged. Polling occurs at most every
+  15 seconds only while the feature and a timer are active. macOS uses Core
+  Graphics combined-session idle duration, Windows uses `GetLastInputInfo`, and
+  supported interactive Linux X11 sessions use the XScreenSaver extension;
+  unsupported sessions expose the feature as unavailable.
+- An application reminder-window policy uses the agent's local aware wall clock
+  only to decide whether a due monotonic deadline may be presented and to find the
+  next weekly opening. It supports same-day and overnight windows and suppresses
+  catch-up bursts. Snooze is agent-owned in-memory state that replaces the current
+  deadline without changing timer or configuration; timer transitions, active
+  confirmation, settings reload, and process restart reset the normal interval,
+  while active-detail edits preserve the deadline.
 - Build with PyInstaller on the target OS; it is not used for cross-compilation.
 - Linux and Windows builds are one-file executables. macOS builds are ad-hoc-signed
   `.app` bundles, with the TUI executable inside the bundle.

@@ -95,16 +95,29 @@ minute intervals. Saving atomically replaces the human-readable TOML
 configuration, applies the new schedule without restarting the background
 process, clears any prompt from the replaced schedule, and preserves disabled
 interval values for later re-enabling.
+An optional shared weekly local-time window suppresses both reminder kinds until
+the next selected opening. Any pending reminder can be snoozed for the configured
+duration with its button or `F12` without changing timer state; snooze is
+in-memory and timer transitions, confirmation, settings reload, or agent restart
+restore the normal interval.
+Optional local input-idle detection can request the existing active reminder
+early after 15 minutes by default, including when periodic active reminders are
+disabled. It observes only an operating-system idle duration, never input
+content, and never changes tracked time automatically. The prompt can be
+confirmed, snoozed, or followed by an explicit Stop; unwanted idle time remains
+correctable in Review.
 
 The CI workflow is configured to build and exercise the packaged lifecycle on
 Linux, Windows, and macOS. A local macOS arm64 app-bundle lifecycle and
-Notification Center dispatch were validated on July 19, 2026.
+Notification Center dispatch were validated on July 19, 2026. The macOS Core
+Graphics idle-duration adapter was validated interactively on July 22, 2026.
 
 Known outstanding validation:
 
 - run the updated packaged-lifecycle workflow successfully on Linux and Windows;
 - run the native-notification smoke on interactive Linux and Windows desktops;
-  and
+- validate idle-duration detection on supported interactive Linux X11 and
+  Windows desktop sessions; and
 - record any additional unmet acceptance criteria here when identified.
 
 ## Development
@@ -124,6 +137,13 @@ make run
 make check
 make build
 ```
+
+Make stores uv's disposable package cache and managed Python installations in the
+ignored repository-local `.uv-cache/` and `.uv-python/` directories so commands
+do not depend on write access to global user locations. PyInstaller similarly
+uses `.pyinstaller-cache/`. Make also removes an unusable generated `.venv`
+before syncing. Set `UV_CACHE_DIR`, `UV_PYTHON_INSTALL_DIR`, or
+`PYINSTALLER_CONFIG_DIR` explicitly to override those locations.
 
 `make build` creates a native package for the current operating system in
 `dist/`. Linux and Windows use one-file executables. macOS uses an ad-hoc-signed
@@ -163,7 +183,8 @@ same views can be selected from the tab row. Track owns timer capture and recent
 activities; Review owns history, summaries, and CSV export; Manage owns archive
 actions; and Settings edits the TOML-backed reminder configuration and applies it
 live. The active timer and any pending reminder stay visible while moving between
-them. `F5` through `F11` retain their documented actions from every view.
+them. `F5` through `F11` retain their documented actions from every view, and
+`F12` snoozes any pending reminder.
 
 In Review (`F2`), completed time is grouped by local date with compact `HH:MM`
 times and a total after each day. An entry crossing midnight has one display
@@ -217,17 +238,23 @@ every view and use the Manage inputs.
 
 When a reminder becomes due while the TUI is connected, it appears below the
 active timer. For an active timer, press its button or `F10` to confirm that it is
-still active and restart the configured interval. Taking no action leaves the
+still active and restart the configured interval. Press Snooze or `F12` on either
+reminder kind to defer it by the configured duration. Taking no action leaves the
 timer running; use Stop or `F6` when the timer should end.
 
 ## Configuration
 
-Use Settings (`F4`) to enable or disable each reminder independently and edit its
-positive interval in minutes. Saving creates or atomically replaces the optional
-TOML file and applies the schedule immediately; no background-process restart is
-needed. Run `uv run time-tracker --config-path` to locate the same user-editable
-file. When it does not exist, both reminders use their built-in defaults. The
-complete supported configuration is:
+Use Settings (`F4`) to enable or disable each reminder independently, edit its
+positive interval in minutes, optionally restrict delivery to selected local
+weekdays and `HH:MM` hours, choose a positive snooze duration, and optionally
+enable an idle-triggered active reminder with a positive threshold. Settings
+reports whether idle detection is available in the current platform session. An
+end earlier than the start makes an overnight window. Saving creates or
+atomically replaces the optional TOML file and applies the schedule immediately;
+no background-process restart is needed. Run `uv run time-tracker --config-path` to
+locate the same user-editable file. When it does not exist, both reminders use
+their built-in defaults and the window is disabled. The complete supported
+configuration is:
 
 ```toml
 [reminders]
@@ -235,9 +262,24 @@ inactive_enabled = true
 inactive_interval_minutes = 5
 active_enabled = true
 active_interval_minutes = 30
+window_enabled = false
+window_weekdays = [0, 1, 2, 3, 4]
+window_start = "09:00"
+window_end = "17:00"
+snooze_minutes = 10
+idle_enabled = false
+idle_threshold_minutes = 15
 ```
 
 Each reminder can be disabled independently. Intervals must be positive numbers.
+Weekdays use Monday `0` through Sunday `6`; values must be unique, and start and
+end must differ. Snoozing clears the current prompt and defers the next reminder
+without modifying the timer or recurring interval.
+Idle detection polls only while enabled and a timer is active. It requests the
+same active reminder early, honors the weekly delivery window, and remains
+available when the periodic active reminder is disabled. A detector failure
+leaves timer and normal reminder state unchanged and is shown as unavailable in
+Settings.
 Direct edits made outside the TUI still require restarting the background process
 with `uv run time-tracker --stop-agent`, then reopening the TUI. Invalid TOML,
 unknown keys, and invalid values are reported without changing the file.

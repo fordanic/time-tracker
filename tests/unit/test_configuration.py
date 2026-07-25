@@ -57,6 +57,8 @@ active_interval_minutes = 12
         "[reminders]\nactive_enabled = 1",
         "[reminders]\ninactive_interval_minutes = 0",
         "[reminders]\nactive_interval_minutes = true",
+        "[reminders]\nidle_enabled = 1",
+        "[reminders]\nidle_threshold_minutes = 0",
         "[reminders]\nactve_enabled = false",
     ],
 )
@@ -82,6 +84,13 @@ def test_configuration_store_atomically_replaces_complete_toml(tmp_path: Path) -
         inactive_interval_minutes=2.5,
         active_enabled=True,
         active_interval_minutes=12,
+        window_enabled=True,
+        window_weekdays=(0, 2, 4),
+        window_start="08:30",
+        window_end="18:15",
+        snooze_minutes=7.5,
+        idle_enabled=True,
+        idle_threshold_minutes=22.5,
     )
 
     TomlConfigurationStore(path).save(settings)
@@ -93,6 +102,13 @@ def test_configuration_store_atomically_replaces_complete_toml(tmp_path: Path) -
         "inactive_interval_minutes = 2.5\n"
         "active_enabled = true\n"
         "active_interval_minutes = 12\n"
+        "window_enabled = true\n"
+        "window_weekdays = [0, 2, 4]\n"
+        'window_start = "08:30"\n'
+        'window_end = "18:15"\n'
+        "snooze_minutes = 7.5\n"
+        "idle_enabled = true\n"
+        "idle_threshold_minutes = 22.5\n"
     )
     assert list(tmp_path.glob(".config.toml.*.tmp")) == []
 
@@ -118,3 +134,22 @@ def test_reminder_settings_reject_non_positive_or_non_finite_values(
 ) -> None:
     with pytest.raises(ValueError, match="positive finite"):
         ReminderSettings(active_interval_minutes=value)
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"window_weekdays": ()}, "weekdays"),
+        ({"window_weekdays": (0, 0)}, "unique"),
+        ({"window_weekdays": (7,)}, "between"),
+        ({"window_start": "9:00"}, "HH:MM"),
+        ({"window_end": "09:00", "window_start": "09:00"}, "differ"),
+        ({"snooze_minutes": 0}, "positive finite"),
+        ({"idle_threshold_minutes": 0}, "positive finite"),
+    ],
+)
+def test_reminder_settings_reject_invalid_window_or_snooze(
+    changes: dict[str, object], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        ReminderSettings(**changes)  # type: ignore[arg-type]

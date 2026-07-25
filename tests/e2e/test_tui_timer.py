@@ -36,6 +36,17 @@ class SilentNotifier:
         """Accept test reminders without contacting the host desktop."""
 
 
+class MonotonicIdleDetector:
+    def __init__(self) -> None:
+        self.reset()
+
+    def reset(self) -> None:
+        self._started = time.monotonic()
+
+    def idle_seconds(self) -> float:
+        return time.monotonic() - self._started
+
+
 @pytest.mark.asyncio
 async def test_user_starts_recovers_and_stops_a_persisted_timer(
     tmp_path: Path,
@@ -316,7 +327,9 @@ async def test_rejected_second_archive_invocation_clears_confirmation(
 
 
 @pytest.mark.asyncio
-async def test_user_confirms_an_active_reminder_from_the_tui(tmp_path: Path) -> None:
+async def test_user_snoozes_and_confirms_an_active_reminder_from_the_tui(
+    tmp_path: Path,
+) -> None:
     paths = AgentPaths.in_directory(tmp_path)
     thread = threading.Thread(
         target=serve,
@@ -332,6 +345,13 @@ async def test_user_confirms_an_active_reminder_from_the_tui(tmp_path: Path) -> 
     _wait_until_ready(client)
 
     try:
+        client.save_configuration(
+            ReminderSettings(
+                inactive_enabled=False,
+                active_interval_minutes=0.004,
+                snooze_minutes=0.001,
+            )
+        )
         started = client.start("Reminder", "Interaction")
         _wait_for_pending_reminder(client, ReminderKind.ACTIVE)
 
@@ -341,12 +361,79 @@ async def test_user_confirms_an_active_reminder_from_the_tui(tmp_path: Path) -> 
             prompt = str(app.query_one("#reminder-message", Static).render())
             assert "Still tracking Reminder / Interaction?" in prompt
 
+            await pilot.press("f12")
+            await pilot.pause()
+
+            assert "Reminder snoozed" in str(app.query_one("#message", Static).render())
+            assert app.pending_reminder is None
+            assert client.get_active() == started
+
+            _wait_for_pending_reminder(client, ReminderKind.ACTIVE)
+            await app._refresh_reminder()
+            await pilot.pause()
             assert await pilot.click("#confirm-active-reminder-button")
             await pilot.pause()
 
             assert "interval restarted" in str(
                 app.query_one("#message", Static).render()
             )
+            assert app.pending_reminder is None
+            assert client.get_active() == started
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+
+
+@pytest.mark.asyncio
+async def test_tui_identifies_idle_triggered_active_reminder(tmp_path: Path) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    detector = MonotonicIdleDetector()
+    thread = threading.Thread(
+        target=serve,
+        args=(paths,),
+        kwargs={
+            "notifier": SilentNotifier(),
+            "idle_detector": detector,
+            "idle_poll_seconds": 0.01,
+        },
+        daemon=True,
+    )
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        client.save_configuration(
+            ReminderSettings(
+                inactive_enabled=False,
+                active_enabled=False,
+                idle_enabled=True,
+                idle_threshold_minutes=0.001,
+            )
+        )
+        started = client.start("Idle", "TUI")
+        detector.reset()
+        _wait_for_pending_reminder(client, ReminderKind.ACTIVE)
+
+        app = TimeTrackerApp(client)
+        async with app.run_test() as pilot:
+            await _wait_for_ui(
+                pilot,
+                lambda: (
+                    "computer was idle"
+                    in str(app.query_one("#reminder-message", Static).render())
+                ),
+                "idle reminder was not rendered",
+            )
+            prompt = str(app.query_one("#reminder-message", Static).render())
+            assert "at least 0.001 minutes" in prompt
+            assert "use Review to remove idle time" in prompt
+
+            await pilot.press("f10")
+            await pilot.pause()
+
             assert app.pending_reminder is None
             assert client.get_active() == started
     finally:
@@ -1060,7 +1147,14 @@ async def test_user_edits_and_live_applies_reminder_settings(tmp_path: Path) -> 
             app.query_one("#inactive-reminder-minutes", Input).value = "2.5"
             app.query_one("#active-reminders-enabled", Switch).value = True
             app.query_one("#active-reminder-minutes", Input).value = "12"
-            assert await pilot.click("#save-settings-button")
+            app.query_one("#reminder-window-enabled", Switch).value = True
+            app.query_one("#reminder-window-weekdays", Input).value = "Mon,Wed,Fri"
+            app.query_one("#reminder-window-start", Input).value = "08:30"
+            app.query_one("#reminder-window-end", Input).value = "18:00"
+            app.query_one("#reminder-snooze-minutes", Input).value = "7.5"
+            app.query_one("#idle-reminders-enabled", Switch).value = True
+            app.query_one("#idle-reminder-minutes", Input).value = "22.5"
+            app.query_one("#save-settings-button", Button).press()
             await pilot.pause()
 
             expected = ReminderSettings(
@@ -1068,6 +1162,13 @@ async def test_user_edits_and_live_applies_reminder_settings(tmp_path: Path) -> 
                 inactive_interval_minutes=2.5,
                 active_enabled=True,
                 active_interval_minutes=12,
+                window_enabled=True,
+                window_weekdays=(0, 2, 4),
+                window_start="08:30",
+                window_end="18:00",
+                snooze_minutes=7.5,
+                idle_enabled=True,
+                idle_threshold_minutes=22.5,
             )
             assert client.get_configuration() == expected
             assert load_config(paths.config).reminder_settings == expected
@@ -1093,6 +1194,16 @@ async def test_user_edits_and_live_applies_reminder_settings(tmp_path: Path) -> 
                 "2.5"
             )
             assert reopened.query_one("#active-reminder-minutes", Input).value == "12"
+            assert (
+                reopened.query_one("#reminder-window-weekdays", Input).value
+                == "Mon,Wed,Fri"
+            )
+            assert reopened.query_one("#reminder-snooze-minutes", Input).value == "7.5"
+            assert reopened.query_one("#idle-reminders-enabled", Switch).value is True
+            assert reopened.query_one("#idle-reminder-minutes", Input).value == "22.5"
+            assert "Idle detection:" in str(
+                reopened.query_one("#idle-status", Static).render()
+            )
     finally:
         client.shutdown()
         thread.join(timeout=2)
