@@ -41,7 +41,7 @@ settings.
 
 The roadmap is a product recommendation, not a requirements source. Before
 implementing a selected slice, define its behavior in
-[Feature Requirements](feature-requirements.md). Those requirements must conform
+[Feature Requirements](feature-requirements/README.md). Those requirements must conform
 to the authoritative [Top-Level Requirements](top-level-requirements.md) and
 [Architecture](architecture.md). Preserve the architectural rules that the
 background process is the single database writer, transitions are persisted

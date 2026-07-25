@@ -1,8 +1,9 @@
 # Releases
 
-Time Tracker release candidates and final releases are built and published from
-development machines. The process does not use GitHub Actions, so it remains
-available when hosted Actions minutes are exhausted.
+Time Tracker release candidates and final releases are built, validated, and
+published by the manually dispatched GitHub Actions release workflow. Development
+machines prepare and review the version change; they do not build or upload the
+official release artifacts.
 
 ## Version policy
 
@@ -15,21 +16,63 @@ names, and the Git tag all derive from it.
 - Git tag: `v<version>`, for example `v0.2.0rc1`
 
 Increment `N` for another candidate of the same intended final release. A final
-release is a new version commit without the `rcN` suffix; it is rebuilt rather
-than relabeling candidate binaries.
+release is a new version commit without the `rcN` suffix; candidate binaries are
+never relabeled.
 
-## Prerequisites
+## Prepare a version
 
-- Install `uv`, GNU Make, Git, and GitHub CLI (`gh`).
-- Authenticate GitHub CLI with an account allowed to publish this repository:
+From a branch based on current `main`, set the candidate or final version:
 
-  ```shell
-  gh auth login
-  gh auth status
-  ```
+```shell
+make set-version VERSION=0.2.0rc1
+```
 
-- Build on the target operating system. PyInstaller does not cross-compile.
-- Start from a clean checkout of the same version commit on every target machine.
+This validates the value, updates the canonical source, and refreshes `uv.lock`
+for the dynamic project metadata. Review the changes, run `make check`, commit
+them, and merge them through the normal review process. Do not create, move, or
+reuse the version tag manually.
+
+The release workflow must run against the reviewed version commit on `main`.
+
+## Run the GitHub release workflow
+
+1. Open the repository's **Actions** page and choose **Release**.
+2. Select **Run workflow** and use `main` at the reviewed version commit.
+3. Enter the exact canonical version, such as `0.2.0rc1`.
+4. Choose **candidate** for an `rc` version or **final** for a version without an
+   `rc` suffix.
+5. Start the workflow and review every job before treating the release as
+   published.
+
+The same operation can be dispatched with GitHub CLI:
+
+```shell
+gh workflow run release.yml \
+  --ref main \
+  -f version=0.2.0rc1 \
+  -f release_kind=candidate
+```
+
+The workflow rejects an expected version that differs from the canonical version
+in the selected commit and rejects a candidate/final choice that does not match
+the version form.
+
+## Build and publication behavior
+
+The workflow runs the complete formatting, lint, type, unit, integration, and
+end-to-end checks on Linux, Windows, and macOS. Each platform then:
+
+1. builds its native PyInstaller package;
+2. exercises the complete packaged timer lifecycle;
+3. verifies the frozen executable reports the canonical version; and
+4. creates a versioned archive and SHA-256 checksum.
+
+Only after all three platform jobs succeed does the publication job receive
+write access. It verifies every checksum, creates an annotated `v<version>` tag
+at the workflow commit, and publishes all platform assets in one GitHub release.
+A candidate becomes a visible prerelease; a final version becomes a visible
+non-prerelease release. GitHub generates the release notes from repository
+history.
 
 The current native formats are:
 
@@ -43,65 +86,18 @@ Asset names contain the version, operating system, and normalized architecture,
 for example `time-tracker-0.2.0rc1-macos-arm64.zip`. Every archive has an adjacent
 `.sha256` file containing its digest and filename.
 
-## Prepare a version
+## Failure and rerun behavior
 
-Set the candidate or final version:
+No tag or release is created when a validation, test, build, smoke, version, or
+packaging step fails.
 
-```shell
-make set-version VERSION=0.2.0rc1
-```
+The workflow stops publication when an existing tag points to another commit, is
+not annotated, or the existing release has the wrong candidate/final state.
+Runs for the same version are serialized. Re-running a partially completed
+publication at the same commit reuses the correct tag and release, preserves
+existing assets, and uploads only missing asset names.
 
-This validates the value, updates the canonical source, and refreshes `uv.lock`
-for the dynamic project metadata. Review and commit any changed files before
-publication. Do not move or reuse an existing version tag.
-
-To build without publishing:
-
-```shell
-make release-artifact
-```
-
-That command synchronizes the locked environment, runs all formatting, lint,
-type, unit, integration, and end-to-end checks, builds the native package, runs
-the packaged lifecycle smoke, verifies its `--version` output, and writes the
-archive and checksum under `dist/release/`.
-
-## Publish a release candidate
-
-On the first target machine at the clean version commit, run:
-
-```shell
-make publish-release-candidate
-```
-
-The command repeats the complete local validation, creates annotated tag
-`v<version>` when needed, pushes it, and publishes a visible GitHub prerelease
-with generated notes and the local target's archive and checksum.
-
-On each other target operating system, check out the exact same tagged commit and
-run the same command. It verifies the existing tag and prerelease before
-uploading that platform's differently named assets. Existing asset names are not
-overwritten.
-
-## Publish a final release
-
-Set and commit the final version, then run on each target platform:
-
-```shell
-make set-version VERSION=0.2.0
-make publish-release
-```
-
-The first publication creates the annotated final tag and visible non-prerelease
-GitHub release. Later target machines add their validated assets to it.
-
-Publication stops before changing Git or GitHub when the version kind is wrong,
-the checkout is dirty, an existing tag identifies another commit, the frozen
-version differs, or an archive/checksum is invalid. GitHub CLI authentication is
-checked before a local tag is created. If publication is interrupted after the
-correct tag or release exists, rerun the same command at the same commit to
-continue.
-
-The hosted check workflow is limited to branch and pull-request events; version
-tag pushes do not dispatch it. Hosted CI remains useful when capacity is
-available, but it is not a release prerequisite.
+For local troubleshooting, `make release-artifact` runs the same checks, native
+build, packaged smoke, archive, and checksum steps for the current operating
+system. Its output is diagnostic only; official assets are always produced by
+the GitHub release workflow.
