@@ -1,7 +1,7 @@
 # Agent Guidance
 
 Before changing the repository, read `README.md`,
-`docs/top-level-requirements.md`, `docs/feature-requirements.md`, and
+`docs/top-level-requirements.md`, `docs/feature-requirements/README.md`, and
 `docs/architecture.md`. Before committing, follow `docs/commits.md`.
 
 The top-level requirements document is authoritative for durable product behavior
@@ -16,7 +16,7 @@ Use the `README.md` Status section as the source of truth for current
 implementation and validation status. Close the recorded validation gaps while
 beginning the TUI work described in `docs/competitive-assessment.md`. Before
 implementing a selected roadmap slice, define its behavior and acceptance
-criteria in `docs/feature-requirements.md`. Update
+criteria in an individual file under `docs/feature-requirements/`. Update
 `docs/top-level-requirements.md` when a top-level product rule or boundary changes
 and `docs/architecture.md` when a technical choice or boundary changes.
 

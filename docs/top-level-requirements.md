@@ -8,7 +8,7 @@ Architecture defines the authoritative technical choices and boundaries.
 The [competitive assessment and TUI roadmap](competitive-assessment.md) is
 planning input, not a requirements source. When a roadmap candidate is selected
 for implementation, define its additional behavior and acceptance criteria in
-[Feature Requirements](feature-requirements.md). Feature requirements are
+[Feature Requirements](feature-requirements/README.md). Feature requirements are
 subordinate to this document and Architecture and cannot override either one. If
 a feature changes a top-level product requirement or an architectural boundary,
 update the corresponding authoritative document in the same change.
@@ -225,7 +225,7 @@ Automated tests and platform validation must demonstrate that:
    destroying the file.
 
 Keep acceptance criteria for top-level behavior here. Feature-specific acceptance
-criteria belong in [Feature Requirements](feature-requirements.md). A feature is
+criteria belong in [Feature Requirements](feature-requirements/README.md). A feature is
 not complete until its relevant automated and platform checks pass.
 
 ## Product boundaries
@@ -240,11 +240,11 @@ The following are not part of the current product direction:
 - Screenshots, GPS tracking, and employee-surveillance features.
 
 Native release-candidate and final-release downloads may be published on GitHub
-after local target-platform validation. Installers, package-manager publishing,
-and automatic updates are not currently required.
+after automated target-platform validation in the release workflow. Installers,
+package-manager publishing, and automatic updates are not currently required.
 
 Features absent from this list are not automatically approved. Record approved
-additional feature behavior in [Feature Requirements](feature-requirements.md)
+additional feature behavior in [Feature Requirements](feature-requirements/README.md)
 before implementation. Update this document first, or in the same change, when a
 feature changes a top-level requirement.
 
