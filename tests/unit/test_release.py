@@ -178,61 +178,34 @@ def test_packaging_rejects_a_mismatched_frozen_version(tmp_path: Path) -> None:
         )
 
 
-def test_publication_kind_must_match_version() -> None:
+def test_release_kind_must_match_version() -> None:
     with pytest.raises(release.ReleaseError, match="final version"):
-        release.validate_publish_kind(release.parse_version("1.2.3"), "candidate")
+        release.validate_release_kind(release.parse_version("1.2.3"), "candidate")
     with pytest.raises(release.ReleaseError, match="release candidate"):
-        release.validate_publish_kind(release.parse_version("1.2.3rc1"), "final")
+        release.validate_release_kind(release.parse_version("1.2.3rc1"), "final")
 
 
-def test_publication_requires_clean_checkout() -> None:
-    release.require_clean_status("")
-
-    with pytest.raises(release.ReleaseError, match="clean Git checkout"):
-        release.require_clean_status(" M README.md\n")
-
-
-def test_existing_tag_must_identify_current_commit() -> None:
-    release.require_matching_tag(
-        "v1.2.3",
-        head_commit="abc123",
-        tag_commit=None,
-    )
-    release.require_matching_tag(
-        "v1.2.3",
-        head_commit="abc123",
-        tag_commit="abc123",
+def test_release_request_matches_canonical_version_and_kind() -> None:
+    release.validate_release_request(
+        release.parse_version("1.2.3rc2"),
+        "candidate",
+        "1.2.3rc2",
     )
 
-    with pytest.raises(release.ReleaseError, match="not current commit"):
-        release.require_matching_tag(
-            "v1.2.3",
-            head_commit="abc123",
-            tag_commit="def456",
+
+def test_release_request_rejects_another_expected_version() -> None:
+    with pytest.raises(release.ReleaseError, match="workflow requested"):
+        release.validate_release_request(
+            release.parse_version("1.2.3rc2"),
+            "candidate",
+            "1.2.3rc3",
         )
 
 
-def test_existing_tag_must_be_annotated() -> None:
-    release.require_annotated_tag("v1.2.3", annotated=True)
-
-    with pytest.raises(release.ReleaseError, match="not an annotated tag"):
-        release.require_annotated_tag("v1.2.3", annotated=False)
-
-
-def test_remote_tag_listing_prefers_annotated_tag_commit() -> None:
-    output = (
-        "111111 refs/tags/v1.2.3\n222222 refs/tags/v1.2.3^{}\n333333 refs/tags/v9.9.9\n"
-    )
-
-    assert release.remote_tag_reference_from_ls_remote(
-        output,
-        "v1.2.3",
-    ) == release.TagReference(commit="222222", annotated=True)
-    assert release.remote_tag_reference_from_ls_remote("", "v1.2.3") is None
-
-
-def test_remote_tag_listing_identifies_a_lightweight_tag() -> None:
-    assert release.remote_tag_reference_from_ls_remote(
-        "111111 refs/tags/v1.2.3\n",
-        "v1.2.3",
-    ) == release.TagReference(commit="111111", annotated=False)
+def test_release_request_rejects_malformed_expected_version() -> None:
+    with pytest.raises(release.ReleaseError, match="version must be"):
+        release.validate_release_request(
+            release.parse_version("1.2.3rc2"),
+            "candidate",
+            "v1.2.3rc2",
+        )

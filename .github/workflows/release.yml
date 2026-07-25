@@ -1,0 +1,208 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Canonical version in the selected commit
+        required: true
+        type: string
+      release_kind:
+        description: Publish as a release candidate or final release
+        required: true
+        type: choice
+        options:
+          - candidate
+          - final
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate release request
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.metadata.outputs.tag }}
+      version: ${{ steps.metadata.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8
+        with:
+          enable-cache: true
+          python-version: "3.14"
+      - run: uv sync --all-groups --locked
+      - name: Require the main branch
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Releases must be dispatched from main, not $GITHUB_REF" >&2
+          exit 1
+      - name: Validate version and release kind
+        env:
+          EXPECTED_VERSION: ${{ inputs.version }}
+          RELEASE_KIND: ${{ inputs.release_kind }}
+        run: >-
+          uv run python scripts/release.py validate
+          "$RELEASE_KIND" "$EXPECTED_VERSION"
+      - name: Resolve release metadata
+        id: metadata
+        shell: bash
+        run: |
+          version="$(uv run python scripts/release.py version)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: ${{ matrix.os }} / Python 3.14
+    needs: validate
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8
+        with:
+          enable-cache: true
+          python-version: "3.14"
+      - run: uv sync --all-groups --locked
+      - run: uv run ruff format --check .
+      - run: uv run ruff check .
+      - run: uv run mypy
+      - run: uv run pytest
+      - run: uv run python scripts/build.py
+      - run: uv run python scripts/run_packaged_smoke.py
+      - run: uv run python scripts/release.py package
+      - uses: actions/upload-artifact@v6
+        with:
+          name: release-${{ matrix.os }}
+          path: dist/release/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub release
+    needs: [validate, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: release-*
+          path: dist/release
+          merge-multiple: true
+      - name: Verify release assets
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          shopt -s nullglob
+          archives=(dist/release/time-tracker-"$VERSION"-*)
+          if [[ "${#archives[@]}" -ne 6 ]]; then
+            echo "expected three release archives and three checksums, found ${#archives[@]}" >&2
+            exit 1
+          fi
+          for operating_system in linux windows macos; do
+            platform_assets=(dist/release/time-tracker-"$VERSION"-"$operating_system"-*)
+            if [[ "${#platform_assets[@]}" -ne 2 ]]; then
+              echo "expected one archive and checksum for $operating_system" >&2
+              exit 1
+            fi
+          done
+          (
+            cd dist/release
+            sha256sum --check ./*.sha256
+          )
+      - name: Create or verify annotated tag
+        shell: bash
+        env:
+          RELEASE_COMMIT: ${{ github.sha }}
+          TAG: ${{ needs.validate.outputs.tag }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          git fetch --force --tags origin
+          if git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
+            tag_commit="$(git rev-list -n 1 "$TAG")"
+            if [[ "$tag_commit" != "$RELEASE_COMMIT" ]]; then
+              echo "$TAG points to $tag_commit, not $RELEASE_COMMIT" >&2
+              exit 1
+            fi
+            if [[ "$(git cat-file -t "refs/tags/$TAG")" != "tag" ]]; then
+              echo "$TAG is not an annotated tag" >&2
+              exit 1
+            fi
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag --annotate "$TAG" "$RELEASE_COMMIT" \
+              --message "Time Tracker $VERSION"
+            git push origin "refs/tags/$TAG"
+          fi
+      - name: Create or resume GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_KIND: ${{ inputs.release_kind }}
+          TAG: ${{ needs.validate.outputs.tag }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          metadata="$RUNNER_TEMP/release.json"
+          error_output="$RUNNER_TEMP/release-error.txt"
+          if ! gh release view "$TAG" \
+            --json assets,isDraft,isPrerelease,tagName \
+            >"$metadata" 2>"$error_output"; then
+            if ! grep -qi "release not found" "$error_output"; then
+              cat "$error_output" >&2
+              exit 1
+            fi
+            create_arguments=(
+              release create "$TAG"
+              --draft
+              --verify-tag
+              --title "Time Tracker $VERSION"
+              --generate-notes
+            )
+            if [[ "$RELEASE_KIND" == "candidate" ]]; then
+              create_arguments+=(--prerelease)
+            fi
+            gh "${create_arguments[@]}"
+            gh release view "$TAG" \
+              --json assets,isDraft,isPrerelease,tagName \
+              >"$metadata"
+          fi
+          if [[ "$(jq -r '.tagName' "$metadata")" != "$TAG" ]]; then
+            echo "GitHub returned another tag for $TAG" >&2
+            exit 1
+          fi
+          expected_prerelease=false
+          if [[ "$RELEASE_KIND" == "candidate" ]]; then
+            expected_prerelease=true
+          fi
+          if [[ "$(jq -r '.isPrerelease' "$metadata")" != "$expected_prerelease" ]]; then
+            echo "GitHub release $TAG has the wrong prerelease state" >&2
+            exit 1
+          fi
+          for asset in dist/release/*; do
+            asset_name="$(basename "$asset")"
+            if jq -e --arg name "$asset_name" \
+              '.assets | any(.name == $name)' "$metadata" >/dev/null; then
+              echo "Preserving existing release asset $asset_name"
+            else
+              gh release upload "$TAG" "$asset"
+            fi
+          done
+          if [[ "$(jq -r '.isDraft' "$metadata")" == "true" ]]; then
+            gh release edit "$TAG" --draft=false
+          fi

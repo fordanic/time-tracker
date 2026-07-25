@@ -1,10 +1,9 @@
-"""Build and publish versioned native Time Tracker releases locally."""
+"""Prepare and package versioned native Time Tracker releases."""
 
 from __future__ import annotations
 
 import argparse
 import hashlib
-import json
 import os
 import platform
 import re
@@ -24,7 +23,7 @@ VERSION_PATTERN = re.compile(
     r"(?:rc(?P<candidate>[1-9]\d*))?$"
 )
 VERSION_ASSIGNMENT_PATTERN = re.compile(r'(?m)^__version__ = "(?P<version>[^"]+)"$')
-PublishKind = Literal["candidate", "final"]
+ReleaseKind = Literal["candidate", "final"]
 PackagedVersionReader = Callable[[Path], str]
 LockRefresher = Callable[[str, Path], None]
 
@@ -60,14 +59,6 @@ class Artifact:
     checksum: Path
     operating_system: str
     architecture: str
-
-
-@dataclass(frozen=True)
-class TagReference:
-    """A resolved Git tag and whether it is an annotated tag object."""
-
-    commit: str
-    annotated: bool
 
 
 def parse_version(value: str) -> AppVersion:
@@ -337,249 +328,35 @@ def validate_checksum(artifact: Artifact) -> None:
         raise ReleaseError(f"release checksum does not match {artifact.archive}")
 
 
-def validate_publish_kind(version: AppVersion, kind: PublishKind) -> None:
-    """Ensure a version has the kind requested by the publication command."""
+def validate_release_kind(version: AppVersion, kind: ReleaseKind) -> None:
+    """Ensure a version has the requested release kind."""
     if kind == "candidate" and not version.is_candidate:
         raise ReleaseError(
-            f"{version.value} is a final version; use the final publication command"
+            f"{version.value} is a final version; choose the final release kind"
         )
     if kind == "final" and version.is_candidate:
         raise ReleaseError(
-            f"{version.value} is a release candidate; "
-            "use the candidate publication command"
+            f"{version.value} is a release candidate; choose the candidate release kind"
         )
 
 
-def require_clean_status(status: str) -> None:
-    """Fail when Git reports tracked or untracked checkout changes."""
-    if status.strip():
-        raise ReleaseError("release publication requires a clean Git checkout")
-
-
-def require_matching_tag(
-    tag: str,
-    *,
-    head_commit: str,
-    tag_commit: str | None,
+def validate_release_request(
+    version: AppVersion,
+    kind: ReleaseKind,
+    expected_value: str,
 ) -> None:
-    """Fail when an existing local release tag identifies another commit."""
-    if tag_commit is not None and tag_commit != head_commit:
+    """Validate workflow inputs against the canonical application version."""
+    expected_version = parse_version(expected_value)
+    if expected_version != version:
         raise ReleaseError(
-            f"existing tag {tag} points to {tag_commit}, "
-            f"not current commit {head_commit}"
+            f"canonical version is {version.value}, "
+            f"but the workflow requested {expected_version.value}"
         )
-
-
-def require_annotated_tag(tag: str, *, annotated: bool) -> None:
-    """Fail when an existing release tag is lightweight."""
-    if not annotated:
-        raise ReleaseError(f"existing tag {tag} is not an annotated tag")
-
-
-def _run(
-    command: Sequence[str],
-    *,
-    root: Path,
-    check: bool = True,
-) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        list(command),
-        cwd=root,
-        check=check,
-        capture_output=True,
-        text=True,
-    )
-
-
-def _git_output(root: Path, *arguments: str) -> str:
-    return _run(["git", *arguments], root=root).stdout.strip()
-
-
-def _existing_tag_commit(root: Path, tag: str) -> str | None:
-    result = _run(
-        ["git", "rev-list", "-n", "1", tag],
-        root=root,
-        check=False,
-    )
-    if result.returncode != 0 or not result.stdout.strip():
-        return None
-    return result.stdout.strip()
-
-
-def remote_tag_reference_from_ls_remote(
-    output: str,
-    tag: str,
-) -> TagReference | None:
-    """Resolve a remote lightweight or annotated tag listing."""
-    direct_commit: str | None = None
-    peeled_commit: str | None = None
-    direct_reference = f"refs/tags/{tag}"
-    peeled_reference = f"{direct_reference}^{{}}"
-    for line in output.splitlines():
-        fields = line.split()
-        if len(fields) != 2:
-            continue
-        commit, reference = fields
-        if reference == direct_reference:
-            direct_commit = commit
-        elif reference == peeled_reference:
-            peeled_commit = commit
-    if peeled_commit is not None:
-        return TagReference(commit=peeled_commit, annotated=True)
-    if direct_commit is not None:
-        return TagReference(commit=direct_commit, annotated=False)
-    return None
-
-
-def _remote_tag_reference(
-    root: Path,
-    remote: str,
-    tag: str,
-) -> TagReference | None:
-    result = _run(
-        [
-            "git",
-            "ls-remote",
-            "--tags",
-            remote,
-            f"refs/tags/{tag}",
-            f"refs/tags/{tag}^{{}}",
-        ],
-        root=root,
-    )
-    return remote_tag_reference_from_ls_remote(result.stdout, tag)
-
-
-def _existing_release(root: Path, tag: str) -> dict[str, object] | None:
-    result = _run(
-        [
-            "gh",
-            "release",
-            "view",
-            tag,
-            "--json",
-            "isDraft,isPrerelease,tagName",
-        ],
-        root=root,
-        check=False,
-    )
-    if result.returncode == 0:
-        loaded = json.loads(result.stdout)
-        if not isinstance(loaded, dict):
-            raise ReleaseError(f"unexpected GitHub release metadata for {tag}")
-        return loaded
-    error_message = f"{result.stdout}\n{result.stderr}".lower()
-    if "release not found" in error_message or "not found" in error_message:
-        return None
-    raise ReleaseError(
-        result.stderr.strip() or f"could not inspect GitHub release {tag}"
-    )
-
-
-def publish_release(
-    root: Path,
-    kind: PublishKind,
-    *,
-    remote: str = "origin",
-) -> None:
-    """Create or extend a GitHub release with the local platform artifact."""
-    version = read_version(root)
-    validate_publish_kind(version, kind)
-    artifact = artifact_for(root, version)
-    validate_checksum(artifact)
-    verify_packaged_version(packaged_executable(artifact), version)
-
-    status = _git_output(root, "status", "--porcelain=v1")
-    require_clean_status(status)
-    head_commit = _git_output(root, "rev-parse", "HEAD")
-    tag_commit = _existing_tag_commit(root, version.tag)
-    require_matching_tag(
-        version.tag,
-        head_commit=head_commit,
-        tag_commit=tag_commit,
-    )
-    if tag_commit is not None:
-        local_tag_type = _git_output(
-            root,
-            "cat-file",
-            "-t",
-            f"refs/tags/{version.tag}",
-        )
-        require_annotated_tag(version.tag, annotated=local_tag_type == "tag")
-
-    _run(["gh", "auth", "status", "--hostname", "github.com"], root=root)
-    remote_tag = _remote_tag_reference(root, remote, version.tag)
-    if remote_tag is not None:
-        require_matching_tag(
-            version.tag,
-            head_commit=head_commit,
-            tag_commit=remote_tag.commit,
-        )
-        require_annotated_tag(version.tag, annotated=remote_tag.annotated)
-    else:
-        if tag_commit is None:
-            _run(
-                [
-                    "git",
-                    "tag",
-                    "--annotate",
-                    version.tag,
-                    "--message",
-                    f"Time Tracker {version.value}",
-                ],
-                root=root,
-            )
-        _run(["git", "push", remote, f"refs/tags/{version.tag}"], root=root)
-
-    existing_release = _existing_release(root, version.tag)
-    expected_prerelease = kind == "candidate"
-    if existing_release is None:
-        command = [
-            "gh",
-            "release",
-            "create",
-            version.tag,
-            str(artifact.archive),
-            str(artifact.checksum),
-            "--verify-tag",
-            "--title",
-            f"Time Tracker {version.value}",
-            "--generate-notes",
-        ]
-        if expected_prerelease:
-            command.append("--prerelease")
-        result = _run(command, root=root)
-        if result.stdout:
-            print(result.stdout.strip())
-        return
-
-    if existing_release.get("tagName") != version.tag:
-        raise ReleaseError(f"GitHub returned another tag for {version.tag}")
-    if bool(existing_release.get("isDraft")):
-        raise ReleaseError(
-            f"GitHub release {version.tag} is a draft; publish it before uploading"
-        )
-    if bool(existing_release.get("isPrerelease")) != expected_prerelease:
-        raise ReleaseError(
-            f"GitHub release {version.tag} has the wrong prerelease state"
-        )
-    _run(
-        [
-            "gh",
-            "release",
-            "upload",
-            version.tag,
-            str(artifact.archive),
-            str(artifact.checksum),
-        ],
-        root=root,
-    )
+    validate_release_kind(version, kind)
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Build and publish native Time Tracker releases locally."
-    )
+    parser = argparse.ArgumentParser(description="Prepare Time Tracker releases.")
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("version", help="print the canonical application version")
 
@@ -598,17 +375,17 @@ def _parser() -> argparse.ArgumentParser:
         "package",
         help="archive and checksum the current native package",
     )
-    publish_parser = subparsers.add_parser(
-        "publish",
-        help="create or extend a GitHub release",
+    validate_parser = subparsers.add_parser(
+        "validate",
+        help="validate a GitHub release workflow request",
     )
-    publish_parser.add_argument("kind", choices=("candidate", "final"))
-    publish_parser.add_argument("--remote", default="origin")
+    validate_parser.add_argument("kind", choices=("candidate", "final"))
+    validate_parser.add_argument("expected_version")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the local release command."""
+    """Run release preparation and packaging commands."""
     arguments = _parser().parse_args(argv)
     root = repository_root()
     try:
@@ -621,8 +398,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             artifact = package_release_artifact(root)
             print(artifact.archive)
             print(artifact.checksum)
-        elif arguments.command == "publish":
-            publish_release(root, arguments.kind, remote=arguments.remote)
+        elif arguments.command == "validate":
+            version = read_version(root)
+            validate_release_request(
+                version,
+                arguments.kind,
+                arguments.expected_version,
+            )
+            print(f"validated {arguments.kind} release {version.value}")
         else:
             raise AssertionError(f"unknown command: {arguments.command}")
     except (OSError, ReleaseError, subprocess.CalledProcessError) as error:
