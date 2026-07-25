@@ -5,7 +5,9 @@ import pytest
 from time_tracker.application.configuration import (
     ApplicationConfig,
     ConfigurationService,
+    ExportSettings,
     ReminderSettings,
+    UiSettings,
 )
 from time_tracker.application.reminders import ReminderIntervals
 from time_tracker.infrastructure.configuration import (
@@ -60,6 +62,10 @@ active_interval_minutes = 12
         "[reminders]\nidle_enabled = 1",
         "[reminders]\nidle_threshold_minutes = 0",
         "[reminders]\nactve_enabled = false",
+        "[ui]\ntheme = 1",
+        "[ui]\nunknown = true",
+        '[export]\ndelimiter = ";"',
+        "[export]\nunknown = true",
     ],
 )
 def test_invalid_configuration_is_rejected_without_rewriting(
@@ -93,9 +99,14 @@ def test_configuration_store_atomically_replaces_complete_toml(tmp_path: Path) -
         idle_threshold_minutes=22.5,
     )
 
-    TomlConfigurationStore(path).save(settings)
+    config = ApplicationConfig(
+        reminder_settings=settings,
+        ui_settings=UiSettings(theme="nord"),
+        export_settings=ExportSettings(delimiter="|"),
+    )
+    TomlConfigurationStore(path).save(config)
 
-    assert load_config(path).reminder_settings == settings
+    assert load_config(path) == config
     assert path.read_text(encoding="utf-8") == (
         "[reminders]\n"
         "inactive_enabled = false\n"
@@ -109,23 +120,47 @@ def test_configuration_store_atomically_replaces_complete_toml(tmp_path: Path) -
         "snooze_minutes = 7.5\n"
         "idle_enabled = true\n"
         "idle_threshold_minutes = 22.5\n"
+        "\n[ui]\n"
+        'theme = "nord"\n'
+        "\n[export]\n"
+        'delimiter = "|"\n'
     )
     assert list(tmp_path.glob(".config.toml.*.tmp")) == []
 
 
 def test_failed_persistence_does_not_publish_new_settings() -> None:
     original = ReminderSettings()
+    original_config = ApplicationConfig(reminder_settings=original)
 
     class FailingStore:
-        def save(self, settings: ReminderSettings) -> None:
+        def save(self, config: ApplicationConfig) -> None:
             raise OSError("simulated write failure")
 
-    service = ConfigurationService(FailingStore(), original)
+    service = ConfigurationService(FailingStore(), original_config)
 
     with pytest.raises(OSError, match="simulated write failure"):
         service.save(ReminderSettings(active_interval_minutes=10))
 
     assert service.get() == original
+    assert service.get_theme() == "textual-dark"
+    assert service.get_export_delimiter() == ","
+
+
+def test_saving_one_configuration_section_preserves_the_other(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "config.toml"
+    service = ConfigurationService(TomlConfigurationStore(path))
+    reminders = ReminderSettings(active_interval_minutes=12)
+
+    assert service.save_theme("nord") == "nord"
+    assert service.save_export_delimiter("|") == "|"
+    assert service.save(reminders) == reminders
+    assert load_config(path) == ApplicationConfig(
+        reminder_settings=reminders,
+        ui_settings=UiSettings(theme="nord"),
+        export_settings=ExportSettings(delimiter="|"),
+    )
 
 
 @pytest.mark.parametrize("value", [0, -1, float("inf"), float("nan")])

@@ -141,6 +141,8 @@ internet connection. The current product interface is a TUI.
   file at platform-appropriate per-user locations.
 - Work with built-in defaults when no configuration file exists.
 - Report invalid configuration without overwriting it.
+- Persist the selected TUI theme and apply it on the next launch, falling back to
+  the built-in default if the saved theme is unavailable.
 - Store timestamps in UTC and display them in the user's local time zone.
 - Permit entries to cross midnight and reject a stop time before its start time.
 - Preserve user data across crashes, restarts, and database migrations.
@@ -155,6 +157,9 @@ internet connection. The current product interface is a TUI.
   ```
 
 - Export timestamps as ISO 8601 with a UTC offset and apply standard CSV quoting.
+- Use comma as the default export delimiter and allow the user to select pipe as
+  an alternative. Apply standard delimited-text quoting so notes containing the
+  selected delimiter, quotes, or line breaks round-trip without data loss.
 - Require confirmation before overwriting a file.
 - Do not export an active entry.
 - Export daily project/activity totals using local calendar dates and these

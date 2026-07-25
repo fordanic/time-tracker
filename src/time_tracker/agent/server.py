@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 import sqlite3
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import date, datetime
 from multiprocessing import AuthenticationError
 from multiprocessing.connection import Listener
@@ -75,14 +75,19 @@ def _serve_locked(
     idle_poll_seconds: float,
 ) -> None:
     """Own the endpoint and database while the instance lock is held."""
-    settings = (
-        ReminderSettings.from_intervals(reminder_intervals)
+    loaded_config = load_config(paths.config)
+    config = (
+        replace(
+            loaded_config,
+            reminder_settings=ReminderSettings.from_intervals(reminder_intervals),
+        )
         if reminder_intervals is not None
-        else load_config(paths.config).reminder_settings
+        else loaded_config
     )
+    settings = config.reminder_settings
     configuration_service = ConfigurationService(
         TomlConfigurationStore(paths.config),
-        settings,
+        config,
     )
     if paths.family == "AF_UNIX":
         Path(paths.address).unlink(missing_ok=True)
@@ -101,6 +106,7 @@ def _serve_locked(
         CsvCompletedEntryWriter(),
         CsvDailySummaryWriter(),
         range_writer=CsvRangeSummaryWriter(),
+        delimiter=configuration_service.get_export_delimiter,
     )
     notification_service = notifier or NativeNotificationService()
     listener = Listener(
@@ -274,6 +280,10 @@ def _handle_request(
             result = pending_reminder is not None
         elif method == "get_configuration":
             result = _settings_dict(configuration_service.get())
+        elif method == "get_theme":
+            result = configuration_service.get_theme()
+        elif method == "get_export_delimiter":
+            result = configuration_service.get_export_delimiter()
         elif method == "get_idle_detection_status":
             result = asdict(idle_detection_status or IdleDetectionStatus(False))
         elif method == "save_configuration":
@@ -300,6 +310,12 @@ def _handle_request(
             )
             result = _settings_dict(settings)
             reloaded_settings = settings
+        elif method == "save_theme":
+            result = configuration_service.save_theme(_required_str(params, "theme"))
+        elif method == "save_export_delimiter":
+            result = configuration_service.save_export_delimiter(
+                _required_str(params, "delimiter")
+            )
         elif method == "list_projects":
             result = service.list_projects()
         elif method == "list_activities":

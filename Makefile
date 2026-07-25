@@ -23,10 +23,19 @@ help:
 	@printf '%s\n' \
 		'Time Tracker development targets:' \
 		'' \
+		'  make help              Show this target list' \
+		'  make prepare-venv      Remove an unusable generated virtual environment' \
 		'  make sync              Sync the locked development environment' \
 		'  make run               Run the Textual app' \
 		'  make stop-agent        Stop the background agent' \
 		'  make format            Format Python sources' \
+		'  make format-check      Check Python source formatting' \
+		'  make lint              Run Ruff lint checks' \
+		'  make typecheck         Run mypy type checks' \
+		'  make test              Run unit, integration, and end-to-end tests' \
+		'  make test-unit         Run unit tests' \
+		'  make test-integration  Run integration tests' \
+		'  make test-e2e          Run end-to-end tests' \
 		'  make check             Run formatting, lint, types, and tests' \
 		'  make ci                Sync and run the complete CI check set' \
 		'  make build             Build a native executable in dist/' \
@@ -66,8 +75,7 @@ lint: prepare-venv
 typecheck: prepare-venv
 	$(UV) run mypy
 
-test: prepare-venv
-	$(UV) run pytest
+test: test-unit test-integration test-e2e
 
 test-unit: prepare-venv
 	$(UV) run pytest tests/unit

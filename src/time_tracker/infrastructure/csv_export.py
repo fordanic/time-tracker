@@ -31,12 +31,13 @@ class CsvCompletedEntryWriter:
         entries: list[CompletedTimer],
         *,
         overwrite: bool,
+        delimiter: str,
     ) -> None:
         """Write entries without overwriting unless explicitly confirmed."""
         mode = "w" if overwrite else "x"
         try:
             with destination.open(mode, encoding="utf-8", newline="") as output:
-                writer = csv.writer(output)
+                writer = csv.writer(output, delimiter=delimiter)
                 writer.writerow(CSV_COLUMNS)
                 for entry in entries:
                     writer.writerow(
@@ -64,12 +65,13 @@ class CsvDailySummaryWriter:
         summaries: list[DailySummary],
         *,
         overwrite: bool,
+        delimiter: str,
     ) -> None:
         """Write summaries without overwriting unless explicitly confirmed."""
         mode = "w" if overwrite else "x"
         try:
             with destination.open(mode, encoding="utf-8", newline="") as output:
-                writer = csv.writer(output)
+                writer = csv.writer(output, delimiter=delimiter)
                 writer.writerow(DAILY_SUMMARY_COLUMNS)
                 for summary in summaries:
                     writer.writerow(
@@ -95,12 +97,13 @@ class CsvRangeSummaryWriter:
         summaries: list[RangeSummary],
         *,
         overwrite: bool,
+        delimiter: str,
     ) -> None:
         """Write range totals without overwriting unless explicitly confirmed."""
         mode = "w" if overwrite else "x"
         try:
             with destination.open(mode, encoding="utf-8", newline="") as output:
-                writer = csv.writer(output)
+                writer = csv.writer(output, delimiter=delimiter)
                 writer.writerow(RANGE_SUMMARY_COLUMNS)
                 for summary in summaries:
                     writer.writerow(

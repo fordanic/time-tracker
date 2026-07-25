@@ -12,7 +12,8 @@ a local background process.
 - Preserve an active timer across restarts and crashes.
 - Continue reminders after the TUI closes by using a background process.
 - Store data locally in SQLite and settings in TOML.
-- Export completed entries or daily project/activity summaries to UTF-8 CSV.
+- Export completed entries or project/activity summaries as UTF-8 delimited
+  text, using comma by default or pipe when selected.
 
 The product remains local, single-user, and TUI-only. See the top-level
 requirements for authoritative product behavior and the competitive assessment
@@ -57,26 +58,30 @@ editable entry identity and full offset-aware timestamps in the editor. Track
 shows the current local day's completed total from the same projection and
 excludes a running timer until it is stopped. Review filters completed time by
 All time, Today, This week, This month, or an inclusive custom local date range,
-plus optional case-insensitive project and activity names. Archived historical
-targets remain filterable. Daily summaries and range totals by project/activity
+plus project and activity selections populated from history. Archived historical
+targets remain selectable. Daily summaries and range totals by project/activity
 use the same filter as day-grouped detail and CSV export; an overnight entry is
-clipped to selected local dates, including across offset changes. All three CSV
-representations require explicit overwrite confirmation. Projects and activities
-can be archived
-from the TUI after a second explicit confirmation naming the canonical target and
-warning that a running timer continues. Archived names disappear from new-timer
-suggestions, remain intact in history, are listed in Manage, and can be restored
-there. Restoring a project preserves each activity's independent archive state,
-and an activity can be restored only after its parent project.
+clipped to selected local dates, including across offset changes. All three
+export representations require explicit overwrite confirmation and use the
+configured comma or pipe delimiter with standard quoting. Projects and
+activities are shown in active and archived Manage trees. A selected exact node
+can be archived after a second explicit confirmation naming the canonical target
+and warning that a running timer continues, or restored from the archived tree.
+Archived names disappear from new-timer suggestions and remain intact in
+history. Restoring a project preserves each activity's independent archive
+state, and an activity can be restored only after its parent project.
 The Track workflow shows up to five unique recently completed project/activity
 pairs, newest first; selecting one prepares it for another timer without copying
 its historical note. Archived targets are excluded from this recent-work list.
 When connected, the TUI also presents due reminders; confirming an active reminder
 restarts its interval without changing the timer, while ignoring it leaves the
-timer running and reminders repeating. The TUI is split into keyboard-addressable
-Track, Review, Manage, and Settings views. Its active-timer strip, reminder prompt,
-and result message remain visible across views, while the existing action
-shortcuts continue to work from any view.
+timer running and reminders repeating. Track places project and activity
+together when space permits and uses a two-line multiline note editor. The TUI
+is split into keyboard-addressable Track, Review, Manage, and Settings views. Its
+active-timer strip, reminder prompt, and result message remain visible across
+views, while the existing action shortcuts continue to work from any view. Its
+compact, context-aware shortcut row keeps shortcut help discoverable in narrow
+terminals, while the overlay lists every retained F-key action.
 In Review's completed-entry mode, a selected entry can be loaded and corrected
 without changing its identity. Project, activity, note, start, and stop are
 editable; offset-aware timestamps are persisted in UTC, and corrections that
@@ -90,11 +95,12 @@ Track also provides an explicit active-detail update that changes the running
 entry's project, activity, or note without changing its identity, original start,
 elapsed time, or reminder deadline. Updated names are used by pending and future
 active reminders.
-Settings exposes the supported inactive- and active-reminder toggles and positive
-minute intervals. Saving atomically replaces the human-readable TOML
-configuration, applies the new schedule without restarting the background
-process, clears any prompt from the replaced schedule, and preserves disabled
-interval values for later re-enabling.
+Settings exposes reminder controls and the comma-or-pipe export choice. Saving
+atomically replaces the human-readable TOML configuration, applies changes
+without restarting the background process, clears any prompt from a replaced
+schedule, and preserves disabled interval values for later re-enabling. Theme
+choices made through Textual's theme picker also persist across TUI launches,
+with a safe built-in fallback if a saved theme disappears.
 An optional shared weekly local-time window suppresses both reminder kinds until
 the next selected opening. Any pending reminder can be snoozed for the configured
 duration with its button or `F12` without changing timer state; snooze is
@@ -134,6 +140,10 @@ The common workflows are available through `make`:
 ```shell
 make help
 make run
+make test-unit
+make test-integration
+make test-e2e
+make test
 make check
 make build
 ```
@@ -153,7 +163,9 @@ To permanently remove the current user's Time Tracker database, configuration,
 IPC secret, and runtime files, first stop any work you want to preserve and run
 `make clear-local CONFIRM=1`.
 
-Run the same checks used in CI:
+Run `make test-unit`, `make test-integration`, or `make test-e2e` while
+iterating on one tier; `make test` runs all three. Run the same complete checks
+used in CI with `make check`, or directly:
 
 ```shell
 uv run ruff format --check .
@@ -181,18 +193,19 @@ total does not include the running portion until Stop persists it.
 Use `F1` through `F4` to switch between Track, Review, Manage, and Settings. The
 same views can be selected from the tab row. Track owns timer capture and recent
 activities; Review owns history, summaries, and CSV export; Manage owns archive
-actions; and Settings edits the TOML-backed reminder configuration and applies it
-live. The active timer and any pending reminder stay visible while moving between
-them. `F5` through `F11` retain their documented actions from every view, and
-`F12` snoozes any pending reminder.
+actions; and Settings edits TOML-backed reminder and export preferences and
+applies them live. The active timer and any pending reminder stay visible while
+moving between them. `F5` through `F11` retain their documented actions from
+every view, and `F12` snoozes any pending reminder. `Ctrl+K` opens the complete
+shortcut overlay, and `Ctrl+C` exits the application.
 
 In Review (`F2`), completed time is grouped by local date with compact `HH:MM`
 times and a total after each day. An entry crossing midnight has one display
 segment in each affected day. Loading either segment for correction opens the
 single full entry with offset-aware timestamps; total rows are not editable. Use
-All time, Today, This week, This month, or Custom dates, then optionally enter a
-project and activity. Target matching is case-insensitive and accepts archived
-names that remain in history. Date boundaries are inclusive local dates. Use
+All time, Today, This week, This month, or Custom dates, then optionally select a
+project and activity from the history-backed controls. Archived names that
+remain in history are included. Date boundaries are inclusive local dates. Use
 Daily summaries for local-day totals or Range totals for one total per
 project/activity pair; leave both off for completed-entry detail.
 
@@ -203,7 +216,9 @@ summary exports contain the same selected durations. Relative paths are resolved
 from the directory where the TUI was launched, and `~` expands to the current
 user's home directory. If the destination exists, the TUI requires a second
 export action before overwriting it. An empty selection exports the appropriate
-header with no data rows.
+header with no data rows. Settings chooses comma (the default) or pipe as the
+delimiter; both formats use standard quoting for delimiters, quotes, Unicode,
+and multiline notes.
 
 To correct completed work, turn off Daily summaries and Range totals, select its
 history row, and choose Load selected entry. Edit the project, activity, note,
@@ -218,23 +233,22 @@ one-hour interval ending at the current local minute. Adjust the values and crea
 the entry; the same timestamp and no-overlap rules apply, and any active timer
 continues unchanged.
 
-When completed work exists, use the one-line Track again selector below the note
-field to choose from up to five recent project/activity pairs. Use the arrow keys
-to move through the list and Enter to select one. The note is cleared and focused
-so a new note can be entered before starting with F5; the selection alone does not
-change the running timer.
+Project and activity share a Track row at normal widths and stack in narrow
+terminals. The note editor displays two lines and preserves line breaks. When
+completed work exists, use the Track again selector below the note to choose from
+up to five recent project/activity pairs. Use the arrow keys to move through the
+list and Enter to select one. This explicit selection clears and focuses the
+note; typing or correcting a target does not clear it, and selection alone does
+not change the running timer.
 
-In Manage (`F3`), enter an existing project or project/activity pair and use its
-archive button or `F8`/`F9`. The first action validates and names the exact target;
-invoke it again without editing the inputs to confirm. Archiving leaves any
+In Manage (`F3`), select a project or activity in the active tree and use Archive
+selected or `F8`/`F9`. The first action validates and names the exact target;
+invoke it again without changing selection to confirm. Archiving leaves any
 running timer active, removes the name from future timer suggestions, and
 preserves completed history. Archived names cannot be reused. Select an item in
-the archived project or activity lists and use its Restore button to make it
-selectable again. Restore a parent project before restoring one of its archived
-activities; restoring the project alone does not restore independently archived
-activities. The archive buttons remain pointer-accessible but are omitted from
-keyboard tab navigation; their function-key shortcuts remain available from
-every view and use the Manage inputs.
+the archived tree and use Restore selected to make it selectable again. Restore
+a parent project before restoring one of its archived activities; restoring the
+project alone does not restore independently archived activities.
 
 When a reminder becomes due while the TUI is connected, it appears below the
 active timer. For an active timer, press its button or `F10` to confirm that it is
@@ -247,14 +261,15 @@ timer running; use Stop or `F6` when the timer should end.
 Use Settings (`F4`) to enable or disable each reminder independently, edit its
 positive interval in minutes, optionally restrict delivery to selected local
 weekdays and `HH:MM` hours, choose a positive snooze duration, and optionally
-enable an idle-triggered active reminder with a positive threshold. Settings
-reports whether idle detection is available in the current platform session. An
-end earlier than the start makes an overnight window. Saving creates or
-atomically replaces the optional TOML file and applies the schedule immediately;
-no background-process restart is needed. Run `uv run time-tracker --config-path` to
-locate the same user-editable file. When it does not exist, both reminders use
-their built-in defaults and the window is disabled. The complete supported
-configuration is:
+enable an idle-triggered active reminder with a positive threshold. Settings also
+chooses comma or pipe for exports. It reports whether idle detection is available
+in the current platform session. An end earlier than the start makes an overnight
+window. Saving creates or atomically replaces the optional TOML file and applies
+changes immediately; no background-process restart is needed. Theme selections
+made through Textual's theme picker are saved to the same file. Run
+`uv run time-tracker --config-path` to locate it. When it does not exist,
+built-in reminder values, the Textual dark theme, and comma-delimited exports are
+used. The complete supported configuration is:
 
 ```toml
 [reminders]
@@ -269,6 +284,12 @@ window_end = "17:00"
 snooze_minutes = 10
 idle_enabled = false
 idle_threshold_minutes = 15
+
+[ui]
+theme = "textual-dark"
+
+[export]
+delimiter = ","
 ```
 
 Each reminder can be disabled independently. Intervals must be positive numbers.
@@ -280,6 +301,8 @@ same active reminder early, honors the weekly delivery window, and remains
 available when the periodic active reminder is disabled. A detector failure
 leaves timer and normal reminder state unchanged and is shown as unavailable in
 Settings.
+The export delimiter must be `","` or `"|"`. An unavailable saved theme falls
+back to `textual-dark` without preventing launch.
 Direct edits made outside the TUI still require restarting the background process
 with `uv run time-tracker --stop-agent`, then reopening the TUI. Invalid TOML,
 unknown keys, and invalid values are reported without changing the file.
