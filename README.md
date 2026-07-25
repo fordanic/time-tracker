@@ -206,16 +206,19 @@ and macOS; all three jobs passed on July 25, 2026. A local macOS arm64 app-bundl
 lifecycle and Notification Center dispatch were validated on July 19, 2026. The
 macOS Core Graphics idle-duration adapter was validated interactively on July
 22, 2026. A versioned, ad-hoc-signed macOS arm64 release archive, checksum, and
-packaged lifecycle were validated locally on July 24, 2026.
+packaged lifecycle were validated locally on July 24, 2026. The GitHub release
+workflow published final release `0.1.0` on July 25, 2026, validating Linux,
+Windows, and macOS archives, checksums, native version metadata, the annotated
+tag, and final-release state.
 
 Known outstanding validation:
 
 - run the native-notification smoke on interactive Linux and Windows desktops;
 - validate idle-duration detection on supported interactive Linux X11 and
   Windows desktop sessions;
-- run the GitHub release workflow end to end for a release candidate and the
-  first final release, verifying their Linux, Windows, and macOS archives,
-  checksums, native version metadata, annotated tags, and release states; and
+- run the GitHub release workflow end to end for a release candidate, verifying
+  its Linux, Windows, and macOS archives, checksums, native version metadata,
+  annotated tag, and prerelease state; and
 - record any additional unmet acceptance criteria here when identified.
 
 This section is the source of truth for current implementation and validation
