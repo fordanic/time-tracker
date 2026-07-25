@@ -115,16 +115,15 @@ content, and never changes tracked time automatically. The prompt can be
 confirmed, snoozed, or followed by an explicit Stop; unwanted idle time remains
 correctable in Review.
 
-The CI workflow is configured to build and exercise the packaged lifecycle on
-Linux, Windows, and macOS. A local macOS arm64 app-bundle lifecycle and
-Notification Center dispatch were validated on July 19, 2026. The macOS Core
-Graphics idle-duration adapter was validated interactively on July 22, 2026.
-A versioned, ad-hoc-signed macOS arm64 release archive, checksum, and packaged
-lifecycle were validated locally on July 24, 2026.
+The CI workflow builds and exercises the packaged lifecycle on Linux, Windows,
+and macOS; all three jobs passed on July 25, 2026. A local macOS arm64 app-bundle
+lifecycle and Notification Center dispatch were validated on July 19, 2026. The
+macOS Core Graphics idle-duration adapter was validated interactively on July
+22, 2026. A versioned, ad-hoc-signed macOS arm64 release archive, checksum, and
+packaged lifecycle were validated locally on July 24, 2026.
 
 Known outstanding validation:
 
-- run the updated packaged-lifecycle workflow successfully on Linux and Windows;
 - run the native-notification smoke on interactive Linux and Windows desktops;
 - validate idle-duration detection on supported interactive Linux X11 and
   Windows desktop sessions;
@@ -327,19 +326,77 @@ requires an interactive desktop session and is therefore a manual platform smoke
 
 ## Releases
 
+Release candidates and final releases are built and published from development
+machines. Publication uses local Git and authenticated GitHub CLI operations; it
+does not depend on GitHub Actions or consume hosted Actions minutes.
+
 Versions use `X.Y.Z` for final releases and `X.Y.ZrcN` for release candidates.
-Set the one canonical version and refresh the lockfile with:
+`src/time_tracker/__init__.py` is the canonical version source, and `v<version>`
+is the corresponding annotated Git tag. Each target operating system must build
+its own artifact because PyInstaller does not cross-compile.
 
-```shell
-make set-version VERSION=0.2.0rc1
-```
+1. Install `uv`, GNU Make, Git, and GitHub CLI. Authenticate the publishing
+   account:
 
-After committing that version, `make release-artifact` runs the complete local
-checks, native build, and packaged lifecycle smoke, then creates a versioned
-target-platform archive and SHA-256 file in `dist/release/`.
-`make publish-release-candidate` publishes an `rc` build as a GitHub prerelease;
-`make publish-release` publishes a final version. Each operating system builds
-and uploads its own asset from the same tagged commit. These commands use local
-Git and authenticated GitHub CLI operations and do not use GitHub Actions
-minutes. See the [release guide](docs/releases.md) for the complete procedure and
-failure safeguards.
+   ```shell
+   gh auth login
+   gh auth status
+   ```
+
+2. From a branch based on current `main`, set the next version:
+
+   ```shell
+   make set-version VERSION=0.2.0rc1
+   ```
+
+   Review the canonical source and `uv.lock` changes, commit them, and merge them
+   through the normal review process. Increment `rcN` for another candidate.
+   Never move or reuse an existing version tag.
+
+3. On a target-platform machine, check out the clean version commit and build the
+   release artifact:
+
+   ```shell
+   make release-artifact
+   ```
+
+   This synchronizes the locked environment, runs formatting, lint, type, unit,
+   integration, and end-to-end checks, builds and smoke-tests the native package,
+   verifies its reported version, and writes a versioned archive and SHA-256 file
+   under `dist/release/`.
+
+4. On the first target platform, publish the version with the command matching
+   its kind:
+
+   ```shell
+   make publish-release-candidate  # X.Y.ZrcN
+   make publish-release            # X.Y.Z
+   ```
+
+   Publication repeats the complete validation, creates and pushes the annotated
+   tag when needed, and creates a visible GitHub prerelease or final release with
+   generated notes and the local platform's archive and checksum.
+
+5. On every other target operating system, check out the exact same tag and run
+   the same publication command:
+
+   ```shell
+   git fetch --tags origin
+   git checkout v0.2.0rc1
+   make publish-release-candidate
+   ```
+
+   The command verifies the existing tag and GitHub release, then uploads that
+   platform's differently named archive and checksum without overwriting an
+   existing asset.
+
+6. After candidate approval, create and merge a new version commit without the
+   `rcN` suffix, then repeat the target-platform process with
+   `make publish-release`. Final artifacts are rebuilt; candidate binaries are
+   not relabeled.
+
+Publication requires a clean checkout and stops when the version kind, tag,
+frozen version, archive, checksum, authentication, or existing release state is
+inconsistent. An interrupted publication can be rerun from the same tagged
+commit. See the [release guide](docs/releases.md) for artifact formats and full
+safeguards.
