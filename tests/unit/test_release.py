@@ -99,6 +99,29 @@ def test_native_version_metadata_supports_finals_and_candidates() -> None:
     assert "StringStruct('ProductVersion', '1.2.3rc4')" in resource
 
 
+def test_windows_build_uses_absolute_version_resource_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands: list[list[str]] = []
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("scripts.build.platform.system", lambda: "Windows")
+    monkeypatch.setattr(
+        "scripts.build.subprocess.run",
+        lambda command, check: commands.append(command),
+    )
+
+    build.main()
+
+    version_path = tmp_path / "build/time-tracker-version.txt"
+    assert version_path.is_file()
+    assert commands
+    version_argument = commands[0][commands[0].index("--version-file") + 1]
+    assert Path(version_argument) == version_path
+    assert Path(version_argument).is_absolute()
+
+
 def test_linux_release_archive_and_checksum(tmp_path: Path) -> None:
     _minimal_repository(tmp_path, "1.2.3rc2")
     executable = tmp_path / "dist/time-tracker"

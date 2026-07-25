@@ -117,7 +117,7 @@ def main() -> None:
             )
         )
     elif platform.system() == "Windows":
-        version_path = Path("build/time-tracker-version.txt")
+        version_path = Path("build/time-tracker-version.txt").resolve()
         version_path.parent.mkdir(parents=True, exist_ok=True)
         version_path.write_text(windows_version_resource(), encoding="utf-8")
         command.extend(("--onefile", "--version-file", str(version_path)))
