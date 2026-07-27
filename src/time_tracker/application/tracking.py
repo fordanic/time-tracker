@@ -112,6 +112,19 @@ class TimerRepository(Protocol):
         """Restore an activity whose parent project is selectable."""
         ...
 
+    def create_project(self, project: str, created_at: datetime) -> str:
+        """Create a new project and return its canonical stored name."""
+        ...
+
+    def create_activity(
+        self,
+        project: str,
+        activity: str,
+        created_at: datetime,
+    ) -> tuple[str, str]:
+        """Create a new activity under an existing, selectable project."""
+        ...
+
     def start(
         self,
         project: str,
@@ -307,6 +320,27 @@ class TrackingService:
         if not activity:
             raise ValueError("activity name is required")
         return self._repository.unarchive_activity(project, activity)
+
+    def create_project(self, project: str) -> str:
+        """Prepare a new project ahead of any timer or entry."""
+        project = project.strip()
+        if not project:
+            raise ValueError("project name is required")
+        return self._repository.create_project(project, self._clock.now())
+
+    def create_activity(self, project: str, activity: str) -> tuple[str, str]:
+        """Prepare a new activity under an existing, selectable project."""
+        project = project.strip()
+        activity = activity.strip()
+        if not project:
+            raise ValueError("project name is required")
+        if not activity:
+            raise ValueError("activity name is required")
+        return self._repository.create_activity(
+            project,
+            activity,
+            self._clock.now(),
+        )
 
     def start(
         self,

@@ -26,7 +26,7 @@ from time_tracker.application.tracking import (
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
 from time_tracker.infrastructure.paths import AgentPaths
 
-PROTOCOL_VERSION = 4
+PROTOCOL_VERSION = 5
 _WINDOWS_DETACHED_PROCESS_FLAGS = 0x00000208
 
 
@@ -288,6 +288,24 @@ class AgentClient:
         result = _object_dict(
             self._request(
                 "unarchive_activity",
+                {"project": project, "activity": activity},
+            )
+        )
+        return (
+            _object_str(result.get("project")),
+            _object_str(result.get("activity")),
+        )
+
+    def create_project(self, project: str) -> str:
+        """Create a new project and return its canonical stored name."""
+        result = _object_dict(self._request("create_project", {"project": project}))
+        return _object_str(result.get("project"))
+
+    def create_activity(self, project: str, activity: str) -> tuple[str, str]:
+        """Create a new activity and return its canonical stored names."""
+        result = _object_dict(
+            self._request(
+                "create_activity",
                 {"project": project, "activity": activity},
             )
         )
