@@ -197,6 +197,7 @@ The initial product baseline and selected TUI roadmap features are implemented:
 - completed-entry review, correction, missed-time entry, filtering, summaries,
   and export;
 - recent-work selection and active/archived project and activity management;
+- preparing new projects and activities from Manage without starting a timer;
 - persistent reminder, theme, and export settings with live reload;
 - reminder windows, snooze, and optional content-free input-idle detection; and
 - responsive Track, Review, Manage, and Settings views with keyboard shortcuts.
