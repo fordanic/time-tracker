@@ -1481,14 +1481,35 @@ async def test_removed_persisted_theme_falls_back_safely(tmp_path: Path) -> None
 
 
 def _wait_until_ready(client: AgentClient) -> None:
-    deadline = time.monotonic() + 2
+    # Windows agents build the WinRT notification backend before opening their
+    # endpoint, so a slow host needs noticeably longer than a local Linux one.
+    deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
         try:
             client.ping()
             return
         except AgentUnavailableError:
             time.sleep(0.01)
+    _stop_late_agent(client)
     raise AssertionError("agent did not start")
+
+
+def _stop_late_agent(client: AgentClient) -> None:
+    """Stop an agent that answered too late to keep its test.
+
+    A caller that never reaches its own cleanup would otherwise leave the agent
+    blocked in `accept`. That call occupies a default-executor thread, which is
+    not a daemon and is joined at interpreter shutdown, so one abandoned agent
+    hangs the whole session after pytest has already reported its result.
+    """
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            client.shutdown()
+        except AgentUnavailableError:
+            time.sleep(0.05)
+        else:
+            return
 
 
 async def _wait_for_ui(
