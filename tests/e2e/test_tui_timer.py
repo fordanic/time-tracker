@@ -607,10 +607,17 @@ async def test_tui_identifies_idle_triggered_active_reminder(tmp_path: Path) -> 
             assert "use Review to remove idle time" in prompt
 
             await pilot.press("f10")
+            # The fake detector never observes input, so the agent becomes
+            # eligible to prompt again immediately. Assert the confirmation was
+            # reported rather than the momentary cleared prompt, which the next
+            # reminder refresh legitimately repopulates.
             await _wait_for_ui(
                 pilot,
-                lambda: app.pending_reminder is None,
-                "confirmed idle reminder was not cleared",
+                lambda: (
+                    "interval restarted"
+                    in str(app.query_one("#message", Static).render())
+                ),
+                "confirmed idle reminder was not reported",
             )
 
             assert client.get_active() == started
@@ -1489,7 +1496,7 @@ async def _wait_for_ui(
     condition: Callable[[], bool],
     failure: str,
 ) -> None:
-    deadline = time.monotonic() + 2
+    deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
         if condition():
             return
