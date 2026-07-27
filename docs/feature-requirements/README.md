@@ -61,6 +61,7 @@ For each selected feature:
 - [Theme-safe visual spacing](theme-safe-visual-spacing.md)
 - [Persistent theme and export preferences](persistent-theme-export-preferences.md)
 - [Versioned release candidates and releases](versioned-release-candidates-releases.md)
+- [Prepare projects and activities](prepare-projects-and-activities.md)
 
 ## Feature specification template
 

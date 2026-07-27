@@ -241,6 +241,76 @@ def test_archive_listing_and_restore_preserve_hierarchy_and_active_timer(
         repository.resolve_project_to_archive("website")
 
 
+def test_create_project_and_activity_prepare_selectable_targets(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteTimerRepository(tmp_path / "tracker.sqlite3")
+    created_at = datetime(2026, 7, 20, 8, tzinfo=UTC)
+
+    assert repository.create_project("Research", created_at) == "Research"
+    assert repository.list_projects() == ["Research"]
+    assert repository.list_activities("Research") == []
+
+    assert repository.create_activity(
+        "research", "Literature review", created_at + timedelta(minutes=5)
+    ) == ("Research", "Literature review")
+    assert repository.list_activities("Research") == ["Literature review"]
+
+
+def test_create_project_rejects_an_existing_name_case_insensitively(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteTimerRepository(tmp_path / "tracker.sqlite3")
+    created_at = datetime(2026, 7, 20, 8, tzinfo=UTC)
+    repository.create_project("Research", created_at)
+
+    with pytest.raises(ValueError, match="project already exists"):
+        repository.create_project("research", created_at)
+
+
+def test_create_project_rejects_an_archived_existing_name(tmp_path: Path) -> None:
+    repository = SQLiteTimerRepository(tmp_path / "tracker.sqlite3")
+    created_at = datetime(2026, 7, 20, 8, tzinfo=UTC)
+    repository.create_project("Research", created_at)
+    repository.archive_project("Research", created_at + timedelta(hours=1))
+
+    with pytest.raises(ValueError, match="project already exists"):
+        repository.create_project("RESEARCH", created_at + timedelta(hours=2))
+
+
+def test_create_activity_rejects_a_missing_or_archived_project(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteTimerRepository(tmp_path / "tracker.sqlite3")
+    created_at = datetime(2026, 7, 20, 8, tzinfo=UTC)
+
+    with pytest.raises(ValueError, match="project not found"):
+        repository.create_activity("Research", "Literature review", created_at)
+
+    repository.create_project("Research", created_at)
+    repository.archive_project("Research", created_at + timedelta(hours=1))
+    with pytest.raises(ValueError, match="project is archived"):
+        repository.create_activity(
+            "research", "Literature review", created_at + timedelta(hours=2)
+        )
+
+
+def test_create_activity_rejects_an_existing_name_case_insensitively(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteTimerRepository(tmp_path / "tracker.sqlite3")
+    created_at = datetime(2026, 7, 20, 8, tzinfo=UTC)
+    repository.create_project("Research", created_at)
+    repository.create_activity(
+        "Research", "Literature review", created_at + timedelta(minutes=5)
+    )
+
+    with pytest.raises(ValueError, match="activity already exists"):
+        repository.create_activity(
+            "research", "literature review", created_at + timedelta(minutes=10)
+        )
+
+
 def test_completed_correction_is_atomic_canonical_and_non_overlapping(
     tmp_path: Path,
 ) -> None:

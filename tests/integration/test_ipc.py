@@ -279,6 +279,44 @@ def test_manual_entry_round_trips_over_ipc_without_changing_active_timer(
     assert not thread.is_alive()
 
 
+def test_create_project_and_activity_round_trip_and_reject_duplicates_over_ipc(
+    tmp_path: Path,
+) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    thread = threading.Thread(target=serve, args=(paths,), daemon=True)
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        assert client.create_project(" Research ") == "Research"
+        assert client.list_projects() == ["Research"]
+
+        with pytest.raises(AgentRequestError, match="project already exists"):
+            client.create_project("research")
+
+        assert client.create_activity(" research ", " Literature review ") == (
+            "Research",
+            "Literature review",
+        )
+        assert client.list_activities("Research") == ["Literature review"]
+
+        with pytest.raises(AgentRequestError, match="activity already exists"):
+            client.create_activity("Research", "literature review")
+
+        with pytest.raises(AgentRequestError, match="project not found"):
+            client.create_activity("Unknown", "Planning")
+
+        client.archive_project("Research")
+        with pytest.raises(AgentRequestError, match="project is archived"):
+            client.create_activity("Research", "Planning")
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+
+
 def test_instance_lock_rejects_a_second_agent(tmp_path: Path) -> None:
     paths = AgentPaths.in_directory(tmp_path)
 

@@ -58,6 +58,9 @@ framework are intentionally unnecessary for the current product.
   has the request ID and either a result or structured error.
 - The current protocol supports one foreground client. Multiple concurrent
   clients are not a protocol guarantee.
+- Bump the protocol version when a genuinely new capability is added, such as
+  the explicit `create_project`/`create_activity` methods (version 5); a minor
+  addition to an existing settings area does not require a bump.
 
 The agent runs reminder scheduling on its asyncio loop and moves blocking IPC and
 SQLite calls to worker threads. Requests are still handled serially, so the agent
@@ -131,6 +134,14 @@ TimeEntry(id, activity_id, started_at_utc, stopped_at_utc?, note?, created_at)
   does not mutate the active timer or historical entries. Project transitions do
   not rewrite child activity flags, and activity restore rejects an archived
   parent project.
+- Create a project or an activity through an agent-owned application use case
+  and one SQLite transaction, exposed over the versioned protocol like archive
+  and restore. Each is a distinct, explicit action that rejects an existing
+  name (active or archived) rather than reusing it, and activity creation
+  rejects a missing or archived parent project rather than creating one. This
+  is separate from the existing implicit get-or-create performed by timer
+  start, manual entry, correction, and active-detail editing, which is
+  unchanged.
 - Enforce at most one entry with no stop time using a partial unique index.
 - Store UTC instants as integer microseconds since the Unix epoch. Convert them to
   local, offset-aware ISO 8601 values at presentation and export boundaries.

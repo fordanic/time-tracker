@@ -368,6 +368,78 @@ class SQLiteTimerRepository:
             )
         return canonical_project, canonical_activity
 
+    def create_project(self, project: str, created_at: datetime) -> str:
+        """Create a new project, rejecting an existing name in any state."""
+        created_micros = datetime_to_micros(created_at)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT name
+                FROM projects
+                WHERE name = ? COLLATE NOCASE
+                ORDER BY id
+                LIMIT 1
+                """,
+                (project,),
+            ).fetchone()
+            if row is not None:
+                raise ValueError(f"project already exists: {row['name']}")
+            connection.execute(
+                "INSERT INTO projects(name, created_at_utc) VALUES (?, ?)",
+                (project, created_micros),
+            )
+        return project
+
+    def create_activity(
+        self,
+        project: str,
+        activity: str,
+        created_at: datetime,
+    ) -> tuple[str, str]:
+        """Create a new activity under an existing, non-archived project."""
+        created_micros = datetime_to_micros(created_at)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            project_row = connection.execute(
+                """
+                SELECT id, name, archived_at_utc
+                FROM projects
+                WHERE name = ? COLLATE NOCASE
+                ORDER BY id
+                LIMIT 1
+                """,
+                (project,),
+            ).fetchone()
+            if project_row is None:
+                raise ValueError(f"project not found: {project}")
+            canonical_project = str(project_row["name"])
+            if project_row["archived_at_utc"] is not None:
+                raise ValueError(f"project is archived: {canonical_project}")
+            activity_row = connection.execute(
+                """
+                SELECT name
+                FROM activities
+                WHERE project_id = ? AND name = ? COLLATE NOCASE
+                ORDER BY id
+                LIMIT 1
+                """,
+                (int(project_row["id"]), activity),
+            ).fetchone()
+            if activity_row is not None:
+                existing_activity = str(activity_row["name"])
+                raise ValueError(
+                    f"activity already exists: {canonical_project}/{existing_activity}"
+                )
+            connection.execute(
+                """
+                INSERT INTO activities(project_id, name, created_at_utc)
+                VALUES (?, ?, ?)
+                """,
+                (int(project_row["id"]), activity, created_micros),
+            )
+        return canonical_project, activity
+
     def start(
         self,
         project: str,

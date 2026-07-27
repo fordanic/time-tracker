@@ -187,6 +187,38 @@ class ArchiveRepository:
         return project, activity
 
 
+class CreateRepository:
+    def __init__(self) -> None:
+        self.existing_projects: set[str] = set()
+        self.existing_activities: dict[str, set[str]] = {}
+        self.created_projects: list[tuple[str, datetime]] = []
+        self.created_activities: list[tuple[str, str, datetime]] = []
+
+    def create_project(self, project: str, created_at: datetime) -> str:
+        if project.casefold() in {name.casefold() for name in self.existing_projects}:
+            raise ValueError(f"project already exists: {project}")
+        self.existing_projects.add(project)
+        self.created_projects.append((project, created_at))
+        return project
+
+    def create_activity(
+        self,
+        project: str,
+        activity: str,
+        created_at: datetime,
+    ) -> tuple[str, str]:
+        if project.casefold() not in {
+            name.casefold() for name in self.existing_projects
+        }:
+            raise ValueError(f"project not found: {project}")
+        existing = self.existing_activities.setdefault(project.casefold(), set())
+        if activity.casefold() in {name.casefold() for name in existing}:
+            raise ValueError(f"activity already exists: {project}/{activity}")
+        existing.add(activity)
+        self.created_activities.append((project, activity, created_at))
+        return project, activity
+
+
 def test_recent_activities_are_unique_selectable_and_limited() -> None:
     started_at = datetime(2026, 7, 20, 8, tzinfo=UTC)
     completed = [
@@ -238,6 +270,74 @@ def test_archive_target_preview_and_listing_do_not_capture_a_write_time() -> Non
     assert service.archive_project(" website ") == "Website"
     assert repository.project_archives == [("website", instant)]
     assert clock.calls == 1
+
+
+def test_create_project_captures_write_time_and_returns_canonical_name() -> None:
+    instant = datetime(2026, 7, 20, 8, tzinfo=UTC)
+    repository = CreateRepository()
+    clock = RecordingClock(instant)
+    service = TrackingService(cast(TimerRepository, repository), clock)
+
+    assert service.create_project(" Website ") == "Website"
+    assert repository.created_projects == [("Website", instant)]
+    assert clock.calls == 1
+
+
+def test_create_project_requires_a_name() -> None:
+    service = TrackingService(cast(TimerRepository, CreateRepository()))
+
+    with pytest.raises(ValueError, match="project name is required"):
+        service.create_project("   ")
+
+
+def test_create_project_rejects_an_existing_name() -> None:
+    repository = CreateRepository()
+    service = TrackingService(cast(TimerRepository, repository))
+    service.create_project("Website")
+
+    with pytest.raises(ValueError, match="project already exists"):
+        service.create_project("website")
+
+
+def test_create_activity_captures_write_time_and_returns_canonical_names() -> None:
+    instant = datetime(2026, 7, 20, 8, tzinfo=UTC)
+    repository = CreateRepository()
+    repository.existing_projects.add("Website")
+    clock = RecordingClock(instant)
+    service = TrackingService(cast(TimerRepository, repository), clock)
+
+    assert service.create_activity(" Website ", " Planning ") == (
+        "Website",
+        "Planning",
+    )
+    assert repository.created_activities == [("Website", "Planning", instant)]
+    assert clock.calls == 1
+
+
+def test_create_activity_requires_project_and_activity_names() -> None:
+    service = TrackingService(cast(TimerRepository, CreateRepository()))
+
+    with pytest.raises(ValueError, match="project name is required"):
+        service.create_activity("   ", "Planning")
+    with pytest.raises(ValueError, match="activity name is required"):
+        service.create_activity("Website", "   ")
+
+
+def test_create_activity_rejects_missing_project() -> None:
+    service = TrackingService(cast(TimerRepository, CreateRepository()))
+
+    with pytest.raises(ValueError, match="project not found"):
+        service.create_activity("Website", "Planning")
+
+
+def test_create_activity_rejects_an_existing_name() -> None:
+    repository = CreateRepository()
+    repository.existing_projects.add("Website")
+    service = TrackingService(cast(TimerRepository, repository))
+    service.create_activity("Website", "Planning")
+
+    with pytest.raises(ValueError, match="activity already exists"):
+        service.create_activity("website", "planning")
 
 
 def test_recent_activity_limit_is_validated() -> None:

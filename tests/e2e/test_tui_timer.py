@@ -345,6 +345,110 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
 
 
 @pytest.mark.asyncio
+async def test_user_prepares_a_project_and_activity_without_starting_a_timer(
+    tmp_path: Path,
+) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    thread = threading.Thread(target=serve, args=(paths,), daemon=True)
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        app = TimeTrackerApp(client)
+        async with app.run_test() as pilot:
+            await pilot.press("f3")
+            await pilot.pause()
+
+            app.query_one("#new-project", Input).value = "Research"
+            create_project_button = app.query_one("#create-project-button", Button)
+            create_project_button.focus()
+            await pilot.pause()
+            create_project_button.press()
+            await _wait_for_ui(
+                pilot,
+                lambda: (
+                    "Created project Research"
+                    in str(app.query_one("#message", Static).render())
+                ),
+                "project was not created",
+            )
+            assert app.query_one("#new-project", Input).value == ""
+            active_tree = app.query_one("#active-targets", Tree)
+            assert [str(node.label) for node in active_tree.root.children] == [
+                "Research"
+            ]
+            assert client.list_projects() == ["Research"]
+
+            app.query_one("#new-project", Input).value = "research"
+            create_project_button.focus()
+            await pilot.pause()
+            create_project_button.press()
+            await _wait_for_ui(
+                pilot,
+                lambda: (
+                    "project already exists: Research"
+                    in str(app.query_one("#message", Static).render())
+                ),
+                "duplicate project was not rejected",
+            )
+
+            app.query_one("#new-activity-project", Input).value = "research"
+            app.query_one("#new-activity-name", Input).value = "Literature review"
+            create_activity_button = app.query_one("#create-activity-button", Button)
+            create_activity_button.focus()
+            await pilot.pause()
+            create_activity_button.press()
+            await _wait_for_ui(
+                pilot,
+                lambda: (
+                    "Created activity Research / Literature review"
+                    in str(app.query_one("#message", Static).render())
+                ),
+                "activity was not created",
+            )
+            assert app.query_one("#new-activity-name", Input).value == ""
+            active_tree = app.query_one("#active-targets", Tree)
+            assert [
+                str(node.label) for node in active_tree.root.children[0].children
+            ] == ["Literature review"]
+            assert client.list_activities("Research") == ["Literature review"]
+
+            app.query_one("#new-activity-name", Input).value = "literature review"
+            create_activity_button.focus()
+            await pilot.pause()
+            create_activity_button.press()
+            await _wait_for_ui(
+                pilot,
+                lambda: (
+                    "activity already exists: Research/Literature review"
+                    in str(app.query_one("#message", Static).render())
+                ),
+                "duplicate activity was not rejected",
+            )
+
+            app.query_one("#new-activity-project", Input).value = "Unknown"
+            app.query_one("#new-activity-name", Input).value = "Planning"
+            create_activity_button.focus()
+            await pilot.pause()
+            create_activity_button.press()
+            await _wait_for_ui(
+                pilot,
+                lambda: (
+                    "project not found: Unknown"
+                    in str(app.query_one("#message", Static).render())
+                ),
+                "missing project was not rejected",
+            )
+            assert client.list_activities("Research") == ["Literature review"]
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+
+
+@pytest.mark.asyncio
 async def test_rejected_second_archive_invocation_clears_confirmation(
     tmp_path: Path,
 ) -> None:

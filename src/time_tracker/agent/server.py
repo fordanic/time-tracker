@@ -395,6 +395,16 @@ def _handle_request(
                 _required_str(params, "activity"),
             )
             result = {"project": project, "activity": activity}
+        elif method == "create_project":
+            result = {
+                "project": service.create_project(_required_str(params, "project"))
+            }
+        elif method == "create_activity":
+            project, activity = service.create_activity(
+                _required_str(params, "project"),
+                _required_str(params, "activity"),
+            )
+            result = {"project": project, "activity": activity}
         elif method == "export_completed":
             result = {
                 "entry_count": export_service.export_completed(
