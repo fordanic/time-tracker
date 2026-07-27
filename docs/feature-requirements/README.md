@@ -62,6 +62,7 @@ For each selected feature:
 - [Persistent theme and export preferences](persistent-theme-export-preferences.md)
 - [Versioned release candidates and releases](versioned-release-candidates-releases.md)
 - [Prepare projects and activities](prepare-projects-and-activities.md)
+- [WSL notification delivery to the Windows desktop](wsl-windows-desktop-notifications.md)
 
 ## Feature specification template
 
