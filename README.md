@@ -111,6 +111,30 @@ starts. To locate the optional TOML configuration file, run:
 uv run time-tracker --config-path
 ```
 
+## Logs
+
+The background process writes one log file, `agent.log`. It records operational
+failures that do not interrupt tracking, such as a native reminder the desktop
+rejected or an idle-duration adapter that became unavailable. Tracked time,
+project and activity names, notes, and input details are never written to it.
+
+Its location follows the platform's per-user log convention:
+
+| Platform | Location |
+| --- | --- |
+| Linux | `~/.local/state/time-tracker/log/agent.log` |
+| macOS | `~/Library/Logs/time-tracker/agent.log` |
+| Windows | `%LOCALAPPDATA%\Time Tracker\time-tracker\Logs\agent.log` |
+
+A WSL distribution uses the Linux location inside that distribution.
+
+An isolated instance writes `agent.log` into its own directory instead of the
+per-user location, so the end-to-end tests, `make smoke-packaged`, and
+`make smoke-notification` never touch the per-user log.
+
+The TUI reports failures it can act on directly in its message area; the log is
+where to look when a reminder never reached the desktop while no TUI was open.
+
 ## Build
 
 Build a native package for the current operating system:
@@ -199,7 +223,8 @@ The initial product baseline and selected TUI roadmap features are implemented:
 - recent-work selection and active/archived project and activity management;
 - preparing new projects and activities from Manage without starting a timer;
 - persistent reminder, theme, and export settings with live reload;
-- reminder windows, snooze, and optional content-free input-idle detection; and
+- reminder windows, snooze, and optional content-free input-idle detection;
+- native reminder delivery to the Windows desktop from WSL; and
 - responsive Track, Review, Manage, and Settings views with keyboard shortcuts.
 
 The check workflow builds and exercises the packaged lifecycle on Linux, Windows,
@@ -210,7 +235,9 @@ macOS Core Graphics idle-duration adapter was validated interactively on July
 packaged lifecycle were validated locally on July 24, 2026. The GitHub release
 workflow published final release `0.1.0` on July 25, 2026, validating Linux,
 Windows, and macOS archives, checksums, native version metadata, the annotated
-tag, and final-release state.
+tag, and final-release state. Reminder delivery to the Windows desktop from WSL
+was validated interactively on July 27, 2026, on Ubuntu-24.04 under Windows 11
+25H2, including delivery from the background process with no TUI open.
 
 Known outstanding validation:
 

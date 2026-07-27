@@ -527,9 +527,15 @@ async def test_user_snoozes_and_confirms_an_active_reminder_from_the_tui(
             assert "Still tracking Reminder / Interaction?" in prompt
 
             await pilot.press("f12")
-            await pilot.pause()
+            await _wait_for_ui(
+                pilot,
+                lambda: (
+                    "Reminder snoozed"
+                    in str(app.query_one("#message", Static).render())
+                ),
+                "snooze was not reported in the interface",
+            )
 
-            assert "Reminder snoozed" in str(app.query_one("#message", Static).render())
             assert app.pending_reminder is None
             assert client.get_active() == started
 
@@ -537,11 +543,15 @@ async def test_user_snoozes_and_confirms_an_active_reminder_from_the_tui(
             await app._refresh_reminder()
             await pilot.pause()
             assert await pilot.click("#confirm-active-reminder-button")
-            await pilot.pause()
-
-            assert "interval restarted" in str(
-                app.query_one("#message", Static).render()
+            await _wait_for_ui(
+                pilot,
+                lambda: (
+                    "interval restarted"
+                    in str(app.query_one("#message", Static).render())
+                ),
+                "confirmation was not reported in the interface",
             )
+
             assert app.pending_reminder is None
             assert client.get_active() == started
     finally:
@@ -597,9 +607,19 @@ async def test_tui_identifies_idle_triggered_active_reminder(tmp_path: Path) -> 
             assert "use Review to remove idle time" in prompt
 
             await pilot.press("f10")
-            await pilot.pause()
+            # The fake detector never observes input, so the agent becomes
+            # eligible to prompt again immediately. Assert the confirmation was
+            # reported rather than the momentary cleared prompt, which the next
+            # reminder refresh legitimately repopulates.
+            await _wait_for_ui(
+                pilot,
+                lambda: (
+                    "interval restarted"
+                    in str(app.query_one("#message", Static).render())
+                ),
+                "confirmed idle reminder was not reported",
+            )
 
-            assert app.pending_reminder is None
             assert client.get_active() == started
     finally:
         client.shutdown()
@@ -1461,14 +1481,35 @@ async def test_removed_persisted_theme_falls_back_safely(tmp_path: Path) -> None
 
 
 def _wait_until_ready(client: AgentClient) -> None:
-    deadline = time.monotonic() + 2
+    # Windows agents build the WinRT notification backend before opening their
+    # endpoint, so a slow host needs noticeably longer than a local Linux one.
+    deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
         try:
             client.ping()
             return
         except AgentUnavailableError:
             time.sleep(0.01)
+    _stop_late_agent(client)
     raise AssertionError("agent did not start")
+
+
+def _stop_late_agent(client: AgentClient) -> None:
+    """Stop an agent that answered too late to keep its test.
+
+    A caller that never reaches its own cleanup would otherwise leave the agent
+    blocked in `accept`. That call occupies a default-executor thread, which is
+    not a daemon and is joined at interpreter shutdown, so one abandoned agent
+    hangs the whole session after pytest has already reported its result.
+    """
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            client.shutdown()
+        except AgentUnavailableError:
+            time.sleep(0.05)
+        else:
+            return
 
 
 async def _wait_for_ui(
@@ -1476,7 +1517,7 @@ async def _wait_for_ui(
     condition: Callable[[], bool],
     failure: str,
 ) -> None:
-    deadline = time.monotonic() + 2
+    deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
         if condition():
             return

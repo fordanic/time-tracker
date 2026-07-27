@@ -37,7 +37,7 @@ behavior independent of Textual presentation code.
 | Persistence | Standard-library `sqlite3` and numbered SQL migrations |
 | Configuration | TOML via `tomllib` |
 | Platform paths | `platformdirs` |
-| Notifications | Narrow native adapter: `desktop-notifier` on Linux/Windows, `osascript` on macOS |
+| Notifications | Narrow native adapter: `desktop-notifier` on Linux/Windows, `osascript` on macOS, WinRT toasts on WSL |
 | Local binaries | PyInstaller, run separately on each target OS |
 | Release publication | GitHub Actions, Git tags, and GitHub CLI |
 | Quality tools | pytest, pytest-asyncio, Ruff, and mypy |
@@ -202,6 +202,19 @@ delivery fails or the TUI disconnects.
   than interpolated into AppleScript source. Delivery failures do not affect
   authoritative timer state and are written to the platform-appropriate agent
   log. Surfacing native delivery failures in the TUI is not currently required.
+- A WSL host reports Linux, so `desktop-notifier` selects its D-Bus backend, but a
+  WSL distribution provides no notification daemon and delivery always fails.
+  Detect WSL from the kernel release and registered Windows interop, then deliver
+  a Windows toast through the Windows PowerShell 5.1 WinRT notification API. The
+  agent registers one stable current-user application identity with a display
+  name so toasts are attributed to Time Tracker and manageable in the Windows
+  notification settings; Windows consumes the first toast from an unseen identity,
+  so first-time registration is followed by one warm-up notification. Reminder
+  text crosses into Windows through the shared process environment rather than
+  script source or a command line, invocations are timeout-bounded so the agent
+  loop cannot stall, and an unavailable interpreter falls back to desktop-service
+  delivery for a user running their own daemon inside WSL. WSLg provides no X11
+  screen-saver extension, so idle detection reports itself unavailable there.
 - Reminder deadlines use a monotonic schedule. A persisted start, switch, or stop
   resets the relevant deadline, as does explicit confirmation of an active
   reminder; closing the TUI does not affect it. The default schedule is five
@@ -265,7 +278,7 @@ Maintain validation of the minimal packaged application on all three platforms:
    closes.
 2. Exchange authenticated JSON over `AF_UNIX` and `AF_PIPE`.
 3. Deliver a native notification with no TUI open, including local signing on
-   macOS.
+   macOS and delivery to the Windows desktop from WSL.
 4. Reconnect the TUI and stop the process cleanly.
 
 If an IPC or notification choice fails, replace that adapter without changing the
@@ -278,6 +291,7 @@ stop it, and shut down the agent. The GitHub Actions workflow is configured to
 build and execute this lifecycle on Linux, Windows, and macOS. Native delivery is
 checked separately on an interactive desktop with `make smoke-notification`,
 since hosted CI runners do not provide a reliable signed-in notification session.
+The same smoke covers WSL, where delivery must reach the Windows desktop.
 The release workflow repeats the canonical checks and packaged lifecycle on each
 target operating system before the publication job can create a tag or upload an
 asset.
@@ -291,6 +305,7 @@ Current platform results and outstanding validation are recorded only in the
 - [Python sqlite3](https://docs.python.org/3/library/sqlite3.html)
 - [Python tomllib](https://docs.python.org/3/library/tomllib.html)
 - [desktop-notifier](https://github.com/samschott/desktop-notifier)
+- [Windows toast notifications and application identity](https://learn.microsoft.com/en-us/windows/apps/design/shell/tiles-and-notifications/send-local-toast-other)
 - [platformdirs](https://platformdirs.readthedocs.io/en/latest/)
 - [PyInstaller](https://pyinstaller.org/en/stable/)
 - [uv projects](https://docs.astral.sh/uv/concepts/projects/)
