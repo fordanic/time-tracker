@@ -201,6 +201,14 @@ class TrackerGateway(Protocol):
         """Restore one archived activity."""
         ...
 
+    def create_project(self, project: str) -> str:
+        """Create a new project and return its canonical stored name."""
+        ...
+
+    def create_activity(self, project: str, activity: str) -> tuple[str, str]:
+        """Create a new activity and return its canonical stored names."""
+        ...
+
     def export_completed(
         self,
         destination: Path,
@@ -450,7 +458,8 @@ class TimeTrackerApp(App[None]):
         color: $text-muted;
     }
 
-    #archive-selected-button, #restore-selected-button {
+    #archive-selected-button, #restore-selected-button,
+    #create-project-button, #create-activity-button {
         width: 30;
         margin-bottom: 1;
     }
@@ -869,6 +878,34 @@ class TimeTrackerApp(App[None]):
                         id="restore-selected-button",
                         disabled=True,
                     )
+                    yield Static(
+                        "Prepare a new project",
+                        classes="manage-title",
+                    )
+                    yield Input(
+                        placeholder="New project name",
+                        id="new-project",
+                    )
+                    yield Button(
+                        "Create project",
+                        id="create-project-button",
+                    )
+                    yield Static(
+                        "Prepare a new activity",
+                        classes="manage-title",
+                    )
+                    yield Input(
+                        placeholder="Existing project",
+                        id="new-activity-project",
+                    )
+                    yield Input(
+                        placeholder="New activity name",
+                        id="new-activity-name",
+                    )
+                    yield Button(
+                        "Create activity",
+                        id="create-activity-button",
+                    )
                 with VerticalScroll(id="settings-view", classes="view"):
                     yield Static(
                         "Configure reminders and export formatting below. Saving "
@@ -1137,6 +1174,16 @@ class TimeTrackerApp(App[None]):
             await self._restore_project()
         else:
             await self._restore_activity()
+
+    @on(Button.Pressed, "#create-project-button")
+    async def handle_create_project_button(self) -> None:
+        """Create a new project prepared ahead of any timer or entry."""
+        await self._create_project()
+
+    @on(Button.Pressed, "#create-activity-button")
+    async def handle_create_activity_button(self) -> None:
+        """Create a new activity prepared ahead of any timer or entry."""
+        await self._create_activity()
 
     @on(Button.Pressed, "#confirm-active-reminder-button")
     async def handle_confirm_active_reminder_button(self) -> None:
@@ -1542,6 +1589,38 @@ class TimeTrackerApp(App[None]):
             f"Restored activity {restored_project} / {restored_activity}."
         )
 
+    async def _create_project(self) -> None:
+        project_input = self.query_one("#new-project", Input)
+        try:
+            created_project = await asyncio.to_thread(
+                self.client.create_project,
+                project_input.value,
+            )
+        except Exception as error:
+            self._show_message(str(error), error=True)
+            return
+        project_input.value = ""
+        await self._refresh_project_suggestions()
+        await self._refresh_manage_items()
+        self._show_message(f"Created project {created_project}.")
+
+    async def _create_activity(self) -> None:
+        project_input = self.query_one("#new-activity-project", Input)
+        activity_input = self.query_one("#new-activity-name", Input)
+        try:
+            created_project, created_activity = await asyncio.to_thread(
+                self.client.create_activity,
+                project_input.value,
+                activity_input.value,
+            )
+        except Exception as error:
+            self._show_message(str(error), error=True)
+            return
+        activity_input.value = ""
+        await self._refresh_all_activity_suggestions()
+        await self._refresh_manage_items()
+        self._show_message(f"Created activity {created_project} / {created_activity}.")
+
     def _clear_project_archive_confirmation(self) -> None:
         self._pending_archive_project = None
         buttons = self.query("#archive-selected-button")
@@ -1601,7 +1680,7 @@ class TimeTrackerApp(App[None]):
 
     def _set_project_suggestions(self, projects: list[str]) -> None:
         """Apply canonical project suggestions to Track and Manage inputs."""
-        for selector in ("#project", "#correction-project"):
+        for selector in ("#project", "#correction-project", "#new-activity-project"):
             self.query_one(selector, Input).suggester = SuggestFromList(
                 projects,
                 case_sensitive=False,
