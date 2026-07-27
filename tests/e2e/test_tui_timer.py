@@ -527,9 +527,15 @@ async def test_user_snoozes_and_confirms_an_active_reminder_from_the_tui(
             assert "Still tracking Reminder / Interaction?" in prompt
 
             await pilot.press("f12")
-            await pilot.pause()
+            await _wait_for_ui(
+                pilot,
+                lambda: (
+                    "Reminder snoozed"
+                    in str(app.query_one("#message", Static).render())
+                ),
+                "snooze was not reported in the interface",
+            )
 
-            assert "Reminder snoozed" in str(app.query_one("#message", Static).render())
             assert app.pending_reminder is None
             assert client.get_active() == started
 
@@ -537,11 +543,15 @@ async def test_user_snoozes_and_confirms_an_active_reminder_from_the_tui(
             await app._refresh_reminder()
             await pilot.pause()
             assert await pilot.click("#confirm-active-reminder-button")
-            await pilot.pause()
-
-            assert "interval restarted" in str(
-                app.query_one("#message", Static).render()
+            await _wait_for_ui(
+                pilot,
+                lambda: (
+                    "interval restarted"
+                    in str(app.query_one("#message", Static).render())
+                ),
+                "confirmation was not reported in the interface",
             )
+
             assert app.pending_reminder is None
             assert client.get_active() == started
     finally:
@@ -597,9 +607,12 @@ async def test_tui_identifies_idle_triggered_active_reminder(tmp_path: Path) -> 
             assert "use Review to remove idle time" in prompt
 
             await pilot.press("f10")
-            await pilot.pause()
+            await _wait_for_ui(
+                pilot,
+                lambda: app.pending_reminder is None,
+                "confirmed idle reminder was not cleared",
+            )
 
-            assert app.pending_reminder is None
             assert client.get_active() == started
     finally:
         client.shutdown()
