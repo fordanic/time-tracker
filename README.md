@@ -111,6 +111,30 @@ starts. To locate the optional TOML configuration file, run:
 uv run time-tracker --config-path
 ```
 
+## Logs
+
+The background process writes one log file, `agent.log`. It records operational
+failures that do not interrupt tracking, such as a native reminder the desktop
+rejected or an idle-duration adapter that became unavailable. Tracked time,
+project and activity names, notes, and input details are never written to it.
+
+Its location follows the platform's per-user log convention:
+
+| Platform | Location |
+| --- | --- |
+| Linux | `~/.local/state/time-tracker/log/agent.log` |
+| macOS | `~/Library/Logs/time-tracker/agent.log` |
+| Windows | `%LOCALAPPDATA%\Time Tracker\time-tracker\Logs\agent.log` |
+
+A WSL distribution uses the Linux location inside that distribution.
+
+An isolated instance writes `agent.log` into its own directory instead of the
+per-user location, so the end-to-end tests, `make smoke-packaged`, and
+`make smoke-notification` never touch the per-user log.
+
+The TUI reports failures it can act on directly in its message area; the log is
+where to look when a reminder never reached the desktop while no TUI was open.
+
 ## Build
 
 Build a native package for the current operating system:
