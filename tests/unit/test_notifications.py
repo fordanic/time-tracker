@@ -98,3 +98,84 @@ async def test_idle_triggered_notification_identifies_threshold(
 
     assert fake.title == "Still tracking Website / Planning?"
     assert "idle for at least 15 minutes" in fake.message
+
+
+@pytest.fixture(autouse=True)
+def not_a_wsl_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep host-dependent delivery out of tests that do not select it."""
+    monkeypatch.setattr(notifications, "is_wsl_host", lambda: False)
+
+
+class FakeToastDispatcher:
+    def __init__(self, *, error: Exception | None = None) -> None:
+        self.error = error
+        self.title = ""
+        self.message = ""
+
+    async def send(self, title: str, message: str) -> None:
+        self.title = title
+        self.message = message
+        if self.error is not None:
+            raise self.error
+
+
+def wsl_service(
+    monkeypatch: pytest.MonkeyPatch,
+    toast: FakeToastDispatcher,
+    notifier: FakeDesktopNotifier,
+) -> NativeNotificationService:
+    monkeypatch.setattr(
+        "time_tracker.infrastructure.notifications.sys.platform", "linux"
+    )
+    monkeypatch.setattr(notifications, "is_wsl_host", lambda: True)
+    monkeypatch.setattr(notifications, "WindowsToastDispatcher", lambda: toast)
+    monkeypatch.setattr(notifications, "DesktopNotifier", lambda **_: notifier)
+    return NativeNotificationService()
+
+
+@pytest.mark.asyncio
+async def test_wsl_host_delivers_the_shared_reminder_text_as_a_toast(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    toast = FakeToastDispatcher()
+    notifier = FakeDesktopNotifier(dispatch=True)
+    service = wsl_service(monkeypatch, toast, notifier)
+
+    await service.send(
+        Reminder(
+            ReminderKind.ACTIVE,
+            project="Website",
+            activity="Planning",
+            reason=ReminderReason.IDLE,
+            idle_threshold_minutes=15,
+        )
+    )
+
+    assert toast.title == "Still tracking Website / Planning?"
+    assert "idle for at least 15 minutes" in toast.message
+    assert notifier.title == ""
+
+
+@pytest.mark.asyncio
+async def test_wsl_toast_failure_falls_back_to_the_desktop_service(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    toast = FakeToastDispatcher(error=RuntimeError("interpreter was not found"))
+    notifier = FakeDesktopNotifier(dispatch=True)
+    service = wsl_service(monkeypatch, toast, notifier)
+
+    await service.send(Reminder(ReminderKind.INACTIVE))
+
+    assert notifier.title == "No timer is running"
+
+
+@pytest.mark.asyncio
+async def test_wsl_reports_the_toast_failure_when_both_paths_fail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    toast = FakeToastDispatcher(error=RuntimeError("Windows rejected the toast"))
+    notifier = FakeDesktopNotifier(dispatch=False)
+    service = wsl_service(monkeypatch, toast, notifier)
+
+    with pytest.raises(RuntimeError, match="Windows rejected the toast"):
+        await service.send(Reminder(ReminderKind.INACTIVE))
