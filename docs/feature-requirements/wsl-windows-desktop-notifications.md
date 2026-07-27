@@ -1,6 +1,6 @@
 # WSL notification delivery to the Windows desktop
 
-**Status:** Approved
+**Status:** Implemented
 
 ## Purpose
 

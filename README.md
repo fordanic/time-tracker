@@ -199,7 +199,8 @@ The initial product baseline and selected TUI roadmap features are implemented:
 - recent-work selection and active/archived project and activity management;
 - preparing new projects and activities from Manage without starting a timer;
 - persistent reminder, theme, and export settings with live reload;
-- reminder windows, snooze, and optional content-free input-idle detection; and
+- reminder windows, snooze, and optional content-free input-idle detection;
+- native reminder delivery to the Windows desktop from WSL; and
 - responsive Track, Review, Manage, and Settings views with keyboard shortcuts.
 
 The check workflow builds and exercises the packaged lifecycle on Linux, Windows,
@@ -210,7 +211,9 @@ macOS Core Graphics idle-duration adapter was validated interactively on July
 packaged lifecycle were validated locally on July 24, 2026. The GitHub release
 workflow published final release `0.1.0` on July 25, 2026, validating Linux,
 Windows, and macOS archives, checksums, native version metadata, the annotated
-tag, and final-release state.
+tag, and final-release state. Reminder delivery to the Windows desktop from WSL
+was validated interactively on July 27, 2026, on Ubuntu-24.04 under Windows 11
+25H2, including delivery from the background process with no TUI open.
 
 Known outstanding validation:
 
