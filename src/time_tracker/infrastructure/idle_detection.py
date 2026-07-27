@@ -103,6 +103,10 @@ class X11IdleDetector:
             ctypes.POINTER(_XScreenSaverInfo),
         ]
         self._xss.XScreenSaverQueryInfo.restype = ctypes.c_int
+        # Probe once so a display without the screen-saver extension, such as
+        # WSLg's, reports detection as unavailable instead of appearing available
+        # until its first failing poll.
+        self.idle_seconds()
 
     def idle_seconds(self) -> float:
         """Return seconds since input for the current X11 display."""
