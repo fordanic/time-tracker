@@ -3,17 +3,27 @@ name: checks
 on:
   push:
     branches:
-      - "**"
+      - main
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# One run per branch. Pushing again supersedes an unfinished run instead of
+# leaving it to occupy runners, and a branch with an open pull request is
+# checked once by the pull_request event rather than twice.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
   checks:
     name: ${{ matrix.os }} / Python 3.14
     runs-on: ${{ matrix.os }}
+    # The suite takes about three minutes; this only bounds a hang, so that a
+    # blocked run fails quickly instead of holding a runner for six hours.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
