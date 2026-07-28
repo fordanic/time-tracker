@@ -677,6 +677,8 @@ class TimeTrackerApp(App[None]):
         self._recent_activities: list[RecentActivity] = []
         self._start_action: StartAction | None = None
         self._editing_entry_id: int | None = None
+        self._editing_started_at: datetime | None = None
+        self._editing_stopped_at: datetime | None = None
         self._creating_manual_entry = False
         self._pending_archive_project: tuple[str, str] | None = None
         self._pending_archive_activity: tuple[str, str, str, str] | None = None
@@ -1800,6 +1802,8 @@ class TimeTrackerApp(App[None]):
         stopped_at = datetime.now().astimezone().replace(second=0, microsecond=0)
         started_at = stopped_at - timedelta(hours=1)
         self._editing_entry_id = None
+        self._editing_started_at = None
+        self._editing_stopped_at = None
         self._creating_manual_entry = True
         self.query_one("#correction-title", Static).update("Add missed entry")
         self.query_one("#correction-project", Input).value = ""
@@ -1818,6 +1822,8 @@ class TimeTrackerApp(App[None]):
 
     def _populate_correction(self, entry: CompletedTimer) -> None:
         self._editing_entry_id = entry.entry_id
+        self._editing_started_at = entry.started_at
+        self._editing_stopped_at = entry.stopped_at
         self._creating_manual_entry = False
         self.query_one("#correction-title", Static).update("Correct selected entry")
         self.query_one("#correction-project", Input).value = entry.project
@@ -1844,13 +1850,19 @@ class TimeTrackerApp(App[None]):
             )
             return
         try:
-            started_at = _parse_offset_datetime(
-                self.query_one("#correction-start", Input).value,
-                "start",
+            started_at = _restore_stored_precision(
+                _parse_offset_datetime(
+                    self.query_one("#correction-start", Input).value,
+                    "start",
+                ),
+                self._editing_started_at,
             )
-            stopped_at = _parse_offset_datetime(
-                self.query_one("#correction-stop", Input).value,
-                "stop",
+            stopped_at = _restore_stored_precision(
+                _parse_offset_datetime(
+                    self.query_one("#correction-stop", Input).value,
+                    "stop",
+                ),
+                self._editing_stopped_at,
             )
             project = self.query_one("#correction-project", Input).value
             activity = self.query_one("#correction-activity", Input).value
@@ -2464,6 +2476,19 @@ def _parse_offset_datetime(value: str, label: str) -> datetime:
     if parsed.tzinfo is None:
         raise ValueError(f"{label} must include a UTC offset")
     return parsed
+
+
+def _restore_stored_precision(edited: datetime, stored: datetime | None) -> datetime:
+    """Return the stored instant when its displayed second precision is unchanged.
+
+    Correction fields show whole seconds, but stored transitions carry
+    sub-second precision and a switch makes one entry stop exactly when the next
+    starts. Submitting the displayed value therefore moves an untouched boundary
+    earlier into its neighbor, which the no-overlap rule rejects.
+    """
+    if stored is not None and edited == stored.replace(microsecond=0):
+        return stored
+    return edited
 
 
 def _parse_filter_date(value: str, label: str) -> date:

@@ -1165,6 +1165,68 @@ async def test_user_corrects_a_selected_completed_entry_in_review(
 
 
 @pytest.mark.asyncio
+async def test_correction_keeps_untouched_switch_boundaries(
+    tmp_path: Path,
+) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    repository = SQLiteTimerRepository(paths.database)
+    # Switching records one sub-second instant as the first entry's stop and the
+    # second entry's start, so a second-precision round trip of either boundary
+    # would move it into its neighbor.
+    started_at = datetime(2026, 7, 20, 8, 0, 0, 123456, tzinfo=UTC)
+    switched_at = datetime(2026, 7, 20, 9, 30, 0, 654321, tzinfo=UTC)
+    stopped_at = datetime(2026, 7, 20, 10, 30, 0, 789012, tzinfo=UTC)
+    repository.start("Website", "Planning", started_at, None)
+    repository.start("Website", "Implementation", switched_at, "Original")
+    repository.stop(stopped_at)
+    thread = threading.Thread(target=serve, args=(paths,), daemon=True)
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        app = TimeTrackerApp(client)
+        async with app.run_test() as pilot:
+            await pilot.press("f2")
+            await pilot.pause()
+            app.query_one("#history", DataTable).move_cursor(row=1)
+            app.query_one("#load-correction-button", Button).press()
+            await _wait_for_ui(
+                pilot,
+                lambda: (
+                    app.query_one("#correction-activity", Input).value
+                    == "Implementation"
+                ),
+                "the switched entry was not loaded into the correction form",
+            )
+
+            assert app.query_one("#correction-start", Input).value == (
+                switched_at.astimezone().isoformat(timespec="seconds")
+            )
+            app.query_one("#correction-note", Input).value = "Revised"
+            app.query_one("#save-correction-button", Button).press()
+            await _wait_for_ui(
+                pilot,
+                lambda: (
+                    "Corrected Website / Implementation"
+                    in str(app.query_one("#message", Static).render())
+                ),
+                "correcting a note next to a switch boundary was rejected",
+            )
+
+            first, corrected = client.list_completed()
+            assert corrected.note == "Revised"
+            assert corrected.started_at == switched_at
+            assert corrected.stopped_at == stopped_at
+            assert first.stopped_at == switched_at
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+
+
+@pytest.mark.asyncio
 async def test_user_adds_missed_time_without_changing_active_timer(
     tmp_path: Path,
 ) -> None:
