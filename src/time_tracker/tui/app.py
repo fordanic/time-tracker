@@ -303,7 +303,7 @@ class ShortcutHelpScreen(ModalScreen[None]):
                 "F5 Start / switch / restart · F6 Stop · F7 Export\n"
                 "F8 Archive project · F9 Archive activity\n"
                 "F10 Still active · F11 Update active · F12 Snooze\n"
-                "Ctrl+C Quit · Ctrl+K or Esc Close this help",
+                "Ctrl+P Commands · Ctrl+C Quit · Ctrl+K or Esc Close this help",
                 id="shortcut-help-text",
             )
 
@@ -916,7 +916,9 @@ class TimeTrackerApp(App[None]):
                 with VerticalScroll(id="settings-view", classes="view"):
                     yield Static(
                         "Configure reminders and export formatting below. Saving "
-                        "updates the TOML file and applies changes immediately.",
+                        "updates the TOML file and applies changes immediately. The "
+                        "color palette applies and is saved as soon as it is "
+                        "selected.",
                         id="settings-info",
                     )
                     with Horizontal(classes="settings-row"):
@@ -964,6 +966,14 @@ class TimeTrackerApp(App[None]):
                             value=",",
                             allow_blank=False,
                             id="export-delimiter",
+                        )
+                    with Horizontal(classes="settings-row"):
+                        yield Static("Color palette")
+                        yield Select(
+                            [(name, name) for name in sorted(self.available_themes)],
+                            value=self.theme,
+                            allow_blank=False,
+                            id="color-palette",
                         )
                     yield Static("Idle detection: checking…", id="idle-status")
                     yield Button(
@@ -1017,6 +1027,7 @@ class TimeTrackerApp(App[None]):
             self._saved_theme = selected_theme
             self.theme = selected_theme
             self._theme_persistence_ready = True
+            self._render_theme_selection()
             self._set_project_suggestions(projects)
             self._render_history(completed)
             self._render_recent_activities(recent)
@@ -1044,7 +1055,8 @@ class TimeTrackerApp(App[None]):
         self._select_view("track-tab")
 
     async def _handle_theme_changed(self, theme: Theme) -> None:
-        """Persist a theme selected through Textual's theme picker."""
+        """Persist a theme selected in Settings or through the command palette."""
+        self._render_theme_selection()
         if not self._theme_persistence_ready or theme.name == self._saved_theme:
             return
         try:
@@ -1053,6 +1065,12 @@ class TimeTrackerApp(App[None]):
             self._show_message(str(error), error=True)
             return
         self._saved_theme = saved
+
+    @on(Select.Changed, "#color-palette")
+    def handle_color_palette_selected(self, event: Select.Changed) -> None:
+        """Apply the palette selected in Settings so it is saved immediately."""
+        if isinstance(event.value, str) and event.value != self.theme:
+            self.theme = event.value
 
     @on(Tabs.TabActivated, "#view-tabs")
     def handle_view_activated(self, event: Tabs.TabActivated) -> None:
@@ -2452,6 +2470,12 @@ class TimeTrackerApp(App[None]):
         )
         self.query_one("#export-delimiter", Select).value = export_delimiter
         self._render_idle_status()
+
+    def _render_theme_selection(self) -> None:
+        """Show the applied palette in Settings without changing the theme."""
+        selects = self.query("#color-palette")
+        if selects:
+            selects.first(Select).value = self.theme
 
     def _render_idle_status(self) -> None:
         availability = "available" if self._idle_detection_available else "unavailable"

@@ -1516,6 +1516,58 @@ async def test_user_edits_and_live_applies_reminder_settings(tmp_path: Path) -> 
 
 
 @pytest.mark.asyncio
+async def test_user_selects_a_color_palette_in_settings(tmp_path: Path) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    thread = threading.Thread(target=serve, args=(paths,), daemon=True)
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        app = TimeTrackerApp(client)
+        async with app.run_test() as pilot:
+            await pilot.press("f4")
+            await pilot.pause()
+            palette = app.query_one("#color-palette", Select)
+
+            assert palette.value == "textual-dark"
+
+            for available in sorted(app.available_themes):
+                palette.value = available
+                await pilot.pause()
+                assert app.theme == available
+
+            palette.value = "gruvbox"
+            await _wait_for_ui(
+                pilot,
+                lambda: client.get_theme() == "gruvbox",
+                "the selected palette was not persisted",
+            )
+            assert app.theme == "gruvbox"
+            assert load_config(paths.config).ui_settings.theme == "gruvbox"
+
+            app.theme = "nord"
+            await _wait_for_ui(
+                pilot,
+                lambda: palette.value == "nord",
+                "Settings did not follow a palette applied elsewhere",
+            )
+            assert client.get_theme() == "nord"
+
+        reopened = TimeTrackerApp(AgentClient(paths))
+        async with reopened.run_test() as pilot:
+            await pilot.press("f4")
+            await pilot.pause()
+            assert reopened.theme == "nord"
+            assert reopened.query_one("#color-palette", Select).value == "nord"
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+
+
+@pytest.mark.asyncio
 async def test_manage_trees_use_the_available_terminal_height(tmp_path: Path) -> None:
     paths = AgentPaths.in_directory(tmp_path)
     thread = threading.Thread(target=serve, args=(paths,), daemon=True)
