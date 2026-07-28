@@ -17,6 +17,11 @@ and active-entry editing remain later slices.
 - Populate start and stop as local, offset-aware ISO 8601 timestamps. Accept only
   offset-aware ISO 8601 input so each edited value maps to one unambiguous UTC
   instant, including during daylight-saving transitions.
+- Populate start and stop with whole-second precision and retain the stored
+  instant for a boundary left at its displayed value. Stored transitions carry
+  sub-second precision and a switch records one instant as both the earlier
+  entry's stop and the later entry's start, so resubmitting a displayed boundary
+  must not move it into a neighboring entry.
 - Trim project and activity names and normalize the note by trimming it and
   treating an empty value as no note, consistently with timer capture.
 - When the project/activity assignment changes, reuse a matching selectable target
@@ -57,7 +62,9 @@ and active-entry editing remain later slices.
    changing history.
 3. Saving with stop equal to or before start is rejected. Saving an interval that
    intersects another completed or active entry is rejected, while an interval
-   that only touches a neighboring boundary succeeds.
+   that only touches a neighboring boundary succeeds. Correcting only the note,
+   target, or one boundary of an entry that adjoins a neighbor at a sub-second
+   instant succeeds and leaves the untouched boundary byte-identical.
 4. Reassignment reuses canonical names case-insensitively, can create a new
    selectable pair, and rejects archived targets. An unchanged archived assignment
    remains valid for time- or note-only correction.
@@ -66,7 +73,8 @@ and active-entry editing remain later slices.
    recent-work projections through their existing shared sources.
 6. Unit, SQLite integration, IPC integration, and Textual workflow tests cover
    normalization and timestamp validation, successful correction, overlap and
-   archived-target rejection, protocol transport, row selection, and refresh.
+   archived-target rejection, retained sub-second boundaries, protocol transport,
+   row selection, and refresh.
 
 ## Documentation impact
 

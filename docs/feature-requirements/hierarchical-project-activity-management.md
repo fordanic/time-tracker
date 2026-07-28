@@ -20,6 +20,9 @@ activity names.
   view is active are visible immediately.
 - Refresh both trees after every successful archive or restore and keep a
   sensible neighboring selection when possible.
+- Size both trees to the available terminal height: at least twelve rows each on
+  terminals of thirty rows or more, and a reduced height on shorter terminals so
+  the remaining Manage controls stay reachable by scrolling.
 
 ## Invariants and error handling
 
@@ -37,8 +40,10 @@ activity names.
    node kind can be selected for restore.
 3. Parent restore ordering, active-timer preservation, exact-target
    confirmation, and reserved-name behavior remain unchanged.
-4. Textual tests cover project and activity selection, confirmation, refresh,
-   restore ordering, empty states, and F8/F9.
+4. Both trees show at least twelve rows on a tall terminal and shrink on a short
+   one without hiding the archive, restore, or preparation controls.
+5. Textual tests cover project and activity selection, confirmation, refresh,
+   restore ordering, empty states, tree height at both breakpoints, and F8/F9.
 
 ## Documentation impact
 

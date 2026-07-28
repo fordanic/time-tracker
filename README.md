@@ -18,6 +18,8 @@ TUI leaves the background process, active timer, and reminders running.
 - Export detailed entries and summaries as comma- or pipe-delimited UTF-8 text.
 - Configure desktop reminders, delivery windows, snooze, and optional local
   input-idle detection.
+- Choose a color palette in Settings that is applied immediately and restored on
+  the next launch.
 - Use Track, Review, Manage, and Settings workflows entirely from the keyboard.
 
 ## Requirements and architecture
@@ -222,7 +224,7 @@ The initial product baseline and selected TUI roadmap features are implemented:
   and export;
 - recent-work selection and active/archived project and activity management;
 - preparing new projects and activities from Manage without starting a timer;
-- persistent reminder, theme, and export settings with live reload;
+- persistent reminder, color-palette, and export settings with live reload;
 - reminder windows, snooze, and optional content-free input-idle detection;
 - native reminder delivery to the Windows desktop from WSL; and
 - responsive Track, Review, Manage, and Settings views with keyboard shortcuts.
