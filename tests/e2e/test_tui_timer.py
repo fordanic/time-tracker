@@ -1516,6 +1516,33 @@ async def test_user_edits_and_live_applies_reminder_settings(tmp_path: Path) -> 
 
 
 @pytest.mark.asyncio
+async def test_manage_trees_use_the_available_terminal_height(tmp_path: Path) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    thread = threading.Thread(target=serve, args=(paths,), daemon=True)
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        client.start("Website", "Planning")
+        client.stop()
+        client.archive_activity("Website", "Planning")
+        for size, minimum, maximum in (((80, 40), 12, 40), ((80, 24), 1, 8)):
+            app = TimeTrackerApp(client)
+            async with app.run_test(size=size) as pilot:
+                await pilot.press("f3")
+                await pilot.pause()
+                for selector in ("#active-targets", "#archived-targets"):
+                    rows = app.query_one(selector, Tree).content_region.height
+                    assert minimum <= rows <= maximum, f"{selector} at {size}: {rows}"
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+
+
+@pytest.mark.asyncio
 async def test_removed_persisted_theme_falls_back_safely(tmp_path: Path) -> None:
     paths = AgentPaths.in_directory(tmp_path)
     TomlConfigurationStore(paths.config).save(

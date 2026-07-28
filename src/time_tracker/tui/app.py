@@ -317,6 +317,7 @@ class TimeTrackerApp(App[None]):
     TITLE = "Time Tracker"
     SUB_TITLE = "Local, persistent time tracking"
     HORIZONTAL_BREAKPOINTS = [(0, "-narrow"), (70, "-wide")]
+    VERTICAL_BREAKPOINTS = [(0, "-short"), (30, "-tall")]
     BINDINGS = [
         Binding("f1", "show_track", "Track", show=False),
         Binding("f2", "show_review", "Review", show=False),
@@ -448,9 +449,13 @@ class TimeTrackerApp(App[None]):
     }
 
     #active-targets, #archived-targets {
-        height: 8;
+        height: 16;
         min-height: 4;
         margin-bottom: 0;
+    }
+
+    Screen.-short #active-targets, Screen.-short #archived-targets {
+        height: 8;
     }
 
     #active-targets-empty, #archived-targets-empty {
