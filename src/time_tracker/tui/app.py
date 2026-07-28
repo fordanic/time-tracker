@@ -418,6 +418,19 @@ class TimeTrackerApp(App[None]):
         margin-left: 1;
     }
 
+    /* Textual only dims the label of a disabled variant button and keeps its
+     * saturated background, which leaves inactive Start, Stop, and Save labels
+     * hard to read. Render disabled buttons as flat, fully opaque surface
+     * controls instead. These declarations need !important because Textual's
+     * own variant rules are more specific than any selector available here. */
+    Button:disabled {
+        color: $text-muted !important;
+        text-opacity: 1 !important;
+        background: $surface !important;
+        border-top: tall $surface !important;
+        border-bottom: tall $surface !important;
+    }
+
     Input {
         margin-bottom: 0;
     }

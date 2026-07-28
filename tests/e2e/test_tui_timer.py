@@ -7,7 +7,9 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from rich.color_triplet import ColorTriplet
 from textual.pilot import Pilot
+from textual.widget import Widget
 from textual.widgets import (
     Button,
     ContentSwitcher,
@@ -1568,6 +1570,43 @@ async def test_user_selects_a_color_palette_in_settings(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_inactive_buttons_stay_legible_in_every_palette(tmp_path: Path) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    thread = threading.Thread(target=serve, args=(paths,), daemon=True)
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        client.start("Website", "Planning", "Current work")
+        app = TimeTrackerApp(client)
+        async with app.run_test() as pilot:
+            start_button = app.query_one("#start-button", Button)
+            edit_button = app.query_one("#edit-active-button", Button)
+            await _wait_for_ui(
+                pilot,
+                lambda: start_button.disabled and edit_button.disabled,
+                "the recovered timer did not make Start and Update inactive",
+            )
+            stop_button = app.query_one("#stop-button", Button)
+            assert start_button.region.height == stop_button.region.height
+
+            for palette in sorted(app.available_themes):
+                app.theme = palette
+                await pilot.pause()
+                for button in (start_button, edit_button):
+                    ratio = _contrast_ratio(button)
+                    assert ratio is None or ratio >= 4.5, (
+                        f"{button.id} is unreadable in {palette}: {ratio}"
+                    )
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+
+
+@pytest.mark.asyncio
 async def test_manage_trees_use_the_available_terminal_height(tmp_path: Path) -> None:
     paths = AgentPaths.in_directory(tmp_path)
     thread = threading.Thread(target=serve, args=(paths,), daemon=True)
@@ -1651,6 +1690,35 @@ def _stop_late_agent(client: AgentClient) -> None:
             time.sleep(0.05)
         else:
             return
+
+
+def _contrast_ratio(widget: Widget) -> float | None:
+    """Return the WCAG contrast ratio of one widget's rendered label.
+
+    ANSI palettes leave the concrete colors to the terminal, so their ratio is
+    unknowable here and reported as None.
+    """
+    style = widget.rich_style
+    foreground = None if style.color is None else style.color.triplet
+    background = None if style.bgcolor is None else style.bgcolor.triplet
+    if foreground is None or background is None:
+        return None
+    darker, lighter = sorted(
+        (_relative_luminance(foreground), _relative_luminance(background))
+    )
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def _relative_luminance(triplet: ColorTriplet) -> float:
+    red, green, blue = (_linear_channel(value) for value in triplet)
+    return 0.2126 * red + 0.7152 * green + 0.0722 * blue
+
+
+def _linear_channel(value: int) -> float:
+    channel = value / 255
+    if channel <= 0.03928:
+        return channel / 12.92
+    return float(((channel + 0.055) / 1.055) ** 2.4)
 
 
 async def _wait_for_ui(

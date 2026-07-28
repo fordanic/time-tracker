@@ -15,6 +15,9 @@ Textual themes.
 - Vertically center Settings input text without clipping borders or focus state.
 - Use semantic Textual theme variables for foreground, background, status, focus,
   and selection colors instead of component-specific literal colors.
+- Render an inactive button as a flat surface control with full text opacity
+  instead of dimming its label against a saturated variant background, so labels
+  such as an inactive Start action stay readable.
 
 ## Invariants and error handling
 
@@ -29,6 +32,9 @@ Textual themes.
 2. Stacked inputs use the parent background between controls.
 3. Light and dark theme tests verify readable messages, focus, selection, and
    reminder state without hard-coded palette values.
+4. Inactive buttons keep a contrast ratio of at least 4.5:1 in every built-in
+   palette that defines concrete colors, and become inactive without changing
+   their size.
 
 ## Documentation impact
 
