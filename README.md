@@ -10,6 +10,8 @@ TUI leaves the background process, active timer, and reminders running.
 ## Features
 
 - Track one activity at a time and switch activities without overlapping entries.
+- Select one of five recent project/activity pairs with `1`–`5`, review the
+  pending action and optional note, and confirm it with `Enter`.
 - Recover an active timer after the TUI closes, the process restarts, or the
   application crashes.
 - Organize activities by project and archive or restore historical targets.
@@ -95,9 +97,11 @@ Or use the Make target, which syncs first:
 make run
 ```
 
-Enter a project and activity, then use the primary action or `F5` to start,
-switch, or restart tracking. Use `F6` to stop. `F1` through `F4` open Track,
-Review, Manage, and Settings; `Ctrl+K` shows all shortcuts.
+Select recent work with `1` through `5`, optionally enter a quick-switch note,
+and press `Enter` to confirm Start or Switch. A selected current pair remains a
+no-op. For work outside the deck, enter a project and activity and use `F5` to
+start, switch, or restart tracking. Use `F6` to stop. `F1` through `F4` open
+Track, Review, Manage, and Settings; `Ctrl+K` shows all shortcuts.
 
 Closing the TUI does not stop the background process or an active timer. Stop
 only the background process with:
@@ -226,8 +230,11 @@ The initial product baseline and selected TUI roadmap features are implemented:
 - preparing new projects and activities from Manage without starting a timer;
 - persistent reminder, color-palette, and export settings with live reload;
 - reminder windows, snooze, and optional content-free input-idle detection;
-- native reminder delivery to the Windows desktop from WSL; and
-- responsive Track, Review, Manage, and Settings views with keyboard shortcuts.
+- native reminder delivery to the Windows desktop from WSL;
+- responsive Track, Review, Manage, and Settings views with keyboard shortcuts;
+  and
+- a five-item quick-switch deck with deliberate selection, optional-note, and
+  Enter-confirmation behavior.
 
 The check workflow builds and exercises the packaged lifecycle on Linux, Windows,
 and macOS; all three jobs passed on July 25, 2026. A local macOS arm64 app-bundle

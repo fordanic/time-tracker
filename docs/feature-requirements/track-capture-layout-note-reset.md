@@ -15,9 +15,10 @@ selected target.
 - Use a two-line multiline note editor with soft wrapping and normal Tab focus
   traversal.
 - Preserve line breaks as plain-text note content.
-- Clear the note only when the user explicitly selects a target from recent work
-  or another selection control. Typing or correcting project/activity text does
-  not clear it.
+- Keep the normal capture note independent from the quick-switch note. Selecting
+  recent work does not change normal capture values; changing deck selection
+  clears only the pending quick-switch note. Typing or correcting normal
+  project/activity text does not clear its note.
 
 ## Invariants and error handling
 
@@ -31,8 +32,8 @@ selected target.
 1. Project and activity share a row at the normal supported width and stack at a
    defined narrow width.
 2. The note editor shows two lines, accepts line breaks, and Tab advances focus.
-3. Explicit recent-target selection clears the note, while typed target edits do
-   not.
+3. Explicit recent-target selection clears only a prior pending deck note, while
+   normal capture values and their note remain unchanged.
 4. Start, switch, restart, active-detail edit, recovery, and CSV quoting preserve
    multiline notes.
 

@@ -6,12 +6,13 @@ import asyncio
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.message import Message
 from textual.screen import ModalScreen
 from textual.suggester import SuggestFromList
 from textual.theme import Theme
@@ -48,8 +49,10 @@ from time_tracker.application.reporting import (
 )
 from time_tracker.application.tracking import (
     ArchivedActivity,
+    QuickSwitchAction,
     RecentActivity,
     StartAction,
+    classify_quick_switch,
 )
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
 
@@ -261,6 +264,39 @@ class ManageTarget:
     activity: str | None = None
 
 
+class QuickSwitchDeck(OptionList):
+    """Recent-work list whose pointer action selects and Enter confirms."""
+
+    BINDINGS = [
+        binding
+        for binding in OptionList.BINDINGS
+        if cast(Binding, binding).key != "enter"
+    ] + [Binding("enter", "confirm", "Confirm", show=False)]
+
+    class Confirmed(Message):
+        """The user confirmed the highlighted quick-switch target."""
+
+        def __init__(self, deck: QuickSwitchDeck) -> None:
+            super().__init__()
+            self.deck = deck
+
+        @property
+        def control(self) -> QuickSwitchDeck:
+            """Return the deck that sent the confirmation."""
+            return self.deck
+
+    def action_select(self) -> None:
+        """Keep pointer selection non-persistent after it moves the highlight."""
+
+    def action_confirm(self) -> None:
+        """Confirm the highlighted target when the deck handles Enter."""
+        highlighted = self.highlighted
+        if highlighted is None:
+            return
+        if not self.get_option_at_index(highlighted).disabled:
+            self.post_message(self.Confirmed(self))
+
+
 class ShortcutHelpScreen(ModalScreen[None]):
     """Read-only overlay containing every application shortcut."""
 
@@ -300,7 +336,8 @@ class ShortcutHelpScreen(ModalScreen[None]):
             yield Static("Keyboard shortcuts", id="shortcut-help-title")
             yield Static(
                 "F1 Track · F2 Review · F3 Manage · F4 Settings\n"
-                "F5 Start / switch / restart · F6 Stop · F7 Export\n"
+                "1–5 Select quick switch · Enter Confirm quick switch\n"
+                "F5 Capture start / switch / restart · F6 Stop · F7 Export\n"
                 "F8 Archive project · F9 Archive activity\n"
                 "F10 Still active · F11 Update active · F12 Snooze\n"
                 "Ctrl+P Commands · Ctrl+C Quit · Ctrl+K or Esc Close this help",
@@ -331,6 +368,11 @@ class TimeTrackerApp(App[None]):
         Binding("f10", "confirm_active_reminder", "Still active", show=False),
         Binding("f11", "edit_active", "Update active", show=False),
         Binding("f12", "snooze_reminder", "Snooze", show=False),
+        Binding("1", "select_recent_1", "Select quick switch 1", show=False),
+        Binding("2", "select_recent_2", "Select quick switch 2", show=False),
+        Binding("3", "select_recent_3", "Select quick switch 3", show=False),
+        Binding("4", "select_recent_4", "Select quick switch 4", show=False),
+        Binding("5", "select_recent_5", "Select quick switch 5", show=False),
         Binding("ctrl+c", "quit", "Quit", show=False, priority=True),
         Binding(
             "ctrl+q",
@@ -390,6 +432,10 @@ class TimeTrackerApp(App[None]):
 
     .view {
         padding-top: 1;
+    }
+
+    #track-view {
+        overflow-x: hidden;
     }
 
     #reminder {
@@ -487,18 +533,21 @@ class TimeTrackerApp(App[None]):
         text-style: bold;
     }
 
-    #actions {
+    #actions, #current-timer-actions, #quick-switch-action-row {
         height: auto;
         margin-top: 0;
     }
 
-    #actions Button {
+    #actions Button, #current-timer-actions Button {
         width: 1fr;
         margin-right: 1;
     }
 
     #recent-activities {
-        height: 1;
+        height: auto;
+        min-height: 1;
+        max-height: 5;
+        overflow-x: hidden;
     }
 
     #recent-empty {
@@ -506,8 +555,33 @@ class TimeTrackerApp(App[None]):
         color: $text-muted;
     }
 
-    #track-context {
+    #quick-switch-title, #capture-title {
         height: 1;
+        text-style: bold;
+    }
+
+    #quick-switch-title {
+        margin-top: 1;
+    }
+
+    #quick-switch-note {
+        height: 4;
+    }
+
+    #quick-switch-action {
+        width: 1fr;
+        height: auto;
+        min-height: 3;
+        padding: 0 1;
+        content-align: left middle;
+    }
+
+    #quick-switch-button {
+        width: 24;
+    }
+
+    #capture-title {
+        margin-top: 1;
     }
 
     #today-total {
@@ -693,6 +767,7 @@ class TimeTrackerApp(App[None]):
         self._review_filter_valid = True
         self._today_total_day: date | None = None
         self._recent_activities: list[RecentActivity] = []
+        self._selected_recent_pair: RecentActivity | None = None
         self._start_action: StartAction | None = None
         self._editing_entry_id: int | None = None
         self._editing_started_at: datetime | None = None
@@ -726,7 +801,19 @@ class TimeTrackerApp(App[None]):
                 id="view-tabs",
             )
             with ContentSwitcher(initial="track-view", id="view-switcher"):
-                with Vertical(id="track-view", classes="view"):
+                with VerticalScroll(id="track-view", classes="view"):
+                    with Horizontal(id="current-timer-actions"):
+                        yield Button(
+                            "Stop current timer  F6",
+                            id="stop-button",
+                            variant="warning",
+                        )
+                        yield Button(
+                            "Update current timer from capture fields  F11",
+                            id="edit-active-button",
+                            disabled=True,
+                        )
+                    yield Static("New or uncommon work", id="capture-title")
                     with Horizontal(id="track-target"):
                         yield Input(
                             placeholder="Project (type to reuse existing)",
@@ -737,27 +824,32 @@ class TimeTrackerApp(App[None]):
                             id="activity",
                         )
                     yield TextArea(placeholder="Optional note", id="note")
-                    with Horizontal(id="track-context"):
-                        yield Static(
-                            "Today's completed time: 00:00:00",
-                            id="today-total",
-                        )
-                        yield OptionList(id="recent-activities", compact=True)
-                        yield Static("No recent activities yet.", id="recent-empty")
                     with Horizontal(id="actions"):
                         yield Button(
                             "Start  F5",
                             id="start-button",
                             variant="success",
                         )
+                    yield Static(
+                        "Today's completed time: 00:00:00",
+                        id="today-total",
+                    )
+                    yield Static("Quick switch", id="quick-switch-title")
+                    yield QuickSwitchDeck(id="recent-activities", compact=True)
+                    yield Static(
+                        "No recent work yet. Use the capture fields above.",
+                        id="recent-empty",
+                    )
+                    yield TextArea(
+                        placeholder="Optional note for this quick switch",
+                        id="quick-switch-note",
+                    )
+                    with Horizontal(id="quick-switch-action-row"):
+                        yield Static("Choose recent work", id="quick-switch-action")
                         yield Button(
-                            "Stop  F6",
-                            id="stop-button",
-                            variant="warning",
-                        )
-                        yield Button(
-                            "Update active details  F11",
-                            id="edit-active-button",
+                            "Confirm  Enter",
+                            id="quick-switch-button",
+                            variant="success",
                             disabled=True,
                         )
                 with VerticalScroll(id="review-view", classes="view"):
@@ -1122,6 +1214,11 @@ class TimeTrackerApp(App[None]):
         """Refresh the primary action when the selected note changes."""
         await self._refresh_start_action()
 
+    @on(TextArea.Changed, "#quick-switch-note")
+    def handle_quick_switch_note_changed(self) -> None:
+        """Keep the pending deck action accurate while its note is edited."""
+        self._render_quick_switch_action()
+
     @on(Input.Changed, "#correction-project")
     async def handle_correction_project_changed(self, event: Input.Changed) -> None:
         """Refresh correction activity suggestions for the edited project."""
@@ -1146,20 +1243,29 @@ class TimeTrackerApp(App[None]):
         """Handle pointer activation of the start action."""
         await self._start_timer()
 
-    @on(OptionList.OptionSelected, "#recent-activities")
-    def handle_recent_activity_selected(
+    @on(OptionList.OptionHighlighted, "#recent-activities")
+    def handle_recent_activity_highlighted(
         self,
-        event: OptionList.OptionSelected,
+        event: OptionList.OptionHighlighted,
     ) -> None:
-        """Populate capture inputs from one application-projected recent pair."""
+        """Select one application-projected pair without changing timer state."""
         if not 0 <= event.option_index < len(self._recent_activities):
             return
         pair = self._recent_activities[event.option_index]
-        self.query_one("#project", Input).value = pair.project
-        self.query_one("#activity", Input).value = pair.activity
-        note_input = self.query_one("#note", TextArea)
-        note_input.load_text("")
-        note_input.focus()
+        if pair != self._selected_recent_pair:
+            self.query_one("#quick-switch-note", TextArea).load_text("")
+        self._selected_recent_pair = pair
+        self._render_quick_switch_action()
+
+    @on(QuickSwitchDeck.Confirmed, "#recent-activities")
+    async def handle_quick_switch_confirmed(self) -> None:
+        """Confirm the highlighted deck action from Enter."""
+        await self._confirm_quick_switch()
+
+    @on(Button.Pressed, "#quick-switch-button")
+    async def handle_quick_switch_button(self) -> None:
+        """Confirm the highlighted deck action from the pointer button."""
+        await self._confirm_quick_switch()
 
     @on(Button.Pressed, "#stop-button")
     async def handle_stop_button(self) -> None:
@@ -1349,6 +1455,36 @@ class TimeTrackerApp(App[None]):
         """Update active details from the F11 binding."""
         await self._edit_active()
 
+    def action_select_recent_1(self) -> None:
+        """Select the first quick-switch target."""
+        self._select_recent_shortcut(0)
+
+    def action_select_recent_2(self) -> None:
+        """Select the second quick-switch target."""
+        self._select_recent_shortcut(1)
+
+    def action_select_recent_3(self) -> None:
+        """Select the third quick-switch target."""
+        self._select_recent_shortcut(2)
+
+    def action_select_recent_4(self) -> None:
+        """Select the fourth quick-switch target."""
+        self._select_recent_shortcut(3)
+
+    def action_select_recent_5(self) -> None:
+        """Select the fifth quick-switch target."""
+        self._select_recent_shortcut(4)
+
+    def _select_recent_shortcut(self, index: int) -> None:
+        """Highlight a numbered deck item unless text entry owns the key."""
+        if isinstance(self.focused, (Input, TextArea)):
+            return
+        deck = self.query_one("#recent-activities", QuickSwitchDeck)
+        if not 0 <= index < len(self._recent_activities):
+            return
+        deck.highlighted = index
+        deck.focus()
+
     async def _start_timer(self) -> None:
         if self.query_one("#start-button", Button).disabled:
             return
@@ -1386,9 +1522,57 @@ class TimeTrackerApp(App[None]):
         self.query_one("#note", TextArea).load_text(self.active_timer.note or "")
         await self._refresh_project_suggestions()
         await self._refresh_history()
-        await self._refresh_recent_activities()
+        await self._refresh_recent_activities(
+            preferred_pair=RecentActivity(
+                self.active_timer.project,
+                self.active_timer.activity,
+            )
+        )
         self._render_active()
         await self._refresh_start_action()
+
+    async def _confirm_quick_switch(self) -> None:
+        """Persist the selected deck Start or Switch through the agent."""
+        pair = self._selected_recent_activity()
+        if pair is None:
+            self._show_message("Select recent work before confirming.", error=True)
+            return
+        if classify_quick_switch(self.active_timer, pair) is QuickSwitchAction.CURRENT:
+            self._show_message(
+                f"{pair.project} / {pair.activity} is current; timer unchanged."
+            )
+            return
+        previous = self.active_timer
+        try:
+            persisted = await asyncio.to_thread(
+                self.client.start,
+                pair.project,
+                pair.activity,
+                self.query_one("#quick-switch-note", TextArea).text,
+            )
+        except Exception as error:
+            await self._refresh_recent_activities()
+            self._show_message(str(error), error=True)
+            return
+        self.active_timer = persisted
+        self.pending_reminder = None
+        self._render_reminder()
+        self.query_one("#project", Input).value = persisted.project
+        self.query_one("#activity", Input).value = persisted.activity
+        self.query_one("#note", TextArea).load_text(persisted.note or "")
+        self.query_one("#quick-switch-note", TextArea).load_text("")
+        await self._refresh_project_suggestions()
+        await self._refresh_history()
+        await self._refresh_recent_activities(
+            preferred_pair=RecentActivity(persisted.project, persisted.activity)
+        )
+        self._render_active()
+        await self._refresh_start_action()
+        if previous is None:
+            message = f"Started {persisted.project} / {persisted.activity}."
+        else:
+            message = f"Switched to {persisted.project} / {persisted.activity}."
+        self._show_message(message)
 
     async def _save_settings(self) -> None:
         try:
@@ -1462,6 +1646,9 @@ class TimeTrackerApp(App[None]):
         self.query_one("#activity", Input).value = active.activity
         self.query_one("#note", TextArea).load_text(active.note or "")
         await self._refresh_project_suggestions()
+        await self._refresh_recent_activities(
+            preferred_pair=RecentActivity(active.project, active.activity)
+        )
         self._render_active()
         await self._refresh_start_action()
         self._show_message(
@@ -1683,14 +1870,17 @@ class TimeTrackerApp(App[None]):
         content_id = self._VIEW_CONTENT[tab_id]
         tabs = self.query_one("#view-tabs", Tabs)
         switcher = self.query_one("#view-switcher", ContentSwitcher)
+        view_changed = tabs.active != tab_id or switcher.current != content_id
         tabs.active = tab_id
         switcher.current = content_id
         focus_selector = self._VIEW_FOCUS.get(tab_id)
+        if tab_id == "track-tab" and self._recent_activities:
+            focus_selector = "#recent-activities"
         if focus_selector is None:
             tabs.focus()
         else:
             self.query_one(focus_selector).focus()
-        if tab_id == "manage-tab":
+        if tab_id == "manage-tab" and view_changed:
             self.run_worker(
                 self._refresh_manage_items(),
                 group="manage-refresh",
@@ -1700,7 +1890,7 @@ class TimeTrackerApp(App[None]):
 
     def _render_shortcut_summary(self) -> None:
         summaries = {
-            "track-tab": "F5 Timer · F6 Stop · F11 Update",
+            "track-tab": "1–5 Deck · Enter Confirm · F5 Capture · F6 Stop · F11 Update",
             "review-tab": "F7 Export",
             "manage-tab": "F8 Archive project · F9 Archive activity",
             "settings-tab": "Settings",
@@ -1741,7 +1931,9 @@ class TimeTrackerApp(App[None]):
                 f"after {_format_duration(completed.duration)}."
             )
             await self._refresh_history()
-            await self._refresh_recent_activities()
+            await self._refresh_recent_activities(
+                preferred_pair=RecentActivity(completed.project, completed.activity)
+            )
         self._render_active()
         await self._refresh_start_action()
 
@@ -1935,13 +2127,17 @@ class TimeTrackerApp(App[None]):
         verb = "Added missed entry for" if was_manual_entry else "Corrected"
         self._show_message(f"{verb} {persisted.project} / {persisted.activity}.")
 
-    async def _refresh_recent_activities(self) -> None:
+    async def _refresh_recent_activities(
+        self,
+        *,
+        preferred_pair: RecentActivity | None = None,
+    ) -> None:
         try:
             recent = await asyncio.to_thread(self.client.list_recent_activities)
         except Exception as error:
             self._show_message(str(error), error=True)
             return
-        self._render_recent_activities(recent)
+        self._render_recent_activities(recent, preferred_pair=preferred_pair)
 
     async def _refresh_manage_items(self) -> None:
         try:
@@ -2295,19 +2491,88 @@ class TimeTrackerApp(App[None]):
         )
         self._today_total_day = today
 
-    def _render_recent_activities(self, recent: list[RecentActivity]) -> None:
+    def _render_recent_activities(
+        self,
+        recent: list[RecentActivity],
+        *,
+        preferred_pair: RecentActivity | None = None,
+    ) -> None:
+        selected_pair = preferred_pair or self._selected_recent_activity()
         self._recent_activities = recent
-        option_list = self.query_one("#recent-activities", OptionList)
+        option_list = self.query_one("#recent-activities", QuickSwitchDeck)
         option_list.set_options(
             Option(
-                f"Track again: {pair.project} / {pair.activity}",
+                f"{index + 1}  {pair.project} / {pair.activity}",
                 id=f"recent-{index}",
             )
             for index, pair in enumerate(recent)
         )
-        option_list.highlighted = 0 if recent else None
+        selected_index = next(
+            (
+                index
+                for index, pair in enumerate(recent)
+                if selected_pair is not None and pair == selected_pair
+            ),
+            0 if recent else None,
+        )
+        option_list.highlighted = selected_index
         option_list.display = bool(recent)
         self.query_one("#recent-empty", Static).display = not recent
+        note = self.query_one("#quick-switch-note", TextArea)
+        note.display = bool(recent)
+        if selected_index is None:
+            self._selected_recent_pair = None
+        else:
+            self._selected_recent_pair = recent[selected_index]
+        self._render_quick_switch_action()
+
+    def _selected_recent_activity(self) -> RecentActivity | None:
+        """Return the highlighted canonical deck pair, if it is still available."""
+        decks = self.query("#recent-activities")
+        if not decks:
+            return None
+        highlighted = decks.first(QuickSwitchDeck).highlighted
+        if highlighted is None or not 0 <= highlighted < len(self._recent_activities):
+            return None
+        return self._recent_activities[highlighted]
+
+    def _render_quick_switch_action(self) -> None:
+        """Describe the pending non-persistent deck action."""
+        actions = self.query("#quick-switch-action")
+        buttons = self.query("#quick-switch-button")
+        notes = self.query("#quick-switch-note")
+        if not actions or not buttons or not notes:
+            return
+        action = actions.first(Static)
+        button = buttons.first(Button)
+        note = notes.first(TextArea)
+        pair = self._selected_recent_activity()
+        if pair is None:
+            action.update("Use the capture fields above to start new work.")
+            button.label = "Confirm  Enter"
+            button.disabled = True
+            note.disabled = True
+            return
+        selected_name = f"{pair.project} / {pair.activity}"
+        pending_action = classify_quick_switch(self.active_timer, pair)
+        if pending_action is QuickSwitchAction.CURRENT:
+            action.update("Current")
+            button.label = "Current"
+            button.disabled = True
+            note.disabled = True
+            return
+        note.disabled = False
+        button.disabled = False
+        if pending_action is QuickSwitchAction.START:
+            action.update(f"Start {selected_name}")
+            button.label = "Start  Enter"
+            return
+        current = self.active_timer
+        if current is None:
+            return
+        current_name = f"{current.project} / {current.activity}"
+        action.update(f"Switch from {current_name} to {selected_name}")
+        button.label = "Switch  Enter"
 
     def _render_manage_items(
         self,
@@ -2393,6 +2658,7 @@ class TimeTrackerApp(App[None]):
             active_widget.update("No timer running")
             stop_button.disabled = True
             edit_button.disabled = True
+            self._render_quick_switch_action()
             return
 
         timer = self.active_timer
@@ -2405,6 +2671,7 @@ class TimeTrackerApp(App[None]):
             f"Started {local_start} · {_format_duration(elapsed)}{note}"
         )
         stop_button.disabled = False
+        self._render_quick_switch_action()
 
     def _render_reminder(self) -> None:
         panels = self.query("#reminder")

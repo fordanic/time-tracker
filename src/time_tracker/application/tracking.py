@@ -36,6 +36,29 @@ class StartAction(StrEnum):
     RESTART = "restart"
 
 
+class QuickSwitchAction(StrEnum):
+    """The pending deck action for one canonical recent target."""
+
+    START = "start"
+    SWITCH = "switch"
+    CURRENT = "current"
+
+
+def classify_quick_switch(
+    active: ActiveTimer | None,
+    selected: RecentActivity,
+) -> QuickSwitchAction:
+    """Classify a recent target without applying capture-note restart rules."""
+    if active is None:
+        return QuickSwitchAction.START
+    if (active.project.casefold(), active.activity.casefold()) == (
+        selected.project.casefold(),
+        selected.activity.casefold(),
+    ):
+        return QuickSwitchAction.CURRENT
+    return QuickSwitchAction.SWITCH
+
+
 class AlreadyTrackingError(ValueError):
     """Raised when a requested start would not change the active timer."""
 

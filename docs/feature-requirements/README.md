@@ -43,6 +43,7 @@ For each selected feature:
 ## Approved feature requirements
 
 - [Recent activities / Track again](recent-activities-track-again.md)
+- [Quick switch deck](quick-switch-deck.md)
 - [Explicit Start, Switch, and Restart actions](explicit-start-switch-restart-actions.md)
 - [Focused Track, Review, Manage, and Settings views](focused-track-review-manage-settings-views.md)
 - [Completed-entry correction](completed-entry-correction.md)

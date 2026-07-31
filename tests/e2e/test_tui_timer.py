@@ -69,6 +69,8 @@ async def test_narrow_footer_keeps_complete_shortcut_help_discoverable(
     _wait_until_ready(client)
 
     try:
+        client.start("Website", "Planning")
+        client.stop()
         app = TimeTrackerApp(client)
         async with app.run_test(size=(40, 24)) as pilot:
             await pilot.pause()
@@ -78,9 +80,11 @@ async def test_narrow_footer_keeps_complete_shortcut_help_discoverable(
             activity = app.query_one("#activity", Input)
 
             assert summary.startswith("Ctrl+K Shortcuts")
-            assert "F5 Timer" in summary
+            assert "F5 Capture" in summary
             assert "F8 Archive project" not in summary
             assert project.region.y < activity.region.y
+            assert app.query_one("#track-view").show_horizontal_scrollbar is False
+            assert app.query_one("#recent-activities", OptionList).option_count == 1
             assert app.active_bindings["ctrl+k"].binding.action == "show_shortcuts"
             assert app.active_bindings["ctrl+c"].binding.action == "quit"
             assert (
@@ -631,7 +635,7 @@ async def test_tui_identifies_idle_triggered_active_reminder(tmp_path: Path) -> 
 
 
 @pytest.mark.asyncio
-async def test_user_tracks_again_from_recent_activities(tmp_path: Path) -> None:
+async def test_user_quick_switches_from_recent_activities(tmp_path: Path) -> None:
     paths = AgentPaths.in_directory(tmp_path)
     thread = threading.Thread(target=serve, args=(paths,), daemon=True)
     thread.start()
@@ -649,31 +653,88 @@ async def test_user_tracks_again_from_recent_activities(tmp_path: Path) -> None:
             await pilot.pause()
             recent = app.query_one("#recent-activities", OptionList)
             assert recent.option_count == 2
-            assert "Website / Implementation" in str(
+            assert "1  Website / Implementation" in str(
                 recent.get_option_at_index(0).prompt
+            )
+            assert app.focused is recent
+            assert "Start Website / Implementation" in str(
+                app.query_one("#quick-switch-action", Static).render()
             )
 
             app.query_one("#project", Input).value = "Temporary"
             app.query_one("#activity", Input).value = "Draft"
             app.query_one("#note", TextArea).load_text("Do not preserve this")
-            app.set_focus(recent)
-            await pilot.press("enter")
+            app.query_one("#project", Input).focus()
+            await pilot.press("1")
             await pilot.pause()
 
-            assert app.query_one("#project", Input).value == "Website"
-            assert app.query_one("#activity", Input).value == "Implementation"
-            assert app.query_one("#note", TextArea).text == ""
-            assert app.focused is app.query_one("#note", TextArea)
+            assert app.query_one("#project", Input).value == "1"
+            assert recent.highlighted == 0
             assert client.get_active() is None
 
-            await pilot.press("f5")
+            recent.focus()
+            recent.scroll_visible(False, top=True, immediate=True)
+            await pilot.pause()
+            assert await pilot.click("#recent-activities", offset=(2, 1))
+            await pilot.pause()
+            assert recent.highlighted == 1
+            assert client.get_active() is None
+
+            app.query_one("#start-button", Button).focus()
+            await pilot.press("2")
+            await pilot.pause()
+
+            assert recent.highlighted == 1
+            assert app.focused is recent
+            assert client.get_active() is None
+            assert "Start Website / Planning" in str(
+                app.query_one("#quick-switch-action", Static).render()
+            )
+
+            quick_note = app.query_one("#quick-switch-note", TextArea)
+            quick_note.load_text("Fresh deck note")
+            recent.focus()
+            await pilot.press("enter")
             await pilot.pause()
 
             active = client.get_active()
             assert active is not None
             assert active.project == "Website"
-            assert active.activity == "Implementation"
-            assert active.note is None
+            assert active.activity == "Planning"
+            assert active.note == "Fresh deck note"
+            assert app.query_one("#project", Input).value == "Website"
+            assert app.query_one("#activity", Input).value == "Planning"
+            assert app.query_one("#note", TextArea).text == "Fresh deck note"
+            assert quick_note.text == ""
+            assert str(app.query_one("#quick-switch-action", Static).render()) == (
+                "Current"
+            )
+
+            original = active
+            history_before_current = client.list_completed()
+            recent.focus()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            assert client.get_active() == original
+            assert client.list_completed() == history_before_current
+
+            await pilot.press("1")
+            await pilot.pause()
+            assert "Switch from Website / Planning to Website / Implementation" in str(
+                app.query_one("#quick-switch-action", Static).render()
+            )
+            recent.focus()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            switched = client.get_active()
+            assert switched is not None
+            assert switched.activity == "Implementation"
+            assert switched.note is None
+            planning_entry = client.list_completed()[-1]
+            assert planning_entry.entry_id == original.entry_id
+            assert planning_entry.stopped_at == switched.started_at
 
             await pilot.press("f6")
             await pilot.pause()
