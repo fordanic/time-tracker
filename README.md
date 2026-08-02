@@ -97,11 +97,12 @@ Or use the Make target, which syncs first:
 make run
 ```
 
-Select recent work with `1` through `5`, optionally enter a quick-switch note,
+Select recent work with `1` through `5`, optionally enter its quick-switch note,
 and press `Enter` to confirm Start or Switch. A selected current pair remains a
-no-op. For work outside the deck, enter a project and activity and use `F5` to
-start, switch, or restart tracking. Use `F6` to stop. `F1` through `F4` open
-Track, Review, Manage, and Settings; `Ctrl+K` shows all shortcuts.
+no-op. For work outside the deck, use Manual entry's project, activity, and
+separate note fields, then press `F5` or its Start action. Stop and Update current
+timer controls follow that action. `F1` through `F4` open Track, Review, Manage,
+and Settings; `Ctrl+K` shows all shortcuts.
 
 Closing the TUI does not stop the background process or an active timer. Stop
 only the background process with:

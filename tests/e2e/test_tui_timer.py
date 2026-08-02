@@ -20,7 +20,6 @@ from textual.widgets import (
     Static,
     Switch,
     Tabs,
-    TextArea,
     Tree,
 )
 
@@ -84,7 +83,17 @@ async def test_narrow_footer_keeps_complete_shortcut_help_discoverable(
             assert "F8 Archive project" not in summary
             assert project.region.y < activity.region.y
             assert app.query_one("#track-view").show_horizontal_scrollbar is False
-            assert app.query_one("#recent-activities", OptionList).option_count == 1
+            recent = app.query_one("#recent-activities", OptionList)
+            assert recent.option_count == 1
+            assert not app.query("#quick-switch-button")
+            assert recent.region.y < project.region.y
+            assert (
+                app.query_one("#quick-switch-note", Input).region.y < project.region.y
+            )
+            assert (
+                app.query_one("#start-button", Button).region.y
+                < app.query_one("#stop-button", Button).region.y
+            )
             assert app.active_bindings["ctrl+k"].binding.action == "show_shortcuts"
             assert app.active_bindings["ctrl+c"].binding.action == "quit"
             assert (
@@ -135,25 +144,22 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
                 project_input.region.y
                 == first_app.query_one("#activity", Input).region.y
             )
-            assert first_app.query_one("#note", TextArea).content_region.height == 2
             first_app.set_focus(project_input)
             await pilot.press("tab")
             assert first_app.focused is first_app.query_one("#activity", Input)
             await pilot.press("tab")
-            assert first_app.query_one("#note", TextArea).has_focus
+            assert first_app.query_one("#note", Input).has_focus
 
             project_input.value = "Website"
             first_app.query_one("#activity", Input).value = "Implementation"
-            first_app.query_one("#note", TextArea).load_text(
-                "Walking skeleton\nSecond line"
-            )
+            first_app.query_one("#note", Input).value = "Walking skeleton details"
             await pilot.click("#start-button")
             await pilot.pause()
 
             active_text = str(first_app.query_one("#active-timer", Static).render())
             assert "Website / Implementation" in active_text
             assert "Walking skeleton" in active_text
-            assert "Second line" in active_text
+            assert "Walking skeleton details" in active_text
 
         assert not first_app.query("#active-timer")
         first_app._render_active()
@@ -168,8 +174,8 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
             assert "Website / Implementation" in recovered_text
             assert recovered_app.query_one("#project", Input).value == "Website"
             assert recovered_app.query_one("#activity", Input).value == "Implementation"
-            assert recovered_app.query_one("#note", TextArea).text == (
-                "Walking skeleton\nSecond line"
+            assert recovered_app.query_one("#note", Input).value == (
+                "Walking skeleton details"
             )
             recovered_start = recovered_app.query_one("#start-button", Button)
             assert str(recovered_start.label) == "Already tracking"
@@ -186,7 +192,7 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
             row = history.get_row_at(0)
             assert row[1] == "Website"
             assert row[2] == "Implementation"
-            assert row[6] == "Walking skeleton\nSecond line"
+            assert row[6] == "Walking skeleton details"
             assert len(str(row[3])) == 5
             assert history.get_row_at(1)[1] == "Day total"
 
@@ -663,7 +669,7 @@ async def test_user_quick_switches_from_recent_activities(tmp_path: Path) -> Non
 
             app.query_one("#project", Input).value = "Temporary"
             app.query_one("#activity", Input).value = "Draft"
-            app.query_one("#note", TextArea).load_text("Do not preserve this")
+            app.query_one("#note", Input).value = "Do not preserve this"
             app.query_one("#project", Input).focus()
             await pilot.press("1")
             await pilot.pause()
@@ -673,9 +679,17 @@ async def test_user_quick_switches_from_recent_activities(tmp_path: Path) -> Non
             assert client.get_active() is None
 
             recent.focus()
-            recent.scroll_visible(False, top=True, immediate=True)
-            await pilot.pause()
-            assert await pilot.click("#recent-activities", offset=(2, 1))
+            await pilot.pause(0.2)
+            content_offset = recent.content_region.offset - recent.region.offset
+            second_option_line = recent._index_to_line[1] - recent.scroll_offset.y
+            pointer_offset = (
+                content_offset.x + 2,
+                content_offset.y + second_option_line,
+            )
+            assert await pilot.click(
+                "#recent-activities",
+                offset=pointer_offset,
+            )
             await pilot.pause()
             assert recent.highlighted == 1
             assert client.get_active() is None
@@ -691,9 +705,9 @@ async def test_user_quick_switches_from_recent_activities(tmp_path: Path) -> Non
                 app.query_one("#quick-switch-action", Static).render()
             )
 
-            quick_note = app.query_one("#quick-switch-note", TextArea)
-            quick_note.load_text("Fresh deck note")
-            recent.focus()
+            quick_note = app.query_one("#quick-switch-note", Input)
+            quick_note.value = "Fresh deck note"
+            quick_note.focus()
             await pilot.press("enter")
             await pilot.pause()
 
@@ -702,10 +716,10 @@ async def test_user_quick_switches_from_recent_activities(tmp_path: Path) -> Non
             assert active.project == "Website"
             assert active.activity == "Planning"
             assert active.note == "Fresh deck note"
-            assert app.query_one("#project", Input).value == "Website"
-            assert app.query_one("#activity", Input).value == "Planning"
-            assert app.query_one("#note", TextArea).text == "Fresh deck note"
-            assert quick_note.text == ""
+            assert app.query_one("#project", Input).value == "1"
+            assert app.query_one("#activity", Input).value == "Draft"
+            assert app.query_one("#note", Input).value == "Do not preserve this"
+            assert quick_note.value == ""
             assert str(app.query_one("#quick-switch-action", Static).render()) == (
                 "Current"
             )
@@ -791,7 +805,7 @@ async def test_user_navigates_focused_views_without_losing_workflow_state(
             assert app.focused is app.query_one("#project", Input)
             assert "Website / Review" in str(active.render())
 
-            app.query_one("#note", TextArea).load_text("Draft replacement")
+            app.query_one("#note", Input).value = "Draft replacement"
             await pilot.press("f2")
             assert tabs.active == "review-tab"
             assert switcher.current == "review-view"
@@ -815,7 +829,7 @@ async def test_user_navigates_focused_views_without_losing_workflow_state(
 
             client.archive_activity("Website", "Review")
             await pilot.press("f1")
-            assert app.query_one("#note", TextArea).text == "Draft replacement"
+            assert app.query_one("#note", Input).value == "Draft replacement"
             await pilot.press("f2")
             assert app.query_one("#export-path", Input).value.endswith("review.csv")
             assert app.query_one("#summary-mode", Switch).value is True
@@ -853,12 +867,12 @@ async def test_primary_action_distinguishes_start_restart_and_switch(
         app = TimeTrackerApp(client)
         async with app.run_test() as pilot:
             start_button = app.query_one("#start-button", Button)
-            assert str(start_button.label) == "Start  F5"
+            assert str(start_button.label) == "Start timer  F5"
             assert start_button.disabled is False
 
             app.query_one("#project", Input).value = "Website"
             app.query_one("#activity", Input).value = "Implementation"
-            app.query_one("#note", TextArea).load_text("Original note")
+            app.query_one("#note", Input).value = "Original note"
             await pilot.pause()
             await pilot.press("f5")
             await pilot.pause()
@@ -873,7 +887,7 @@ async def test_primary_action_distinguishes_start_restart_and_switch(
             assert client.get_active() == original
             assert client.list_completed() == []
 
-            app.query_one("#note", TextArea).load_text("New note")
+            app.query_one("#note", Input).value = "New note"
             await pilot.pause()
             assert str(start_button.label) == "Restart with new note  F5"
             assert start_button.disabled is False
@@ -1398,7 +1412,7 @@ async def test_user_updates_active_details_without_restarting_timer(
 
             app.query_one("#project", Input).value = "Client"
             app.query_one("#activity", Input).value = "Review"
-            app.query_one("#note", TextArea).load_text("Revised")
+            app.query_one("#note", Input).value = "Revised"
             await pilot.pause()
             assert edit_button.disabled is False
 
@@ -1421,7 +1435,7 @@ async def test_user_updates_active_details_without_restarting_timer(
                 app.query_one("#active-timer", Static).render()
             )
 
-            app.query_one("#note", TextArea).load_text("Pointer update")
+            app.query_one("#note", Input).value = "Pointer update"
             await pilot.pause()
             assert await pilot.click("#edit-active-button")
             await pilot.pause()
@@ -1436,7 +1450,7 @@ async def test_user_updates_active_details_without_restarting_timer(
             await pilot.pause()
             assert recovered_app.query_one("#project", Input).value == "Client"
             assert recovered_app.query_one("#activity", Input).value == "Review"
-            assert recovered_app.query_one("#note", TextArea).text == "Pointer update"
+            assert recovered_app.query_one("#note", Input).value == "Pointer update"
             recovered = client.get_active()
             assert recovered is not None
             assert recovered.entry_id == original.entry_id

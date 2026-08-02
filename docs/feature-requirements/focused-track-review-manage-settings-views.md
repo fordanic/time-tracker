@@ -15,8 +15,9 @@ progressively denser, while keeping the current timer continuously visible.
   show those shortcuts in the view selector and in-app shortcut help.
 - Keep the active-timer strip, its live elapsed duration, pending reminder prompt,
   and shared success/error message visible while any view is selected.
-- Put the quick switch deck and pending action, normal project/activity/note
-  capture, and separate current-timer Stop and Update controls in Track.
+- Put the quick switch deck, its note, and pending action first in Track. Put the
+  normal project/activity/note capture below it as `Manual entry`, followed by
+  its primary Start action and separate current-timer Stop and Update controls.
 - Put completed-entry and daily-summary review, CSV destination, and export
   controls in Review. Preserve the current selected representation and pending
   overwrite confirmation when another view is visited.

@@ -18,11 +18,18 @@ Let a user resume common work quickly while keeping timer transitions deliberate
   - `Start` when no timer is active;
   - `Switch from <current> to <selected>` when another pair is active; or
   - `Current` when the selected pair is already active.
-- Pressing `Enter` confirms the selected Start or Switch action.
+- Pressing `Enter` from the deck or its dedicated single-line optional-note input
+  confirms the selected Start or Switch action. Do not show a separate
+  quick-switch confirmation button.
 - Starting or switching directly from the deck creates the new active entry without copying a historical note.
 - Selecting the current pair must not offer a timer transition. `Enter` must leave the active timer unchanged.
-- Provide an explicit optional-note interaction before confirmation. A note entered there applies only to the pending Start or Switch.
-- Keep Stop and Update active details associated with the current-timer area rather than the selected deck entry.
+- Put the deck first in Track and provide a dedicated single-line optional-note
+  input immediately below it. A note entered there applies only to the pending
+  Start or Switch.
+- Put the normal capture workflow below the deck under the label `Manual entry`,
+  with its own independent single-line optional-note input.
+- Put Stop and Update active details below the Manual entry Start action rather
+  than associating them with the selected deck entry.
 - Keep active-detail editing distinct from switching or restarting. It must continue to preserve the active entry's identity and start time.
 - Preserve the existing project, activity, and note capture path for targets not shown in the deck and for creating new targets.
 - Refresh the deck and its action descriptions after connection, start, switch, restart, stop, active-detail editing, archive, and restoration.
@@ -49,10 +56,14 @@ Let a user resume common work quickly while keeping timer transitions deliberate
 4. Pressing `Enter` with another pair active creates adjacent, non-overlapping entries at one transition timestamp.
 5. Selecting the current pair shows `Current`; pressing `Enter` leaves the timer, note, history, and reminder deadline unchanged.
 6. Historical notes are never copied into deck-started entries.
-7. An optional note entered before confirmation is applied to the new active entry under the existing note-normalization rules.
+7. A quick-switch note entered before confirmation is applied to the new active
+   entry under the existing note-normalization rules and never changes the
+   independent Manual entry project, activity, or note fields.
 8. Number keys entered inside text-editing controls do not change deck selection.
 9. Archived pairs do not appear, and archive or restoration refreshes the visible deck.
-10. The normal capture path remains available for uncommon and new project/activity pairs.
+10. The normal capture path remains available below the deck as `Manual entry`
+    for uncommon and new project/activity pairs, with Start followed by Stop and
+    Update controls.
 11. Unit, SQLite, IPC, and Textual tests cover projection ordering, selection without persistence, Enter confirmation, atomic switching, current-pair no-op behavior, note handling, archive exclusion, focus guards, recovery, and narrow layout.
 
 ## Documentation impact
