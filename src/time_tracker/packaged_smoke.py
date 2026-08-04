@@ -27,7 +27,7 @@ async def run_packaged_lifecycle(directory: Path) -> None:
         async with first_app.run_test() as pilot:
             first_app.query_one("#project", Input).value = "Packaged smoke"
             first_app.query_one("#activity", Input).value = "Lifecycle"
-            await pilot.click("#start-button")
+            await pilot.press("f5")
             await _wait_for_started(first_app)
             started = first_app.active_timer
             if started is None:
@@ -47,7 +47,7 @@ async def run_packaged_lifecycle(directory: Path) -> None:
                     "the packaged TUI did not recover the active timer: "
                     f"expected {started!r}, got {second_app.active_timer!r}"
                 )
-            await pilot.click("#stop-button")
+            await pilot.press("f6")
             await _wait_for_active(second_app)
             if second_app.active_timer is not None:
                 raise RuntimeError("the packaged TUI did not stop the recovered timer")

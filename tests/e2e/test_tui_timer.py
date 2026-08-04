@@ -181,7 +181,10 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
             assert str(recovered_start.label) == "Already tracking"
             assert recovered_start.disabled is True
 
-            await pilot.click("#stop-button")
+            stop_button = recovered_app.query_one("#stop-button", Button)
+            stop_button.scroll_visible(False, immediate=True)
+            await pilot.pause()
+            assert await pilot.click(stop_button)
             await pilot.pause()
 
             assert "No timer running" in str(
