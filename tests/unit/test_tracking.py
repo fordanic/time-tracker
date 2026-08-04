@@ -8,11 +8,13 @@ import pytest
 from time_tracker.application.tracking import (
     AlreadyTrackingError,
     ArchivedActivity,
+    QuickSwitchAction,
     RecentActivity,
     StartAction,
     TimerRepository,
     TrackingService,
     UnchangedActiveEntryError,
+    classify_quick_switch,
 )
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
 
@@ -347,6 +349,24 @@ def test_recent_activity_limit_is_validated() -> None:
     assert service.list_recent_activities(limit=0) == []
     with pytest.raises(ValueError, match="limit cannot be negative"):
         service.list_recent_activities(limit=-1)
+
+
+def test_quick_switch_action_ignores_capture_note_restart_rules() -> None:
+    pair = RecentActivity("Website", "Planning")
+    active = ActiveTimer(
+        entry_id=7,
+        project="Website",
+        activity="Planning",
+        started_at=datetime(2026, 7, 20, 8, tzinfo=UTC),
+        note="Current note",
+    )
+
+    assert classify_quick_switch(None, pair) is QuickSwitchAction.START
+    assert classify_quick_switch(active, pair) is QuickSwitchAction.CURRENT
+    assert (
+        classify_quick_switch(active, RecentActivity("Website", "Review"))
+        is QuickSwitchAction.SWITCH
+    )
 
 
 def test_start_action_classifies_normalized_selection() -> None:

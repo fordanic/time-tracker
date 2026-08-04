@@ -15,8 +15,9 @@ progressively denser, while keeping the current timer continuously visible.
   show those shortcuts in the view selector and in-app shortcut help.
 - Keep the active-timer strip, its live elapsed duration, pending reminder prompt,
   and shared success/error message visible while any view is selected.
-- Put project/activity/note capture, recent activities, and Start/Stop controls in
-  Track.
+- Put the quick switch deck, its note, and pending action first in Track. Put the
+  normal project/activity/note capture below it as `Manual entry`, followed by
+  its primary Start action and separate current-timer Stop and Update controls.
 - Put completed-entry and daily-summary review, CSV destination, and export
   controls in Review. Preserve the current selected representation and pending
   overwrite confirmation when another view is visited.
@@ -53,9 +54,9 @@ progressively denser, while keeping the current timer continuously visible.
    `F1` through `F4` and pointer selection each activate the corresponding view.
 2. A running timer's project, activity, start time, note, and increasing elapsed
    duration remain visible in Track, Review, Manage, and Settings.
-3. Existing capture/recent-work behavior operates in Track, history/summary/export
-   behavior operates in Review, and project/activity archiving operates from the
-   dedicated Manage inputs.
+3. Quick-switch and normal capture behavior operate in Track,
+   history/summary/export behavior operates in Review, and project/activity
+   archiving operates from the dedicated Manage inputs.
 4. View changes preserve capture values, review mode, export path and overwrite
    confirmation, Manage selections, the current message, and pending reminders.
 5. Existing `F5` through `F10` shortcuts retain their actions, including when the

@@ -4,24 +4,25 @@
 
 ## Purpose
 
-Use horizontal space efficiently, support short multiline notes, and prevent a
-note from an earlier target being unintentionally carried to an explicitly
-selected target.
+Use horizontal space efficiently and prevent a note from one timer workflow from
+being unintentionally carried into another.
 
 ## Required behavior
 
 - Place project and activity inputs on one row when space permits and stack them
   in narrow terminals.
-- Use a two-line multiline note editor with soft wrapping and normal Tab focus
-  traversal.
-- Preserve line breaks as plain-text note content.
-- Clear the note only when the user explicitly selects a target from recent work
-  or another selection control. Typing or correcting project/activity text does
-  not clear it.
+- Use separate single-line optional-note inputs for Quick switch and Manual
+  entry, with normal Tab focus traversal.
+- Keep the normal capture note independent from the quick-switch note. Numbered
+  or pointer recent-work selection copies project and activity into Manual entry
+  and clears its note; changing deck selection clears the pending quick-switch
+  note. After a quick-switch Start or Switch is persisted, copy its non-empty
+  normalized note into Manual entry. Typing or correcting normal project/activity
+  text does not clear its note.
 
 ## Invariants and error handling
 
-- Multiline notes follow the existing trim/empty normalization rules.
+- Both note inputs follow the existing trim/empty normalization rules.
 - Selecting a target never starts, switches, restarts, or edits a timer by
   itself.
 - Responsive layout changes do not discard field values or change focus order.
@@ -30,11 +31,15 @@ selected target.
 
 1. Project and activity share a row at the normal supported width and stack at a
    defined narrow width.
-2. The note editor shows two lines, accepts line breaks, and Tab advances focus.
-3. Explicit recent-target selection clears the note, while typed target edits do
-   not.
-4. Start, switch, restart, active-detail edit, recovery, and CSV quoting preserve
-   multiline notes.
+2. Quick switch and Manual entry each have one single-line optional-note input,
+   and Tab advances focus normally.
+3. Numbered or pointer recent-target selection copies its project and activity
+   into Manual entry and clears both a prior pending deck note and the Manual
+   entry note.
+4. A successful quick-switch Start or Switch copies its non-empty persisted note
+   into Manual entry before clearing the quick-switch note input.
+5. Start, switch, restart, active-detail edit, and recovery preserve notes from
+   their owning input.
 
 ## Documentation impact
 
