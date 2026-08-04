@@ -13,10 +13,12 @@ being unintentionally carried into another.
   in narrow terminals.
 - Use separate single-line optional-note inputs for Quick switch and Manual
   entry, with normal Tab focus traversal.
-- Keep the normal capture note independent from the quick-switch note. Selecting
-  recent work does not change normal capture values; changing deck selection
-  clears only the pending quick-switch note. Typing or correcting normal
-  project/activity text does not clear its note.
+- Keep the normal capture note independent from the quick-switch note. Numbered
+  or pointer recent-work selection copies project and activity into Manual entry
+  and clears its note; changing deck selection clears the pending quick-switch
+  note. After a quick-switch Start or Switch is persisted, copy its non-empty
+  normalized note into Manual entry. Typing or correcting normal project/activity
+  text does not clear its note.
 
 ## Invariants and error handling
 
@@ -31,9 +33,12 @@ being unintentionally carried into another.
    defined narrow width.
 2. Quick switch and Manual entry each have one single-line optional-note input,
    and Tab advances focus normally.
-3. Explicit recent-target selection clears only a prior pending deck note, while
-   normal capture values and their note remain unchanged.
-4. Start, switch, restart, active-detail edit, and recovery preserve notes from
+3. Numbered or pointer recent-target selection copies its project and activity
+   into Manual entry and clears both a prior pending deck note and the Manual
+   entry note.
+4. A successful quick-switch Start or Switch copies its non-empty persisted note
+   into Manual entry before clearing the quick-switch note input.
+5. Start, switch, restart, active-detail edit, and recovery preserve notes from
    their owning input.
 
 ## Documentation impact

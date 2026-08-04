@@ -1238,6 +1238,14 @@ class TimeTrackerApp(App[None]):
         self._selected_recent_pair = pair
         self._render_quick_switch_action()
 
+    @on(OptionList.OptionSelected, "#recent-activities")
+    def handle_recent_activity_selected(
+        self,
+        event: OptionList.OptionSelected,
+    ) -> None:
+        """Mirror a pointer-selected quick-switch target into Manual entry."""
+        self._apply_recent_selection(event.option_index)
+
     @on(QuickSwitchDeck.Confirmed, "#recent-activities")
     async def handle_quick_switch_confirmed(self) -> None:
         """Confirm the highlighted deck action from Enter."""
@@ -1452,14 +1460,24 @@ class TimeTrackerApp(App[None]):
         self._select_recent_shortcut(4)
 
     def _select_recent_shortcut(self, index: int) -> None:
-        """Highlight a numbered deck item unless text entry owns the key."""
+        """Select a numbered deck item and mirror its target into Manual entry."""
         if isinstance(self.focused, Input):
             return
         deck = self.query_one("#recent-activities", QuickSwitchDeck)
         if not 0 <= index < len(self._recent_activities):
             return
         deck.highlighted = index
+        self._apply_recent_selection(index)
         deck.focus()
+
+    def _apply_recent_selection(self, index: int) -> None:
+        """Apply the shared pointer and number-key selection consequences."""
+        if not 0 <= index < len(self._recent_activities):
+            return
+        pair = self._recent_activities[index]
+        self.query_one("#project", Input).value = pair.project
+        self.query_one("#activity", Input).value = pair.activity
+        self.query_one("#note", Input).value = ""
 
     async def _start_timer(self) -> None:
         if self.query_one("#start-button", Button).disabled:
@@ -1533,6 +1551,8 @@ class TimeTrackerApp(App[None]):
         self.active_timer = persisted
         self.pending_reminder = None
         self._render_reminder()
+        if persisted.note:
+            self.query_one("#note", Input).value = persisted.note
         self.query_one("#quick-switch-note", Input).value = ""
         await self._refresh_project_suggestions()
         await self._refresh_history()

@@ -693,6 +693,13 @@ async def test_user_quick_switches_from_recent_activities(tmp_path: Path) -> Non
             await pilot.pause()
             assert recent.highlighted == 1
             assert client.get_active() is None
+            assert app.query_one("#project", Input).value == "Website"
+            assert app.query_one("#activity", Input).value == "Planning"
+            assert app.query_one("#note", Input).value == ""
+
+            app.query_one("#project", Input).value = "Temporary"
+            app.query_one("#activity", Input).value = "Draft"
+            app.query_one("#note", Input).value = "Clear this too"
 
             app.query_one("#start-button", Button).focus()
             await pilot.press("2")
@@ -701,6 +708,9 @@ async def test_user_quick_switches_from_recent_activities(tmp_path: Path) -> Non
             assert recent.highlighted == 1
             assert app.focused is recent
             assert client.get_active() is None
+            assert app.query_one("#project", Input).value == "Website"
+            assert app.query_one("#activity", Input).value == "Planning"
+            assert app.query_one("#note", Input).value == ""
             assert "Start Website / Planning" in str(
                 app.query_one("#quick-switch-action", Static).render()
             )
@@ -716,9 +726,9 @@ async def test_user_quick_switches_from_recent_activities(tmp_path: Path) -> Non
             assert active.project == "Website"
             assert active.activity == "Planning"
             assert active.note == "Fresh deck note"
-            assert app.query_one("#project", Input).value == "1"
-            assert app.query_one("#activity", Input).value == "Draft"
-            assert app.query_one("#note", Input).value == "Do not preserve this"
+            assert app.query_one("#project", Input).value == "Website"
+            assert app.query_one("#activity", Input).value == "Planning"
+            assert app.query_one("#note", Input).value == "Fresh deck note"
             assert quick_note.value == ""
             assert str(app.query_one("#quick-switch-action", Static).render()) == (
                 "Current"

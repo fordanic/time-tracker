@@ -17,11 +17,13 @@ TUI opens, while keeping the user in control of the new timer and its note.
 - Exclude a pair when its project or activity is archived. Collapse repeated
   completed entries for the same pair to the pair's most recent use.
 - Present recent pairs as the quick switch deck with visible number shortcuts.
-  Selection highlights one pair and updates its pending action without changing
-  the normal capture inputs or timer state.
+  Numbered or pointer selection highlights one pair, updates its pending action,
+  and copies its project and activity into Manual entry while clearing its note,
+  without changing timer state.
 - Use a dedicated single-line optional note below the deck for the pending
   action. Confirm Start or Switch with `Enter` rather than a separate action
-  button; never copy a historical note.
+  button; never copy a historical note. After persistence, copy a non-empty note
+  supplied for this quick switch into the Manual entry note field.
 - Refresh recent pairs after connection, timer transitions, active-detail edits,
   archive, and restoration so visible choices reflect authoritative storage.
 - When no eligible completed pair exists, show a concise empty state instead of

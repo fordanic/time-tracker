@@ -12,8 +12,12 @@ Let a user resume common work quickly while keeping timer transitions deliberate
 - Derive ordering, canonical names, and eligibility in the application layer and expose them through the versioned agent protocol.
 - Exclude archived projects and activities and collapse repeated completed entries to each pair's most recent use.
 - Assign visible shortcuts `1` through `5` to the displayed entries.
-- Pressing a number shortcut selects and highlights its entry but does not change timer state.
-- Pointer selection and keyboard selection must have the same non-persistent effect.
+- Pressing a number shortcut selects and highlights its entry, copies its project
+  and activity into Manual entry so the primary action reflects the selection,
+  clears the Manual entry note, and does not change timer state.
+- Pointer selection must have the same non-persistent effect as a numbered
+  shortcut, including updating Manual entry's project and activity and clearing
+  its note.
 - Describe the pending confirmed action as:
   - `Start` when no timer is active;
   - `Switch from <current> to <selected>` when another pair is active; or
@@ -25,7 +29,8 @@ Let a user resume common work quickly while keeping timer transitions deliberate
 - Selecting the current pair must not offer a timer transition. `Enter` must leave the active timer unchanged.
 - Put the deck first in Track and provide a dedicated single-line optional-note
   input immediately below it. A note entered there applies only to the pending
-  Start or Switch.
+  Start or Switch. After that action is persisted, copy a non-empty normalized
+  note into the Manual entry note field.
 - Put the normal capture workflow below the deck under the label `Manual entry`,
   with its own independent single-line optional-note input.
 - Put Stop and Update active details below the Manual entry Start action rather
@@ -57,8 +62,10 @@ Let a user resume common work quickly while keeping timer transitions deliberate
 5. Selecting the current pair shows `Current`; pressing `Enter` leaves the timer, note, history, and reminder deadline unchanged.
 6. Historical notes are never copied into deck-started entries.
 7. A quick-switch note entered before confirmation is applied to the new active
-   entry under the existing note-normalization rules and never changes the
-   independent Manual entry project, activity, or note fields.
+   entry under the existing note-normalization rules. Numbered or pointer
+   selection updates Manual entry's project and activity and clears its
+   independent note; successful confirmation then copies a non-empty persisted
+   quick-switch note into that Manual entry note.
 8. Number keys entered inside text-editing controls do not change deck selection.
 9. Archived pairs do not appear, and archive or restoration refreshes the visible deck.
 10. The normal capture path remains available below the deck as `Manual entry`
