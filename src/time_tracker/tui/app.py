@@ -760,6 +760,7 @@ class TimeTrackerApp(App[None]):
         self._idle_detection_available = False
         self._theme_persistence_ready = False
         self._saved_theme: str | None = None
+        self._theme_save_lock = asyncio.Lock()
 
     def compose(self) -> ComposeResult:
         """Compose focused workflows around one persistent active-timer strip."""
@@ -1138,14 +1139,21 @@ class TimeTrackerApp(App[None]):
     async def _handle_theme_changed(self, theme: Theme) -> None:
         """Persist a theme selected in Settings or through the command palette."""
         self._render_theme_selection()
-        if not self._theme_persistence_ready or theme.name == self._saved_theme:
+        if not self._theme_persistence_ready:
             return
-        try:
-            saved = await asyncio.to_thread(self.client.save_theme, theme.name)
-        except Exception as error:
-            self._show_message(str(error), error=True)
-            return
-        self._saved_theme = saved
+        async with self._theme_save_lock:
+            selected_theme = self.theme
+            if selected_theme == self._saved_theme:
+                return
+            try:
+                saved = await asyncio.to_thread(
+                    self.client.save_theme,
+                    selected_theme,
+                )
+            except Exception as error:
+                self._show_message(str(error), error=True)
+                return
+            self._saved_theme = saved
 
     @on(Select.Changed, "#color-palette")
     def handle_color_palette_selected(self, event: Select.Changed) -> None:
