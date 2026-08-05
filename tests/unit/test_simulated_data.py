@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, timedelta, timezone
 from itertools import pairwise
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 import pytest
 from pytest import MonkeyPatch
@@ -14,7 +13,7 @@ from time_tracker.infrastructure.simulated_data import SeedSummary, simulated_en
 
 
 def test_simulated_entries_cover_45_days_without_weekends() -> None:
-    local_timezone = ZoneInfo("Europe/Stockholm")
+    local_timezone = timezone(timedelta(hours=2))
     end_date = date(2026, 7, 31)
     start_date = end_date - timedelta(days=44)
 
