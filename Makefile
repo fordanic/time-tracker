@@ -17,7 +17,8 @@ endif
 
 .PHONY: help prepare-venv sync run stop-agent format format-check lint typecheck test \
 	test-unit test-integration test-e2e check ci build smoke-packaged \
-	smoke-notification set-version release-artifact clean clear-database clear-local
+	smoke-notification set-version release-artifact clean clear-database \
+	seed-test-data clear-local
 
 help:
 	@printf '%s\n' \
@@ -47,6 +48,8 @@ help:
 		'  make clean             Remove repository build and check artifacts' \
 		'  make clear-database CONFIRM=1' \
 		'                         Stop the agent and delete the local database' \
+		'  make seed-test-data CONFIRM=1' \
+		'                         Stop the agent and seed an empty local database' \
 		'  make clear-local CONFIRM=1' \
 		'                         Stop the agent and delete local app data'
 
@@ -117,6 +120,10 @@ clean:
 clear-database: prepare-venv
 	$(UV) run python -m time_tracker.infrastructure.local_files \
 		--database-only $(if $(filter 1,$(CONFIRM)),--yes,)
+
+seed-test-data: prepare-venv
+	$(UV) run python -m time_tracker.infrastructure.simulated_data \
+		$(if $(filter 1,$(CONFIRM)),--yes,)
 
 clear-local: prepare-venv
 	$(UV) run python -m time_tracker.infrastructure.local_files \
