@@ -333,6 +333,10 @@ def _handle_request(
                     _optional_str(params, "note"),
                 )
             )
+        elif method == "delete_completed":
+            result = _timer_dict(
+                service.delete_completed(_required_int(params, "entry_id"))
+            )
         elif method == "create_manual_entry":
             result = _timer_dict(
                 service.create_manual_entry(

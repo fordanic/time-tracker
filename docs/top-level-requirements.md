@@ -94,6 +94,8 @@ internet connection. The current product interface is a TUI.
   stop. A corrected stop must be strictly after its start, and its half-open
   interval must not overlap another completed or active entry; touching boundaries
   are allowed.
+- Allow permanent deletion of one selected completed entry after explicit
+  confirmation. Deletion does not change an active timer.
 - Reassignment during correction uses a non-archived project/activity target,
   while an unchanged historical assignment may remain on its archived target.
 - Persist correction atomically before reporting success and preserve the entry's

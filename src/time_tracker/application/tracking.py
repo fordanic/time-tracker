@@ -174,6 +174,10 @@ class TimerRepository(Protocol):
         """Atomically validate and update one completed entry."""
         ...
 
+    def delete_completed(self, entry_id: int) -> CompletedTimer:
+        """Atomically delete and return one completed entry."""
+        ...
+
     def create_completed(
         self,
         project: str,
@@ -433,6 +437,12 @@ class TrackingService:
             stopped_at,
             normalized_note,
         )
+
+    def delete_completed(self, entry_id: int) -> CompletedTimer:
+        """Permanently delete one completed entry."""
+        if entry_id <= 0:
+            raise ValueError("completed entry ID must be positive")
+        return self._repository.delete_completed(entry_id)
 
     def create_manual_entry(
         self,

@@ -15,7 +15,7 @@ TUI leaves the background process, active timer, and reminders running.
 - Recover an active timer after the TUI closes, the process restarts, or the
   application crashes.
 - Organize activities by project and archive or restore historical targets.
-- Review, correct, and manually add completed entries.
+- Review, correct, permanently delete, and manually add completed entries.
 - Filter history and view daily or project/activity totals.
 - Export detailed entries and summaries as comma- or pipe-delimited UTF-8 text.
 - Configure desktop reminders, delivery windows, snooze, and optional local
@@ -245,8 +245,8 @@ The initial product baseline and selected TUI roadmap features are implemented:
 
 - durable single-timer start, switch, restart, stop, recovery, and active-detail
   editing;
-- completed-entry review, correction, missed-time entry, filtering, summaries,
-  and export;
+- completed-entry review, correction, confirmed deletion, missed-time entry,
+  filtering, summaries, and export;
 - recent-work selection and active/archived project and activity management;
 - preparing new projects and activities from Manage without starting a timer;
 - persistent reminder, color-palette, and export settings with live reload;

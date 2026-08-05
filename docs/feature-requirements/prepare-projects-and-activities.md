@@ -1,6 +1,6 @@
 # Prepare projects and activities
 
-**Status:** Approved
+**Status:** Implemented
 
 ## Purpose
 
@@ -12,11 +12,11 @@ feature adds a direct, explicit way to prepare names for later use.
 
 ## Required behavior
 
-- Manage offers a "New project" input and a "Create project" action that
+- Manage offers a "New project" input and an "Add project" action that
   creates a project with no activities.
 - Manage offers a "New activity" project input (with the same typeahead
   suggestions of active projects used elsewhere in the TUI) and activity-name
-  input, plus a "Create activity" action that creates an activity under an
+  input, plus an "Add activity" action that creates an activity under an
   existing, non-archived project.
 - On success, both actions report the canonical created name(s), clear the
   relevant input(s), and refresh Manage's active tree and every project/activity

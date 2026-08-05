@@ -59,8 +59,8 @@ framework are intentionally unnecessary for the current product.
 - The current protocol supports one foreground client. Multiple concurrent
   clients are not a protocol guarantee.
 - Bump the protocol version when a genuinely new capability is added, such as
-  the explicit `create_project`/`create_activity` methods (version 5); a minor
-  addition to an existing settings area does not require a bump.
+  completed-entry deletion (version 6); a minor addition to an existing settings
+  area does not require a bump.
 
 The agent runs reminder scheduling on its asyncio loop and moves blocking IPC and
 SQLite calls to worker threads. Requests are still handled serially, so the agent
@@ -120,6 +120,10 @@ TimeEntry(id, activity_id, started_at_utc, stopped_at_utc?, note?, created_at)
   every other completed or active entry, and updates the existing row only after
   all checks pass. Adjacent interval boundaries are valid; no schema or revision
   history is added for the first correction slice.
+- Delete a completed entry through an agent-owned application use case and one
+  SQLite transaction, exposed over protocol version 6. The repository verifies
+  that the identifier names a completed entry before deleting only that entry;
+  the active timer and project/activity records are unchanged.
 - Create a manual completed entry through an agent-owned application use case and
   one SQLite transaction. The application validates normalized values and captures
   the creation time from its injected clock; the transaction resolves or creates

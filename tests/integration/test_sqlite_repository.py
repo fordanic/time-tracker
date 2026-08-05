@@ -415,6 +415,32 @@ def test_time_only_correction_retains_archived_historical_target(
         )
 
 
+def test_completed_entry_deletion_preserves_active_timer_and_targets(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteTimerRepository(tmp_path / "tracker.sqlite3")
+    started_at = datetime(2026, 7, 20, 8, tzinfo=UTC)
+    completed_active = repository.start("Website", "Review", started_at, "Remove")
+    completed = repository.stop(started_at + timedelta(hours=1))
+    assert completed is not None
+    active = repository.start(
+        "Website",
+        "Implementation",
+        started_at + timedelta(hours=2),
+        "Keep",
+    )
+
+    assert repository.delete_completed(completed_active.entry_id) == completed
+    assert repository.list_completed() == []
+    assert repository.get_active() == active
+    assert repository.list_projects() == ["Website"]
+    assert repository.list_activities("Website") == ["Implementation", "Review"]
+
+    with pytest.raises(ValueError, match="unknown completed entry"):
+        repository.delete_completed(active.entry_id)
+    assert repository.get_active() == active
+
+
 def test_manual_entry_is_atomic_non_overlapping_and_preserves_active_timer(
     tmp_path: Path,
 ) -> None:

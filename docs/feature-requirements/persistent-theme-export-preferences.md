@@ -12,8 +12,8 @@ exports without making them the default.
 - Persist a selected built-in Textual theme in the human-readable configuration
   and apply it on the next TUI launch.
 - Offer every available built-in theme as a Settings choice that applies and
-  persists as soon as it is selected, without requiring Save, so the palette is
-  reachable without the command palette.
+  durably persists as part of handling that selection, without requiring Save,
+  so the palette is reachable without the command palette.
 - Keep the Settings choice in step with a theme applied elsewhere, including
   through Textual's command palette.
 - Fall back to the built-in default when the saved theme is not available and
@@ -45,7 +45,8 @@ exports without making them the default.
 4. All three export representations use the chosen delimiter, while comma
    remains the default for existing and absent configurations.
 5. Every available palette can be chosen from Settings, applies immediately,
-   survives a restart, and the shown choice follows a palette applied elsewhere.
+   is durably saved before selection handling completes, survives a restart, and
+   the shown choice follows a palette applied elsewhere.
 6. Unit, integration, IPC, and Textual tests cover persistence, partial settings
    preservation, fallback, Settings palette selection, live delimiter changes, and
    quoted multiline notes.
