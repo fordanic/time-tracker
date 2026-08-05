@@ -185,6 +185,26 @@ make build
 `make` keeps disposable uv, Python, and PyInstaller caches in ignored
 repository-local directories by default.
 
+To stop the background agent and permanently delete only the local tracking
+database while preserving configuration, credentials, and logs, explicitly
+confirm the destructive operation:
+
+```shell
+make clear-database CONFIRM=1
+```
+
+To populate that empty database with a fixed manual-testing data set covering
+the most recent 45 complete local calendar days, run:
+
+```shell
+make seed-test-data CONFIRM=1
+```
+
+The seed contains multiple projects and activities, varied completed entries,
+and notes. Every weekday has entries and weekends have none. The command stops
+the agent before writing and refuses to mix simulated entries into a non-empty
+database.
+
 Before committing, run the complete check set:
 
 ```shell
