@@ -11,13 +11,20 @@ from time_tracker.infrastructure.ipc import AgentClient, AgentUnavailableError
 from time_tracker.infrastructure.paths import AgentPaths
 
 
-def local_files(paths: AgentPaths) -> tuple[Path, ...]:
-    """Return the exact files owned by the current walking skeleton."""
-    files = [
+def database_files(paths: AgentPaths) -> tuple[Path, ...]:
+    """Return the SQLite database and its possible sidecar files."""
+    return (
         paths.database,
         Path(f"{paths.database}-journal"),
         Path(f"{paths.database}-shm"),
         Path(f"{paths.database}-wal"),
+    )
+
+
+def local_files(paths: AgentPaths) -> tuple[Path, ...]:
+    """Return the exact files owned by the current walking skeleton."""
+    files = [
+        *database_files(paths),
         paths.config,
         paths.secret,
         paths.lock,
@@ -28,16 +35,26 @@ def local_files(paths: AgentPaths) -> tuple[Path, ...]:
     return tuple(files)
 
 
-def clear_local_files(paths: AgentPaths) -> list[Path]:
-    """Delete only existing files explicitly owned by Time Tracker."""
+def _clear_files(files: Sequence[Path]) -> list[Path]:
+    """Delete the selected existing files and report what was removed."""
     removed: list[Path] = []
-    for path in local_files(paths):
+    for path in files:
         try:
             path.unlink()
         except FileNotFoundError:
             continue
         removed.append(path)
     return removed
+
+
+def clear_database_files(paths: AgentPaths) -> list[Path]:
+    """Delete only the SQLite database and its possible sidecar files."""
+    return _clear_files(database_files(paths))
+
+
+def clear_local_files(paths: AgentPaths) -> list[Path]:
+    """Delete only existing files explicitly owned by Time Tracker."""
+    return _clear_files(local_files(paths))
 
 
 def stop_agent(paths: AgentPaths, *, timeout_seconds: float = 2.0) -> None:
@@ -66,18 +83,29 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="confirm permanent deletion of all local Time Tracker data",
     )
+    parser.add_argument(
+        "--database-only",
+        action="store_true",
+        help="delete only the SQLite database and its sidecar files",
+    )
     arguments = parser.parse_args(argv)
     if not arguments.yes:
-        parser.error("deletion requires confirmation: make clear-local CONFIRM=1")
+        target = "clear-database" if arguments.database_only else "clear-local"
+        parser.error(f"deletion requires confirmation: make {target} CONFIRM=1")
 
     paths = AgentPaths.defaults()
     stop_agent(paths)
-    removed = clear_local_files(paths)
+    removed = (
+        clear_database_files(paths)
+        if arguments.database_only
+        else clear_local_files(paths)
+    )
     if removed:
         for path in removed:
             print(f"removed {path}")
     else:
-        print("no local Time Tracker files found")
+        kind = "database files" if arguments.database_only else "files"
+        print(f"no local Time Tracker {kind} found")
     return 0
 
 
