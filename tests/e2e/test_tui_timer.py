@@ -377,6 +377,7 @@ async def test_user_prepares_a_project_and_activity_without_starting_a_timer(
 
             app.query_one("#new-project", Input).value = "Research"
             create_project_button = app.query_one("#create-project-button", Button)
+            assert str(create_project_button.label) == "Add project"
             create_project_button.focus()
             await pilot.pause()
             create_project_button.press()
@@ -411,6 +412,7 @@ async def test_user_prepares_a_project_and_activity_without_starting_a_timer(
             app.query_one("#new-activity-project", Input).value = "research"
             app.query_one("#new-activity-name", Input).value = "Literature review"
             create_activity_button = app.query_one("#create-activity-button", Button)
+            assert str(create_activity_button.label) == "Add activity"
             create_activity_button.focus()
             await pilot.pause()
             create_activity_button.press()
@@ -699,6 +701,23 @@ async def test_user_quick_switches_from_recent_activities(tmp_path: Path) -> Non
             assert app.query_one("#project", Input).value == "Website"
             assert app.query_one("#activity", Input).value == "Planning"
             assert app.query_one("#note", Input).value == ""
+
+            app.query_one("#project", Input).value = "Temporary"
+            app.query_one("#activity", Input).value = "Draft"
+            app.query_one("#note", Input).value = "Clear with arrows"
+            recent.focus()
+            await pilot.press("up")
+            await pilot.pause()
+            assert recent.highlighted == 0
+            assert app.query_one("#project", Input).value == "Website"
+            assert app.query_one("#activity", Input).value == "Implementation"
+            assert app.query_one("#note", Input).value == ""
+
+            await pilot.press("down")
+            await pilot.pause()
+            assert recent.highlighted == 1
+            assert app.query_one("#project", Input).value == "Website"
+            assert app.query_one("#activity", Input).value == "Planning"
 
             app.query_one("#project", Input).value = "Temporary"
             app.query_one("#activity", Input).value = "Draft"
@@ -1000,17 +1019,17 @@ async def test_review_groups_local_days_and_loads_an_overnight_entry_segment(
                 "Release",
                 "23:30",
                 "00:00",
-                "00:30:00",
+                "0h 30m",
                 "Across midnight",
             ]
             assert history.get_row_at(1)[1] == "Day total"
 
             second_segment = history.get_row_at(2)
             assert second_segment[0] == local_midnight.date().isoformat()
-            assert second_segment[3:6] == ["00:00", "00:30", "00:30:00"]
+            assert second_segment[3:6] == ["00:00", "00:30", "0h 30m"]
             assert history.get_row_at(3)[0] == ""
             assert history.get_row_at(4)[1] == "Day total"
-            assert history.get_row_at(4)[5] == "01:15:00"
+            assert history.get_row_at(4)[5] == "1h 15m"
             assert "Today's completed time: 01:15:00" in str(
                 app.query_one("#today-total", Static).render()
             )
@@ -1040,6 +1059,98 @@ async def test_review_groups_local_days_and_loads_an_overnight_entry_segment(
                 "day-total selection was not rejected",
             )
             assert app._editing_entry_id == overnight.entry_id
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+
+
+@pytest.mark.asyncio
+async def test_review_deletes_selected_entry_and_rounds_duration_up(
+    tmp_path: Path,
+) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    repository = SQLiteTimerRepository(paths.database)
+    local_midnight = (
+        datetime.now()
+        .astimezone()
+        .replace(
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+    )
+    completed_active = repository.start(
+        "Client",
+        "Overnight",
+        local_midnight - timedelta(minutes=30),
+        "Delete all segments",
+    )
+    completed = repository.stop(local_midnight + timedelta(minutes=30, seconds=1))
+    assert completed is not None
+    active = repository.start(
+        "Client",
+        "Keep active",
+        local_midnight + timedelta(hours=1),
+        None,
+    )
+    thread = threading.Thread(target=serve, args=(paths,), daemon=True)
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        app = TimeTrackerApp(client)
+        async with app.run_test() as pilot:
+            await pilot.press("f2")
+            await pilot.pause()
+            history = app.query_one("#history", DataTable)
+            delete_button = app.query_one("#delete-completed-button", Button)
+
+            assert history.row_count == 4
+            assert history.get_row_at(0)[5] == "0h 30m"
+            assert history.get_row_at(2)[5] == "0h 31m"
+            assert "Today's completed time: 00:30:01" in str(
+                app.query_one("#today-total", Static).render()
+            )
+
+            history.move_cursor(row=2)
+            delete_button.press()
+            await pilot.pause()
+            assert client.list_completed() == [completed]
+            assert "Confirm delete" in str(delete_button.label)
+
+            history.move_cursor(row=3)
+            delete_button.press()
+            await pilot.pause()
+            assert client.list_completed() == [completed]
+            assert "Select a completed entry row" in str(
+                app.query_one("#message", Static).render()
+            )
+
+            history.move_cursor(row=2)
+            delete_button.press()
+            await pilot.pause()
+            assert client.list_completed() == [completed]
+            delete_button.press()
+            await _wait_for_ui(
+                pilot,
+                lambda: (
+                    client.list_completed() == []
+                    and "Deleted Client / Overnight"
+                    in str(app.query_one("#message", Static).render())
+                ),
+                "selected entry was not deleted",
+            )
+
+            assert history.row_count == 0
+            assert client.get_active() == active
+            assert completed_active.entry_id != active.entry_id
+            assert "Deleted Client / Overnight" in str(
+                app.query_one("#message", Static).render()
+            )
     finally:
         client.shutdown()
         thread.join(timeout=2)
@@ -1114,8 +1225,8 @@ async def test_review_filters_range_totals_and_export_share_one_selection(
 
             assert range_switch.value is True
             assert history.row_count == 2
-            assert history.get_row_at(0) == ["Client", "Research", "00:30:00"]
-            assert history.get_row_at(1) == ["Client", "Writing", "01:00:00"]
+            assert history.get_row_at(0) == ["Client", "Research", "0h 30m"]
+            assert history.get_row_at(1) == ["Client", "Writing", "1h 00m"]
             assert "Project/activity totals" in str(
                 app.query_one("#history-title", Static).render()
             )

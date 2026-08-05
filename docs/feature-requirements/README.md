@@ -58,6 +58,7 @@ For each selected feature:
 - [Responsive shortcut discovery](responsive-shortcut-discovery.md)
 - [Hierarchical project and activity management](hierarchical-project-activity-management.md)
 - [Review selection and action layout](review-selection-action-layout.md)
+- [Review entry deletion and duration display](review-entry-deletion-duration-display.md)
 - [Track capture layout and note reset](track-capture-layout-note-reset.md)
 - [Theme-safe visual spacing](theme-safe-visual-spacing.md)
 - [Persistent theme and export preferences](persistent-theme-export-preferences.md)

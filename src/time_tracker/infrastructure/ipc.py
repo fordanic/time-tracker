@@ -26,7 +26,7 @@ from time_tracker.application.tracking import (
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
 from time_tracker.infrastructure.paths import AgentPaths
 
-PROTOCOL_VERSION = 5
+PROTOCOL_VERSION = 6
 _WINDOWS_DETACHED_PROCESS_FLAGS = 0x00000208
 
 
@@ -165,6 +165,12 @@ class AgentClient:
             },
         )
         return _completed_from_object(result)
+
+    def delete_completed(self, entry_id: int) -> CompletedTimer:
+        """Persist deletion of one completed entry before returning it."""
+        return _completed_from_object(
+            self._request("delete_completed", {"entry_id": entry_id})
+        )
 
     def create_manual_entry(
         self,

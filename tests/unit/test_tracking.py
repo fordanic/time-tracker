@@ -140,6 +140,16 @@ class ManualEntryRepository:
         )
 
 
+class DeleteRepository:
+    def __init__(self, entry: CompletedTimer) -> None:
+        self.entry = entry
+        self.deleted_ids: list[int] = []
+
+    def delete_completed(self, entry_id: int) -> CompletedTimer:
+        self.deleted_ids.append(entry_id)
+        return self.entry
+
+
 class RecordingClock:
     def __init__(self, now: datetime) -> None:
         self.instant = now
@@ -526,6 +536,24 @@ def test_manual_entry_normalizes_values_and_captures_creation_time() -> None:
         )
     assert clock.calls == 1
     assert len(repository.created) == 1
+
+
+def test_completed_entry_deletion_validates_identifier_and_returns_entry() -> None:
+    entry = _completed(
+        7,
+        "Website",
+        "Review",
+        datetime(2026, 7, 20, 10, tzinfo=UTC),
+    )
+    repository = DeleteRepository(entry)
+    service = TrackingService(cast(TimerRepository, repository))
+
+    assert service.delete_completed(7) == entry
+    assert repository.deleted_ids == [7]
+
+    with pytest.raises(ValueError, match="ID must be positive"):
+        service.delete_completed(0)
+    assert repository.deleted_ids == [7]
 
 
 def test_active_edit_preserves_start_and_rejects_unchanged_values_before_clock() -> (

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -132,6 +133,10 @@ class TrackerGateway(Protocol):
         note: str | None = None,
     ) -> CompletedTimer:
         """Correct one completed entry and return its canonical values."""
+        ...
+
+    def delete_completed(self, entry_id: int) -> CompletedTimer:
+        """Delete one completed entry and return its canonical values."""
         ...
 
     def create_manual_entry(
@@ -284,6 +289,19 @@ class QuickSwitchDeck(OptionList):
             """Return the deck that sent the confirmation."""
             return self.deck
 
+    class Navigated(Message):
+        """The user moved the highlighted target with an arrow key."""
+
+        def __init__(self, deck: QuickSwitchDeck, option_index: int) -> None:
+            super().__init__()
+            self.deck = deck
+            self.option_index = option_index
+
+        @property
+        def control(self) -> QuickSwitchDeck:
+            """Return the deck that sent the navigation."""
+            return self.deck
+
     def action_confirm(self) -> None:
         """Confirm the highlighted target when the deck handles Enter."""
         highlighted = self.highlighted
@@ -291,6 +309,23 @@ class QuickSwitchDeck(OptionList):
             return
         if not self.get_option_at_index(highlighted).disabled:
             self.post_message(self.Confirmed(self))
+
+    def action_cursor_up(self) -> None:
+        """Move upward and report genuine keyboard navigation."""
+        previous = self.highlighted
+        super().action_cursor_up()
+        self._post_navigation_if_changed(previous)
+
+    def action_cursor_down(self) -> None:
+        """Move downward and report genuine keyboard navigation."""
+        previous = self.highlighted
+        super().action_cursor_down()
+        self._post_navigation_if_changed(previous)
+
+    def _post_navigation_if_changed(self, previous: int | None) -> None:
+        highlighted = self.highlighted
+        if highlighted is not None and highlighted != previous:
+            self.post_message(self.Navigated(self, highlighted))
 
 
 class ShortcutHelpScreen(ModalScreen[None]):
@@ -634,7 +669,8 @@ class TimeTrackerApp(App[None]):
         align-horizontal: left;
     }
 
-    #load-correction-button, #add-manual-entry-button {
+    #load-correction-button, #add-manual-entry-button,
+    #delete-completed-button {
         width: 24;
         margin-right: 1;
     }
@@ -755,6 +791,7 @@ class TimeTrackerApp(App[None]):
         self._editing_started_at: datetime | None = None
         self._editing_stopped_at: datetime | None = None
         self._creating_manual_entry = False
+        self._pending_delete_entry_id: int | None = None
         self._pending_archive_project: tuple[str, str] | None = None
         self._pending_archive_activity: tuple[str, str, str, str] | None = None
         self._idle_detection_available = False
@@ -900,6 +937,11 @@ class TimeTrackerApp(App[None]):
                             "Add missed entry",
                             id="add-manual-entry-button",
                         )
+                        yield Button(
+                            "Delete selected entry",
+                            id="delete-completed-button",
+                            variant="error",
+                        )
                     yield Static("Correct selected entry", id="correction-title")
                     with Horizontal(id="correction-target"):
                         yield Input(
@@ -978,7 +1020,7 @@ class TimeTrackerApp(App[None]):
                         id="new-project",
                     )
                     yield Button(
-                        "Create project",
+                        "Add project",
                         id="create-project-button",
                     )
                     yield Static(
@@ -994,7 +1036,7 @@ class TimeTrackerApp(App[None]):
                         id="new-activity-name",
                     )
                     yield Button(
-                        "Create activity",
+                        "Add activity",
                         id="create-activity-button",
                     )
                 with VerticalScroll(id="settings-view", classes="view"):
@@ -1136,13 +1178,16 @@ class TimeTrackerApp(App[None]):
         await self._refresh_reminder()
         self._select_view("track-tab")
 
-    async def _handle_theme_changed(self, theme: Theme) -> None:
+    async def _handle_theme_changed(self, _theme: Theme) -> None:
         """Persist a theme selected in Settings or through the command palette."""
         self._render_theme_selection()
+        await self._persist_theme(self.theme)
+
+    async def _persist_theme(self, selected_theme: str) -> None:
+        """Save one applied palette, serializing concurrent theme events."""
         if not self._theme_persistence_ready:
             return
         async with self._theme_save_lock:
-            selected_theme = self.theme
             if selected_theme == self._saved_theme:
                 return
             try:
@@ -1156,10 +1201,13 @@ class TimeTrackerApp(App[None]):
             self._saved_theme = saved
 
     @on(Select.Changed, "#color-palette")
-    def handle_color_palette_selected(self, event: Select.Changed) -> None:
-        """Apply the palette selected in Settings so it is saved immediately."""
-        if isinstance(event.value, str) and event.value != self.theme:
+    async def handle_color_palette_selected(self, event: Select.Changed) -> None:
+        """Apply and durably save the palette selected in Settings."""
+        if not isinstance(event.value, str):
+            return
+        if event.value != self.theme:
             self.theme = event.value
+        await self._persist_theme(event.value)
 
     @on(Tabs.TabActivated, "#view-tabs")
     def handle_view_activated(self, event: Tabs.TabActivated) -> None:
@@ -1246,6 +1294,14 @@ class TimeTrackerApp(App[None]):
         self._selected_recent_pair = pair
         self._render_quick_switch_action()
 
+    @on(QuickSwitchDeck.Navigated, "#recent-activities")
+    def handle_recent_activity_navigated(
+        self,
+        event: QuickSwitchDeck.Navigated,
+    ) -> None:
+        """Mirror an arrow-key deck selection into Manual entry."""
+        self._apply_recent_selection(event.option_index)
+
     @on(OptionList.OptionSelected, "#recent-activities")
     def handle_recent_activity_selected(
         self,
@@ -1283,6 +1339,11 @@ class TimeTrackerApp(App[None]):
     async def handle_add_manual_entry_button(self) -> None:
         """Prepare the Review editor for one missed-time entry."""
         await self._start_manual_entry()
+
+    @on(Button.Pressed, "#delete-completed-button")
+    async def handle_delete_completed_button(self) -> None:
+        """Confirm or delete the selected completed entry."""
+        await self._delete_selected_completed()
 
     @on(Button.Pressed, "#save-correction-button")
     async def handle_save_correction_button(self) -> None:
@@ -2021,6 +2082,88 @@ class TimeTrackerApp(App[None]):
         self._populate_correction(entry)
         self.query_one("#correction-project", Input).focus()
 
+    async def _delete_selected_completed(self) -> None:
+        if self._review_summary_mode():
+            self._clear_delete_confirmation()
+            self._show_message(
+                "Switch to completed entries before deleting an entry.",
+                error=True,
+            )
+            return
+        table = self.query_one("#history", DataTable)
+        if table.cursor_row >= len(self._history_row_entry_ids):
+            self._clear_delete_confirmation()
+            self._show_message("Select a completed entry row to delete.", error=True)
+            return
+        entry_id = self._history_row_entry_ids[table.cursor_row]
+        if entry_id is None:
+            self._clear_delete_confirmation()
+            self._show_message("Select a completed entry row to delete.", error=True)
+            return
+        entry = next(
+            (item for item in self._completed_entries if item.entry_id == entry_id),
+            None,
+        )
+        if entry is None:
+            self._clear_delete_confirmation()
+            self._show_message(
+                "The selected completed entry is unavailable.", error=True
+            )
+            return
+        if self._pending_delete_entry_id != entry_id:
+            self._pending_delete_entry_id = entry_id
+            self.query_one(
+                "#delete-completed-button", Button
+            ).label = "Confirm delete selected"
+            local_start = entry.started_at.astimezone().isoformat(timespec="minutes")
+            self._show_message(
+                "Press Delete selected entry again to permanently delete "
+                f"{entry.project} / {entry.activity} from {local_start}."
+            )
+            return
+        try:
+            deleted = await asyncio.to_thread(
+                self.client.delete_completed,
+                entry_id,
+            )
+        except Exception as error:
+            self._clear_delete_confirmation()
+            self._show_message(str(error), error=True)
+            return
+
+        if self._editing_entry_id == deleted.entry_id:
+            self._reset_correction_editor()
+        await self._refresh_history()
+        await self._refresh_recent_activities()
+        await self._refresh_project_suggestions()
+        self._show_message(
+            f"Deleted {deleted.project} / {deleted.activity} completed entry."
+        )
+
+    def _reset_correction_editor(self) -> None:
+        self._editing_entry_id = None
+        self._editing_started_at = None
+        self._editing_stopped_at = None
+        self._creating_manual_entry = False
+        self.query_one("#correction-title", Static).update("Correct selected entry")
+        for selector in (
+            "#correction-project",
+            "#correction-activity",
+            "#correction-note",
+            "#correction-start",
+            "#correction-stop",
+        ):
+            self.query_one(selector, Input).value = ""
+        save_button = self.query_one("#save-correction-button", Button)
+        save_button.label = "Save correction"
+        save_button.disabled = True
+
+    def _clear_delete_confirmation(self) -> None:
+        self._pending_delete_entry_id = None
+        buttons = self.query("#delete-completed-button")
+        if buttons:
+            buttons.first(Button).label = "Delete selected entry"
+
     async def _start_manual_entry(self) -> None:
         if self._review_summary_mode():
             self._show_message(
@@ -2370,6 +2513,7 @@ class TimeTrackerApp(App[None]):
         *,
         preferred_entry_id: int | None = None,
     ) -> None:
+        self._clear_delete_confirmation()
         entries_changed = entries is not self._completed_entries
         self._completed_entries = entries
         self._render_today_total(entries)
@@ -2397,6 +2541,7 @@ class TimeTrackerApp(App[None]):
         title = self.query_one("#history-title", Static)
         load_button = self.query_one("#load-correction-button", Button)
         manual_button = self.query_one("#add-manual-entry-button", Button)
+        delete_button = self.query_one("#delete-completed-button", Button)
         save_button = self.query_one("#save-correction-button", Button)
         correction_inputs = self.query(".correction-input")
         correction_disabled = summary_mode or range_mode
@@ -2404,6 +2549,7 @@ class TimeTrackerApp(App[None]):
             correction_input.disabled = correction_disabled
         load_button.disabled = correction_disabled or not has_entries
         manual_button.disabled = correction_disabled
+        delete_button.disabled = correction_disabled or not has_entries
         save_button.disabled = correction_disabled or (
             self._editing_entry_id is None and not self._creating_manual_entry
         )
@@ -2414,7 +2560,7 @@ class TimeTrackerApp(App[None]):
                 table.add_row(
                     range_summary.project,
                     range_summary.activity,
-                    _format_duration(range_summary.duration),
+                    _format_review_duration(range_summary.duration),
                     key=f"{range_summary.project}\0{range_summary.activity}",
                 )
             return
@@ -2426,7 +2572,7 @@ class TimeTrackerApp(App[None]):
                     daily_summary.day.isoformat(),
                     daily_summary.project,
                     daily_summary.activity,
-                    _format_duration(daily_summary.duration),
+                    _format_review_duration(daily_summary.duration),
                     key=(
                         f"{daily_summary.day.isoformat()}\0"
                         f"{daily_summary.project}\0{daily_summary.activity}"
@@ -2452,7 +2598,7 @@ class TimeTrackerApp(App[None]):
                     segment.activity,
                     segment.started_at.astimezone().strftime("%H:%M"),
                     segment.stopped_at.astimezone().strftime("%H:%M"),
-                    _format_duration(segment.duration),
+                    _format_review_duration(segment.duration),
                     segment.note or "",
                     key=(f"entry-{segment.entry_id}-{group_index}-{segment_index}"),
                 )
@@ -2463,7 +2609,7 @@ class TimeTrackerApp(App[None]):
                 "",
                 "",
                 "",
-                _format_duration(group.duration),
+                _format_review_duration(group.duration),
                 "",
                 key=f"day-total-{group.day.isoformat()}",
             )
@@ -2769,6 +2915,13 @@ def _format_duration(duration: timedelta) -> str:
     hours, remainder = divmod(total_seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def _format_review_duration(duration: timedelta) -> str:
+    total_seconds = max(0.0, duration.total_seconds())
+    total_minutes = math.ceil(total_seconds / 60)
+    hours, minutes = divmod(total_minutes, 60)
+    return f"{hours}h {minutes:02d}m"
 
 
 def _parse_offset_datetime(value: str, label: str) -> datetime:

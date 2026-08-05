@@ -644,6 +644,27 @@ class SQLiteTimerRepository:
             note=note,
         )
 
+    def delete_completed(self, entry_id: int) -> CompletedTimer:
+        """Delete one completed entry without changing its target or active timer."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT e.id, p.name AS project, a.name AS activity,
+                       e.started_at_utc, e.stopped_at_utc, e.note
+                FROM time_entries AS e
+                JOIN activities AS a ON a.id = e.activity_id
+                JOIN projects AS p ON p.id = a.project_id
+                WHERE e.id = ? AND e.stopped_at_utc IS NOT NULL
+                """,
+                (entry_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"unknown completed entry: {entry_id}")
+            completed = self._completed_from_row(row)
+            connection.execute("DELETE FROM time_entries WHERE id = ?", (entry_id,))
+        return completed
+
     def create_completed(
         self,
         project: str,

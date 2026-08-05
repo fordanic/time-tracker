@@ -279,6 +279,33 @@ def test_manual_entry_round_trips_over_ipc_without_changing_active_timer(
     assert not thread.is_alive()
 
 
+def test_completed_entry_deletion_round_trips_over_ipc(
+    tmp_path: Path,
+) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    thread = threading.Thread(target=serve, args=(paths,), daemon=True)
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        client.start("Website", "Review", "Remove")
+        completed = client.stop()
+        assert completed is not None
+        active = client.start("Website", "Implementation", "Keep")
+
+        assert client.delete_completed(completed.entry_id) == completed
+        assert client.list_completed() == []
+        assert client.get_active() == active
+        with pytest.raises(AgentRequestError, match="unknown completed entry"):
+            client.delete_completed(active.entry_id)
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+
+
 def test_create_project_and_activity_round_trip_and_reject_duplicates_over_ipc(
     tmp_path: Path,
 ) -> None:

@@ -18,6 +18,8 @@ Let a user resume common work quickly while keeping timer transitions deliberate
 - Pointer selection must have the same non-persistent effect as a numbered
   shortcut, including updating Manual entry's project and activity and clearing
   its note.
+- Moving the highlighted entry with the arrow keys must have the same
+  non-persistent effect as pointer and numbered selection.
 - Describe the pending confirmed action as:
   - `Start` when no timer is active;
   - `Switch from <current> to <selected>` when another pair is active; or
@@ -62,8 +64,8 @@ Let a user resume common work quickly while keeping timer transitions deliberate
 5. Selecting the current pair shows `Current`; pressing `Enter` leaves the timer, note, history, and reminder deadline unchanged.
 6. Historical notes are never copied into deck-started entries.
 7. A quick-switch note entered before confirmation is applied to the new active
-   entry under the existing note-normalization rules. Numbered or pointer
-   selection updates Manual entry's project and activity and clears its
+   entry under the existing note-normalization rules. Numbered, pointer, or
+   arrow-key selection updates Manual entry's project and activity and clears its
    independent note; successful confirmation then copies a non-empty persisted
    quick-switch note into that Manual entry note.
 8. Number keys entered inside text-editing controls do not change deck selection.
