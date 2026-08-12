@@ -19,9 +19,15 @@ test("responsive browser workflow stays durable across all four views", async ({
 
   const recent = page.getByRole("radio", { name: /Documentation/ });
   await recent.click();
-  await expect(
-    page.getByText("Will switch from the current timer."),
-  ).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Project" })).toHaveValue(
+    "Launch work",
+  );
+  await expect(page.getByRole("combobox", { name: "Activity" })).toHaveValue(
+    "Documentation",
+  );
+  const switchPreviews = page.getByText("Will switch from the current timer.");
+  await expect(switchPreviews).toHaveCount(2);
+  await expect(switchPreviews.first()).toBeVisible();
   await recent.focus();
   await page.keyboard.press("Tab");
   const quickNote = page.getByRole("textbox", {

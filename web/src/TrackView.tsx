@@ -176,6 +176,16 @@ export function TrackView({ data, connected, announce, refresh }: Props) {
     }
   };
 
+  const selectRecent = (index: number) => {
+    const selection = data.recent[index];
+    if (!selection) return;
+    setRecentIndex(index);
+    setProject(selection.project);
+    setActivity(selection.activity);
+    setQuickAction(null);
+    setManualAction(null);
+  };
+
   const shortcutState = useRef({
     recentItems: data.recent,
     active: data.active,
@@ -191,6 +201,7 @@ export function TrackView({ data, connected, announce, refresh }: Props) {
     update,
     stop,
     announce,
+    selectRecent,
   });
   shortcutState.current = {
     recentItems: data.recent,
@@ -207,6 +218,7 @@ export function TrackView({ data, connected, announce, refresh }: Props) {
     update,
     stop,
     announce,
+    selectRecent,
   };
 
   useEffect(() => {
@@ -236,8 +248,7 @@ export function TrackView({ data, connected, announce, refresh }: Props) {
         const selection = state.recentItems[index];
         if (index >= 0 && selection) {
           event.preventDefault();
-          setRecentIndex(index);
-          setQuickAction(null);
+          state.selectRecent(index);
           window.requestAnimationFrame(() =>
             recentButtons.current[index]?.focus(),
           );
@@ -340,10 +351,7 @@ export function TrackView({ data, connected, announce, refresh }: Props) {
                     : -1
                 }
                 class={recentIndex === index ? "recent selected" : "recent"}
-                onClick={() => {
-                  setRecentIndex(index);
-                  setQuickAction(null);
-                }}
+                onClick={() => selectRecent(index)}
                 onKeyDown={(event) => {
                   if (
                     event.key === "Enter" &&
@@ -371,8 +379,7 @@ export function TrackView({ data, connected, announce, refresh }: Props) {
                   const next =
                     (index + direction + data.recent.slice(0, 5).length) %
                     data.recent.slice(0, 5).length;
-                  setRecentIndex(next);
-                  setQuickAction(null);
+                  selectRecent(next);
                   recentButtons.current[next]?.focus();
                 }}
               >

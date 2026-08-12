@@ -94,11 +94,22 @@ describe("App", () => {
     await screen.findByText("Recent work");
     const apply = screen.getByRole("button", { name: "Apply selected work" });
     expect((apply as HTMLButtonElement).disabled).toBe(true);
+    const manualNote = screen.getByRole("textbox", { name: /^Note optional$/ });
+    await user.type(manualNote, "Keep this note");
 
     const recent = screen.getByRole("radio", { name: /1ClientBuild/ });
     await user.click(recent);
     await screen.findByText("Will start a new timer.");
     expect((apply as HTMLButtonElement).disabled).toBe(false);
+    expect(
+      (screen.getByRole("combobox", { name: "Project" }) as HTMLInputElement)
+        .value,
+    ).toBe("Client");
+    expect(
+      (screen.getByRole("combobox", { name: "Activity" }) as HTMLInputElement)
+        .value,
+    ).toBe("Build");
+    expect((manualNote as HTMLInputElement).value).toBe("Keep this note");
 
     recent.focus();
     await user.tab();
@@ -118,6 +129,32 @@ describe("App", () => {
         expect.objectContaining({ method: "POST" }),
       );
     });
+  });
+
+  it("mirrors number and arrow deck selections into manual entry", async () => {
+    bootstrapResponse = {
+      ...bootstrap,
+      projects: ["Client", "Internal"],
+      activities: { Client: ["Build"], Internal: ["Planning"] },
+      recent: [
+        { project: "Client", activity: "Build" },
+        { project: "Internal", activity: "Planning" },
+      ],
+    };
+    render(<App />);
+    await screen.findByText("Recent work");
+    await new Promise((resolve) => window.setTimeout(resolve, 50));
+    const project = screen.getByRole("combobox", { name: "Project" });
+    const activity = screen.getByRole("combobox", { name: "Activity" });
+
+    fireEvent.keyDown(window, { key: "2" });
+    expect((project as HTMLInputElement).value).toBe("Internal");
+    expect((activity as HTMLInputElement).value).toBe("Planning");
+
+    const second = screen.getByRole("radio", { name: /2InternalPlanning/ });
+    fireEvent.keyDown(second, { key: "ArrowUp" });
+    expect((project as HTMLInputElement).value).toBe("Client");
+    expect((activity as HTMLInputElement).value).toBe("Build");
   });
 
   it("uses browser-safe view shortcuts outside editable fields", async () => {

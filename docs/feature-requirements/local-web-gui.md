@@ -33,10 +33,12 @@ interface and the web GUI is an explicit alternative.
   confirmation, a separate quick-switch note, classified Start/Switch/Restart or
   disabled no-op behavior, manual project/activity/note capture, Stop, Update
   active details, reminders, Still active, Snooze, and today's completed total.
-  After deck selection, `Tab` moves directly to its optional note and `Enter`
-  from either the selected deck item or its note confirms the classified action.
-  Both deck and manual capture show whether the current input will start, switch,
-  restart, or make no change before confirmation.
+  Selecting deck work by pointer, number key, or arrow navigation copies its
+  project and activity into the manual capture fields without changing either
+  note. After deck selection, `Tab` moves directly to its optional note and
+  `Enter` from either the selected deck item or its note confirms the classified
+  action. Both deck and manual capture show whether the current input will start,
+  switch, restart, or make no change before confirmation.
 - Review provides one shared inclusive local-date/project/activity filter that
   refreshes automatically after a change, without a separate apply action; All
   time, Today, This week, This month, and custom date choices; completed-entry,
@@ -147,13 +149,14 @@ interface and the web GUI is an explicit alternative.
 3. Track implements all recent, manual, classified action, reminder, active-edit,
    and today's-total behaviors with matching agent results and no duplicated
    business classification in TypeScript. Deck selection has one roving tab stop,
-   tabs next to the quick note, and Enter confirms from the selected item or note;
-   authoritative action previews update for deck and manual input. Visible
-   `G`, `U`, and `X` shortcuts perform Start/Switch, Update, and Stop respectively
-   only when their corresponding Track action is available. Their documented
-   modifier equivalents work from editable Track controls. Direct view shortcuts
-   remain inactive while editing, while the timed `Escape` view chord changes
-   views from those controls without intercepting dialog Escape behavior.
+   mirrors the selected project and activity into manual capture, tabs next to the
+   quick note, and confirms from the selected item or note with Enter;
+   authoritative action previews update for deck and manual input. Visible `G`,
+   `U`, and `X` shortcuts perform Start/Switch, Update, and Stop respectively only
+   when their corresponding Track action is available. Their documented modifier
+   equivalents work from editable Track controls. Direct view shortcuts remain
+   inactive while editing, while the timed `Escape` view chord changes views from
+   those controls without intercepting dialog Escape behavior.
 4. Review implements all three representations, shared filters, local-day splits,
    correction, missed time, deletion, and matching exports, including offset-aware
    input, overlap rejection, header-only empty export, and overwrite confirmation.
