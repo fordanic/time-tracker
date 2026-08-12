@@ -33,13 +33,20 @@ interface and the web GUI is an explicit alternative.
   confirmation, a separate quick-switch note, classified Start/Switch/Restart or
   disabled no-op behavior, manual project/activity/note capture, Stop, Update
   active details, reminders, Still active, Snooze, and today's completed total.
-- Review provides one shared inclusive local-date/project/activity filter; All
+  After deck selection, `Tab` moves directly to its optional note and `Enter`
+  from either the selected deck item or its note confirms the classified action.
+  Both deck and manual capture show whether the current input will start, switch,
+  restart, or make no change before confirmation.
+- Review provides one shared inclusive local-date/project/activity filter that
+  refreshes automatically after a change, without a separate apply action; All
   time, Today, This week, This month, and custom date choices; completed-entry,
   daily-summary, and range-total representations; local-day grouping and
   midnight splitting; completed-entry selection, correction, missed-time
   creation, confirmed permanent deletion, and matching filtered export with
-  overwrite confirmation. Export accepts a server-local destination path, just
-  like the TUI; it is not a browser download, and it never silently replaces an
+  overwrite confirmation. Correction and missed-time forms use a compact,
+  responsive multi-column layout and the same project/activity suggestion
+  controls as Track. Export accepts a server-local destination path, just like
+  the TUI; it is not a browser download, and it never silently replaces an
   existing file.
 - Manage presents selectable and archived projects and activities in their
   hierarchy. It supports exact-target archive confirmation, restore under the
@@ -54,10 +61,14 @@ interface and the web GUI is an explicit alternative.
   has its own browser-local preference. It neither reads nor overwrites the
   persisted Textual palette.
 - Preserve keyboard-only use through native focus order and controls. Number keys
-  `1` through `5` select recent work only when focus is outside an editable
-  control. Enter or Space activates focused controls. Provide visible web-safe
-  shortcut help without intercepting browser- or operating-system-reserved
-  function keys.
+  `1` through `5` select and focus recent work only when focus is outside an
+  editable control. `T`, `R`, `M`, and `S` open Track, Review, Manage, and
+  Settings from outside editable controls; `?` toggles visible web shortcut help.
+  Enter or Space activates focused controls. Do not reuse the TUI function-key
+  map or intercept browser- or operating-system-reserved shortcuts.
+- Favor a compact information-dense presentation on desktop through smaller type,
+  spacing, and margins while retaining readable reflow and 44-pixel touch targets
+  in narrow layouts.
 - Use pointer and touch controls with targets of at least 44 CSS pixels in narrow
   layouts. Use a table for completed entries where it fits and readable entry
   cards on narrow screens. Focused correction, missed-time, archive, delete, and
@@ -123,17 +134,21 @@ interface and the web GUI is an explicit alternative.
    shutdown.
 3. Track implements all recent, manual, classified action, reminder, active-edit,
    and today's-total behaviors with matching agent results and no duplicated
-   business classification in TypeScript.
+   business classification in TypeScript. Deck selection has one roving tab stop,
+   tabs next to the quick note, and Enter confirms from the selected item or note;
+   authoritative action previews update for deck and manual input.
 4. Review implements all three representations, shared filters, local-day splits,
    correction, missed time, deletion, and matching exports, including offset-aware
    input, overlap rejection, header-only empty export, and overwrite confirmation.
+   Filter changes apply automatically, and entry forms retain values while
+   presenting project/activity suggestions consistently with Track.
 5. Manage implements hierarchical create, exact archive confirmation, and restore
    semantics, including active-timer preservation and archived-parent rejection.
 6. Settings round-trips every supported durable value, live-reloads the reminder
    schedule under existing rules, reports idle availability, preserves unrelated
    TOML tables, and keeps browser appearance independent of the TUI palette.
-7. At 320, 720, and 1280 CSS pixels, layouts have no horizontal page overflow,
-   clipped essential content, or lost state. Keyboard-only and touch workflows,
+7. At 320, 720, and 1280 CSS pixels, compact layouts have no horizontal page
+   overflow, clipped essential content, or lost state. Keyboard-only and touch workflows,
    visible focus, labels, error associations, status announcements, 200% zoom,
    reduced motion, and light/dark contrast meet WCAG AA thresholds of 4.5:1 for
    normal text and 3:1 for large text and essential interface boundaries.
