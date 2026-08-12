@@ -47,16 +47,21 @@ function json(data: object): Response {
 
 describe("App", () => {
   const fetchMock = vi.fn<typeof fetch>();
+  let bootstrapResponse: Bootstrap;
 
   beforeEach(() => {
+    bootstrapResponse = bootstrap;
     fetchMock.mockReset();
     fetchMock.mockImplementation(async (input) => {
       const path = String(input);
-      if (path === "/api/bootstrap") return json(bootstrap);
+      if (path === "/api/bootstrap") return json(bootstrapResponse);
       if (path === "/api/state") return json({ active: null, reminder: null });
       if (path === "/api/track/classify") return json({ action: "start" });
       if (path === "/api/timer/start")
         return json({ active: { ...bootstrap.recent[0] } });
+      if (path === "/api/timer/edit")
+        return json({ active: bootstrapResponse.active });
+      if (path === "/api/timer/stop") return json({ completed: {} });
       if (path === "/api/review/query")
         return json({
           groups: [],
@@ -173,6 +178,68 @@ describe("App", () => {
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/timer/start",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+  });
+
+  it("runs Track action shortcuts only outside editable fields", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByText("Recent work");
+    const project = screen.getByRole("combobox", { name: "Project" });
+    const activity = screen.getByRole("combobox", { name: "Activity" });
+    await user.type(project, "Client");
+    await user.type(activity, "Build");
+
+    fireEvent.keyDown(activity, { key: "g" });
+    expect(
+      fetchMock.mock.calls.some(
+        ([path]) => String(path) === "/api/timer/start",
+      ),
+    ).toBe(false);
+    activity.blur();
+    fireEvent.keyDown(window, { key: "g" });
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/timer/start",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+  });
+
+  it("updates and stops the active timer with Track shortcuts", async () => {
+    bootstrapResponse = {
+      ...bootstrap,
+      active: {
+        entry_id: 7,
+        project: "Client",
+        activity: "Build",
+        note: "Active note",
+        started_at: "2026-08-12T08:00:00+00:00",
+      },
+    };
+    render(<App />);
+    await screen.findByRole("heading", { name: "Client / Build" });
+    await new Promise((resolve) => window.setTimeout(resolve, 50));
+
+    fireEvent.keyDown(window, { key: "u" });
+    await screen.findByText("Active details updated without restarting time.");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/timer/edit",
+      expect.objectContaining({ method: "POST" }),
+    );
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "Stop" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false),
+    );
+
+    fireEvent.keyDown(window, { key: "x" });
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/timer/stop",
         expect.objectContaining({ method: "POST" }),
       ),
     );

@@ -64,8 +64,12 @@ interface and the web GUI is an explicit alternative.
   `1` through `5` select and focus recent work only when focus is outside an
   editable control. `T`, `R`, `M`, and `S` open Track, Review, Manage, and
   Settings from outside editable controls; `?` toggles visible web shortcut help.
-  Enter or Space activates focused controls. Do not reuse the TUI function-key
-  map or intercept browser- or operating-system-reserved shortcuts.
+  On Track, `G` starts or switches the selected quick work, or the manual entry
+  when no quick work is selected; `U` updates the active entry; and `X` stops it.
+  These action shortcuts also apply only outside editable controls and expose
+  disabled-state feedback without invoking a mutation. Enter or Space activates
+  focused controls. Do not reuse the TUI function-key map or intercept browser-
+  or operating-system-reserved shortcuts.
 - Favor a compact information-dense presentation on desktop through smaller type,
   spacing, and margins while retaining readable reflow and 44-pixel touch targets
   in narrow layouts.
@@ -136,7 +140,9 @@ interface and the web GUI is an explicit alternative.
    and today's-total behaviors with matching agent results and no duplicated
    business classification in TypeScript. Deck selection has one roving tab stop,
    tabs next to the quick note, and Enter confirms from the selected item or note;
-   authoritative action previews update for deck and manual input.
+   authoritative action previews update for deck and manual input. Visible
+   `G`, `U`, and `X` shortcuts perform Start/Switch, Update, and Stop respectively
+   only when their corresponding Track action is available.
 4. Review implements all three representations, shared filters, local-day splits,
    correction, missed time, deletion, and matching exports, including offset-aware
    input, overlap rejection, header-only empty export, and overwrite confirmation.

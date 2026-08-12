@@ -105,30 +105,6 @@ export function TrackView({ data, connected, announce, refresh }: Props) {
     };
   }, [activity, activeKey, note, project]);
 
-  useEffect(() => {
-    const listener = (event: KeyboardEvent) => {
-      const target = event.target;
-      if (
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        target instanceof HTMLSelectElement
-      )
-        return;
-      const index = Number(event.key) - 1;
-      const selection = data.recent[index];
-      if (index >= 0 && selection) {
-        event.preventDefault();
-        setRecentIndex(index);
-        setQuickAction(null);
-        window.requestAnimationFrame(() =>
-          recentButtons.current[index]?.focus(),
-        );
-      }
-    };
-    window.addEventListener("keydown", listener);
-    return () => window.removeEventListener("keydown", listener);
-  }, [data.recent]);
-
   const applyStart = async (
     targetProject: string,
     targetActivity: string,
@@ -199,6 +175,116 @@ export function TrackView({ data, connected, announce, refresh }: Props) {
       setBusy(false);
     }
   };
+
+  const shortcutState = useRef({
+    recentItems: data.recent,
+    active: data.active,
+    disabled,
+    recent,
+    quickAction,
+    quickNote,
+    project,
+    activity,
+    note,
+    manualAction,
+    applyStart,
+    update,
+    stop,
+    announce,
+  });
+  shortcutState.current = {
+    recentItems: data.recent,
+    active: data.active,
+    disabled,
+    recent,
+    quickAction,
+    quickNote,
+    project,
+    activity,
+    note,
+    manualAction,
+    applyStart,
+    update,
+    stop,
+    announce,
+  };
+
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => {
+      if (event.altKey || event.ctrlKey || event.metaKey) return;
+      const target = event.target;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      )
+        return;
+
+      const state = shortcutState.current;
+      const index = Number(event.key) - 1;
+      const selection = state.recentItems[index];
+      if (index >= 0 && selection) {
+        event.preventDefault();
+        setRecentIndex(index);
+        setQuickAction(null);
+        window.requestAnimationFrame(() =>
+          recentButtons.current[index]?.focus(),
+        );
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+      if (key !== "g" && key !== "u" && key !== "x") return;
+      event.preventDefault();
+      if (state.disabled) {
+        state.announce("Tracking controls are currently unavailable.");
+        return;
+      }
+      if (key === "g") {
+        if (state.recent) {
+          if (state.quickAction === "already_tracking") {
+            state.announce("That project and activity are already active.");
+            return;
+          }
+          void state.applyStart(
+            state.recent.project,
+            state.recent.activity,
+            state.quickNote,
+            true,
+          );
+          return;
+        }
+        if (state.project && state.activity) {
+          if (state.manualAction === "already_tracking") {
+            state.announce(
+              "That project, activity, and note are already active.",
+            );
+            return;
+          }
+          void state.applyStart(
+            state.project,
+            state.activity,
+            state.note,
+            false,
+          );
+          return;
+        }
+        state.announce(
+          "Select recent work or enter a project and activity first.",
+        );
+        return;
+      }
+      if (!state.active) {
+        state.announce("There is no active timer for that action.");
+        return;
+      }
+      if (key === "u") void state.update();
+      else void state.stop();
+    };
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, []);
 
   const reminderAction = async (kind: "confirm" | "snooze") => {
     setBusy(true);
@@ -312,12 +398,18 @@ export function TrackView({ data, connected, announce, refresh }: Props) {
         </div>
         <button
           class="primary full"
+          aria-label={
+            quickAction && quickAction !== "already_tracking"
+              ? `${actionLabel(quickAction)} selected work`
+              : "Apply selected work"
+          }
           disabled={disabled || !recent || quickAction === "already_tracking"}
           onClick={() =>
             recent &&
             void applyStart(recent.project, recent.activity, quickNote, true)
           }
         >
+          <kbd aria-hidden="true">G</kbd>
           {quickAction && quickAction !== "already_tracking"
             ? `${actionLabel(quickAction)} selected work`
             : "Apply selected work"}
@@ -373,6 +465,11 @@ export function TrackView({ data, connected, announce, refresh }: Props) {
         <div class="button-row">
           <button
             class="primary"
+            aria-label={
+              manualAction && manualAction !== "already_tracking"
+                ? actionLabel(manualAction)
+                : "Start / switch"
+            }
             disabled={
               disabled ||
               !project ||
@@ -381,21 +478,26 @@ export function TrackView({ data, connected, announce, refresh }: Props) {
             }
             onClick={() => void applyStart(project, activity, note, false)}
           >
+            <kbd aria-hidden="true">G</kbd>
             {manualAction && manualAction !== "already_tracking"
               ? actionLabel(manualAction)
               : "Start / switch"}
           </button>
           <button
+            aria-label="Update active"
             disabled={disabled || !data.active}
             onClick={() => void update()}
           >
+            <kbd aria-hidden="true">U</kbd>
             Update active
           </button>
           <button
             class="danger"
+            aria-label="Stop"
             disabled={disabled || !data.active}
             onClick={() => void stop()}
           >
+            <kbd aria-hidden="true">X</kbd>
             Stop
           </button>
         </div>

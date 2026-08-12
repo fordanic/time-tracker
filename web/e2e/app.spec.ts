@@ -71,7 +71,13 @@ test("responsive browser workflow stays durable across all four views", async ({
   await expect(page.locator("html")).toHaveAttribute("data-appearance", "dark");
 
   await page.getByRole("button", { name: "Track" }).click();
-  await page.getByRole("button", { name: "Stop" }).click();
+  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur());
+  await page.keyboard.press("u");
+  await expect(
+    page.getByText("Active details updated without restarting time."),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Stop" })).toBeEnabled();
+  await page.keyboard.press("x");
   await expect(
     page.getByRole("heading", { name: "No active timer" }),
   ).toBeVisible();

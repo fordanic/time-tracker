@@ -187,6 +187,15 @@ export function App() {
             <kbd>Enter</kbd> confirm selected work
           </span>
           <span>
+            <kbd>G</kbd> Start / switch
+          </span>
+          <span>
+            <kbd>U</kbd> Update active
+          </span>
+          <span>
+            <kbd>X</kbd> Stop
+          </span>
+          <span>
             <kbd>T</kbd> Track
           </span>
           <span>
