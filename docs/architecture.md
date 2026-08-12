@@ -9,21 +9,28 @@ conform to both authoritative documents.
 ## Overview
 
 ```text
-+-------------+       local IPC       +--------------------+
-| Textual TUI | <-------------------> | Background process |
-+-------------+                       +---------+----------+
-                                                |
-                                      +---------+----------+
-                                      |                    |
-                                  +---v----+         +-----v------+
-                                  | SQLite |         | OS notifier |
-                                  +--------+         +------------+
++-------------+      local IPC      +--------------------+     +--------+
+| Textual TUI | <-----------------> | Background process | --> | SQLite |
++-------------+                     +---------+----------+     +--------+
+                                              ^    |
+                                    local IPC |    +----------> OS notifier
+                                              |
++------------+    loopback HTTP    +----------+--------+
+| Browser UI | <-----------------> | Python web adapter |
++------------+                     +-------------------+
 ```
 
-The TUI is a client. One long-lived background process—called the agent in code
-and operational documentation—owns timer state, reminders, and all database
-writes. Closing the TUI does not stop that process. This boundary keeps product
-behavior independent of Textual presentation code.
+The TUI and optional local web server are alternative foreground clients. One
+long-lived background process—called the agent in code and operational
+documentation—owns timer state, reminders, and all database writes. Closing
+either interface does not stop that process. This boundary keeps product behavior
+independent of Textual and browser presentation code.
+
+The web server is a Python interface adapter. It serves compiled browser assets
+and translates same-origin JSON HTTP requests to the existing authenticated agent
+protocol. The browser never connects to agent IPC or SQLite. Version 1 rejects
+simultaneous TUI and web foreground clients because concurrent clients are not a
+protocol guarantee.
 
 ## Technology choices
 
@@ -32,6 +39,8 @@ behavior independent of Textual presentation code.
 | Runtime | CPython 3.14 |
 | Project management | `uv`, `pyproject.toml`, and a `src/` layout |
 | TUI | Textual |
+| Local web server | Starlette served by Uvicorn on `127.0.0.1` |
+| Browser UI | TypeScript and Preact, built with Vite |
 | Background work | `asyncio` |
 | Local IPC | `multiprocessing.connection` |
 | Persistence | Standard-library `sqlite3` and numbered SQL migrations |
@@ -42,13 +51,18 @@ behavior independent of Textual presentation code.
 | Release publication | GitHub Actions, Git tags, and GitHub CLI |
 | Quality tools | pytest, pytest-asyncio, Ruff, and mypy |
 
-An ORM, dependency-injection framework, network service, and external migration
-framework are intentionally unnecessary for the current product.
+An ORM, dependency-injection framework, remotely reachable network service, and
+external migration framework are intentionally unnecessary for the current
+product. Node.js is a development and build dependency only; native packages
+contain compiled browser assets and no Node runtime.
 
 ## Process and IPC
 
-- Starting the TUI starts the background process if needed; an explicit lifecycle
-  command stops it. Starting at login is deferred.
+- Starting either interface starts the background process if needed; an explicit
+  lifecycle command stops it. Starting at login is deferred. The default command
+  starts the TUI. `time-tracker --web` starts the loopback server on port `47831`
+  and opens the default browser unless `--no-open` is present. `--port PORT`
+  overrides that stable default and is valid only with `--web`.
 - Prevent a second background process with an instance lock.
 - Use `AF_UNIX` sockets on Linux and macOS and `AF_PIPE` named pipes on Windows.
 - Authenticate connections with a per-user secret.
@@ -56,8 +70,10 @@ framework are intentionally unnecessary for the current product.
   pickle-based `send` or `recv` methods.
 - A request has a protocol version, request ID, method, and parameters. A response
   has the request ID and either a result or structured error.
-- The current protocol supports one foreground client. Multiple concurrent
-  clients are not a protocol guarantee.
+- The current protocol supports one foreground agent-protocol client. Multiple
+  concurrent protocol clients are not a guarantee. Version 1 reports a clear
+  conflict rather than allowing simultaneous TUI and web clients. Browser tabs
+  are HTTP consumers of one web process and are not independent protocol clients.
 - Bump the protocol version when a genuinely new capability is added, such as
   completed-entry deletion (version 6); a minor addition to an existing settings
   area does not require a bump.
@@ -75,7 +91,10 @@ src/time_tracker/
   infrastructure/     # SQLite, IPC, config, notifications, platform adapters
   agent/              # Background process and reminder scheduler
   tui/                # Textual interface
-  cli.py               # TUI launch and process lifecycle
+  web/                # Loopback ASGI adapter and compiled browser assets
+  cli.py               # Interface launch and process lifecycle
+
+web/                   # TypeScript/Preact source and build configuration
 
 tests/
   unit/
@@ -83,13 +102,50 @@ tests/
   e2e/
 ```
 
-- Domain and application code must not depend on Textual, SQLite, IPC, or a
-  notification library.
+- Domain and application code must not depend on Textual, the web framework,
+  SQLite, IPC, or a notification library.
 - Interfaces call application use cases; they do not implement timer rules.
 - Clocks, repositories, and notification services are injected for deterministic
   testing. No dependency-injection framework is used.
 - The TUI uses the background process and protocol; it never accesses SQLite
   directly.
+- The web adapter uses the same background process and protocol, serializes its
+  blocking IPC calls away from the ASGI event loop, and never accesses SQLite
+  directly. Browser code performs presentation and immediate field validation
+  only.
+
+## Local web boundary
+
+- Bind only to IPv4 loopback. LAN binding is not configurable in version 1.
+- Use a Starlette application served programmatically by Uvicorn. The stable
+  default origin is `http://127.0.0.1:47831`; `--port` changes it explicitly. If
+  the selected port is unavailable, fail clearly without opening a browser or
+  selecting another port, so browser-local appearance remains origin-stable.
+- Open the browser only after the server accepts connections. With `--no-open`,
+  print the exact URL after readiness. Browser-open failure reports the URL and
+  leaves the server running. `Ctrl+C` stops only the foreground web server and
+  leaves the background agent and active timer running.
+- Serve one same-origin Preact application and explicit JSON endpoints. Use
+  modest polling for active state and reminders; derive the one-second elapsed
+  display from the authoritative aware start timestamp between polls.
+- One web process owns one IPC client and an async serialization lock. Multiple
+  browser tabs may reach that server, but requests still pass through one
+  foreground agent connection.
+- Accept only `Host: 127.0.0.1:<selected-port>` and mutation Origin
+  `http://127.0.0.1:<selected-port>`. Emit no permissive CORS response. Generate
+  a fresh 256-bit URL-safe token at each web-server launch, embed it in the
+  uncached same-origin HTML as `<meta name="time-tracker-token">`, and require
+  its exact value in `X-Time-Tracker-Token` for every mutation. Accept mutation
+  bodies only as JSON up to 64 KiB and expose no state-changing `GET` route.
+- Send a restrictive Content Security Policy, deny framing, use same-origin
+  resource isolation, and disable MIME sniffing. Do not load runtime assets from
+  third-party origins.
+- Do not place the launch token, tracked names, notes, or entry data in URLs or
+  access logs.
+- Browser appearance is local to browser storage with System, Light, and Dark
+  values. The stable default origin preserves it across launches. It does not
+  reuse or overwrite the Textual theme setting; an explicit port has its own
+  browser-local preference.
 
 ## Persistence and time
 
@@ -179,9 +235,10 @@ delivery fails or the TUI disconnects.
   `inactive_interval_minutes`/`active_interval_minutes` numbers, an optional
   weekly local-time delivery window, a positive snooze duration, and independent
   opt-in idle-reminder state with a positive threshold in minutes. Configuration
-  is loaded when the background process starts. A successful agent-owned TUI save
-  reloads it immediately, clears a prompt created by the replaced schedule, and
-  resets the current timer state's monotonic deadline from the save time.
+  is loaded when the background process starts. A successful agent-owned
+  foreground save reloads it immediately, clears a prompt created by the replaced
+  schedule, and resets the current timer state's monotonic deadline from the save
+  time.
 - The same strict TOML file may contain `[ui]` and `[export]` tables. The UI table
   stores the selected Textual theme name, and the export table stores one
   validated delimiter (`comma` or `pipe`). Comma remains the default. Saving one
@@ -196,8 +253,9 @@ delivery fails or the TUI disconnects.
   locations.
 - Use simple native notifications. Native notification action buttons are
   deferred; the agent retains the latest due reminder in memory for a connected
-  TUI to poll over IPC. Confirming an active reminder clears that prompt and
-  restarts the active monotonic interval without mutating the persisted timer.
+  foreground interface to poll over IPC. Confirming an active reminder clears
+  that prompt and restarts the active monotonic interval without mutating the
+  persisted timer.
   Ignoring it leaves both the timer and repeating schedule unchanged.
 - `desktop-notifier` uses desktop services on Linux and WinRT on Windows. macOS
   uses its built-in `osascript` notification command: on the current macOS 26
@@ -221,8 +279,8 @@ delivery fails or the TUI disconnects.
   screen-saver extension, so idle detection reports itself unavailable there.
 - Reminder deadlines use a monotonic schedule. A persisted start, switch, or stop
   resets the relevant deadline, as does explicit confirmation of an active
-  reminder; closing the TUI does not affect it. The default schedule is five
-  minutes without a timer and 30 minutes with one.
+  reminder; closing a foreground interface does not affect it. The default
+  schedule is five minutes without a timer and 30 minutes with one.
 - Optional idle-triggered active reminders use an agent-owned poller and a narrow,
   injected operating-system adapter that reports only elapsed local input-idle
   duration. The adapter never exposes input content. Detector state is advisory
@@ -241,6 +299,9 @@ delivery fails or the TUI disconnects.
   confirmation, settings reload, and process restart reset the normal interval,
   while active-detail edits preserve the deadline.
 - Build with PyInstaller on the target OS; it is not used for cross-compilation.
+- Build browser assets deterministically before packaging and include the
+  production HTML, CSS, and JavaScript under `time_tracker.web`. The frozen
+  runtime does not contain Node.js or `node_modules`.
 - Linux and Windows builds are one-file executables. macOS builds are ad-hoc-signed
   `.app` bundles, with the TUI executable inside the bundle.
 - Windows file-version resources and macOS bundle-version metadata are generated
@@ -272,18 +333,19 @@ delivery fails or the TUI disconnects.
 
 ## Testing and platform validation
 
-Use unit tests for domain behavior, integration tests for SQLite, IPC, recovery,
-and migrations, and Textual tests for critical keyboard workflows. CI runs the
-canonical checks on Linux, Windows, and macOS.
+Use unit tests for domain behavior, integration tests for SQLite, IPC, HTTP,
+recovery, and migrations, Textual tests for critical terminal workflows, and
+browser tests for critical web workflows at desktop and mobile widths. CI runs
+the canonical Python and frontend checks on Linux, Windows, and macOS.
 
 Maintain validation of the minimal packaged application on all three platforms:
 
-1. Start the background process from the TUI and leave it running after the TUI
-   closes.
+1. Start the background process from either interface and leave it running after
+   the foreground interface closes.
 2. Exchange authenticated JSON over `AF_UNIX` and `AF_PIPE`.
-3. Deliver a native notification with no TUI open, including local signing on
-   macOS and delivery to the Windows desktop from WSL.
-4. Reconnect the TUI and stop the process cleanly.
+3. Deliver a native notification with no foreground interface open, including
+   local signing on macOS and delivery to the Windows desktop from WSL.
+4. Reconnect an interface and stop the process cleanly.
 
 If an IPC or notification choice fails, replace that adapter without changing the
 domain or application boundary.
@@ -299,12 +361,34 @@ The same smoke covers WSL, where delivery must reach the Windows desktop.
 The release workflow repeats the canonical checks and packaged lifecycle on each
 target operating system before the publication job can create a tag or upload an
 asset.
+
+The packaged web smoke starts the loopback server from the frozen artifact,
+loads the compiled shell, starts a timer through HTTP, closes the web server while
+leaving the agent and active entry running, relaunches the server, recovers and
+stops the timer, and shuts down the agent. Broader source-browser tests cover
+switch, restart, active editing, reminders, Review, Manage, and Settings. Chromium
+is the release-gating automated browser engine; interactive Safari and Firefox
+results are recorded as validation rather than blocking native publication. WSL
+uses the Linux artifact and remains an interactive validation target, not a
+fourth native package.
+
+Canonical frontend checks are `npm run format:check`, `npm run lint`,
+`npm run typecheck`, `npm run test`, `npm run test:e2e`, and `npm run build`.
+Security integration tests reject unexpected Host and Origin values, invalid
+mutation tokens, non-JSON and oversized bodies, framing, and non-loopback
+binding. Accessibility checks use WCAG AA contrast thresholds: 4.5:1 for normal
+text and 3:1 for large text and essential user-interface boundaries.
+
 Current platform results and outstanding validation are recorded only in the
 [README Status](../README.md#status) section.
 
 ## References
 
 - [Textual](https://textual.textualize.io/getting_started/)
+- [Starlette](https://www.starlette.io/)
+- [Uvicorn](https://www.uvicorn.org/)
+- [Preact](https://preactjs.com/)
+- [Vite](https://vite.dev/)
 - [Python IPC](https://docs.python.org/3/library/multiprocessing.html#listeners-and-clients)
 - [Python sqlite3](https://docs.python.org/3/library/sqlite3.html)
 - [Python tomllib](https://docs.python.org/3/library/tomllib.html)

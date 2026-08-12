@@ -17,7 +17,8 @@ update the corresponding authoritative document in the same change.
 
 Time Tracker helps one user reliably record time against named activities within
 projects. It is local-first, keyboard-first, and works without an account or
-internet connection. The current product interface is a TUI.
+internet connection. The product provides a TUI and an optional responsive local
+web interface served only to the same computer. The TUI remains the default.
 
 ## Product principles
 
@@ -29,8 +30,8 @@ internet connection. The current product interface is a TUI.
   pointer.
 - **Derived time:** timestamps are authoritative; duration is calculated rather
   than edited independently.
-- **Separation of concerns:** product rules are independent of the TUI and storage
-  implementation.
+- **Separation of concerns:** product rules are independent of either interface
+  and the storage implementation.
 - **User control:** the product does not require telemetry or silently discard
   recorded time.
 
@@ -64,7 +65,7 @@ internet connection. The current product interface is a TUI.
 
 ### Tracking
 
-- Start and stop an activity from the TUI.
+- Start and stop an activity from either supported interface.
 - Starting a different activity automatically stops the active one and starts the
   new one at the same transition timestamp, without overlap.
 - Starting the active project/activity with a different normalized note closes
@@ -119,8 +120,9 @@ internet connection. The current product interface is a TUI.
 ### Reminders and process lifecycle
 
 - A single background process owns timer state, database access, and reminders.
-- Closing the TUI leaves that process and its reminders running. Explicitly
-  stopping the process stops reminders but leaves any active entry open.
+- Closing the TUI or local web interface leaves that process and its reminders
+  running. Explicitly stopping the process stops reminders but leaves any active
+  entry open.
 - With no active timer, send a native desktop notification every five minutes by
   default.
 - With an active timer, ask every 30 minutes by default whether it is still active.
@@ -135,7 +137,8 @@ internet connection. The current product interface is a TUI.
   timer state or its configured recurring interval.
 - Ignoring an active reminder leaves the timer running; confirming it restarts the
   interval.
-- Reminders require no internet connection. A connected TUI may also show them.
+- Reminders require no internet connection. A connected foreground interface may
+  also show them.
 
 ### Storage and configuration
 
@@ -145,6 +148,8 @@ internet connection. The current product interface is a TUI.
 - Report invalid configuration without overwriting it.
 - Persist the selected TUI theme and apply it on the next launch, falling back to
   the built-in default if the saved theme is unavailable.
+- Allow the web interface to use a browser-local System, Light, or Dark
+  appearance without changing the persisted TUI palette.
 - Store timestamps in UTC and display them in the user's local time zone.
 - Permit entries to cross midnight and reject a stop time before its start time.
 - Preserve user data across crashes, restarts, and database migrations.
@@ -201,8 +206,8 @@ internet connection. The current product interface is a TUI.
   database boundary.
 - Make timer, recovery, switching, and reminder behavior testable with a
   controlled clock.
-- Keep domain and application logic independent of Textual, SQLite, IPC, and
-  notification libraries.
+- Keep domain and application logic independent of Textual, the web framework,
+  SQLite, IPC, and notification libraries.
 - Treat the background process as the single database writer.
 - Isolate operating-system behavior behind narrow adapters.
 
@@ -214,8 +219,8 @@ Automated tests and platform validation must demonstrate that:
    correct derived duration.
 2. Switching activities produces adjacent, non-overlapping entries.
 3. An active timer survives both a normal restart and a simulated crash.
-4. Reminders work according to configuration after the TUI closes, and ignoring
-   an active reminder does not stop the timer.
+4. Reminders work according to configuration after either interface closes, and
+   ignoring an active reminder does not stop the timer.
 5. Archived items remain readable in history but cannot start new timers.
 6. Two active entries cannot be created.
 7. CSV export preserves timestamps, Unicode, and notes containing commas, quotes,
@@ -234,8 +239,10 @@ not complete until its relevant automated and platform checks pass.
 
 The following are not part of the current product direction:
 
-- GUI, web, and mobile interfaces.
-- Concurrent timers, users, or foreground clients.
+- LAN or remote access to the web interface, a native mobile application, or a
+  hosted web service.
+- Concurrent timers, users, or foreground agent-protocol clients. Multiple tabs
+  served by one web process remain one agent-protocol client.
 - Accounts, synchronization, collaboration, telemetry, and remote services.
 - Billing, invoicing, rates, costs, profitability, expenses, and approvals.
 - Plugins, third-party integrations, imports, and public automation APIs.

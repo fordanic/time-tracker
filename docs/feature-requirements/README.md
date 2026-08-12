@@ -42,6 +42,7 @@ For each selected feature:
 
 ## Approved feature requirements
 
+- [Local responsive web GUI](local-web-gui.md)
 - [Recent activities / Track again](recent-activities-track-again.md)
 - [Quick switch deck](quick-switch-deck.md)
 - [Explicit Start, Switch, and Restart actions](explicit-start-switch-restart-actions.md)
