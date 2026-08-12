@@ -2,39 +2,29 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import secrets
 import threading
 import time
 import webbrowser
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from importlib.resources import files
-from typing import Final, Protocol, cast
+from typing import Final, cast
 
 import uvicorn
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response
-from starlette.routing import Route
+from starlette.routing import Mount, Route
+from starlette.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from time_tracker.domain.models import ActiveTimer, CompletedTimer
-from time_tracker.infrastructure.ipc import AgentClient, AgentRequestError
+from time_tracker.infrastructure.ipc import AgentClient
+from time_tracker.web.api import InputError, WebAgent, WebApi, input_error_response
 
 DEFAULT_WEB_PORT: Final = 47831
 MAX_JSON_BODY_BYTES: Final = 64 * 1024
 TOKEN_HEADER: Final = b"x-time-tracker-token"
-
-
-class WebAgent(Protocol):
-    """Agent operations used by the initial web-server foundation."""
-
-    def ping(self) -> None: ...
-
-    def get_active(self) -> ActiveTimer | None: ...
-
-    def stop(self) -> CompletedTimer | None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,55 +214,29 @@ def create_web_app(
 ) -> ASGIApp:
     """Create one launch-scoped application around the agent client."""
     launch_token = token or secrets.token_urlsafe(32)
-    index_template = (
-        files("time_tracker.web")
-        .joinpath("static", "index.html")
-        .read_text(encoding="utf-8")
-    )
+    static_root = files("time_tracker.web").joinpath("static")
+    index_template = static_root.joinpath("index.html").read_text(encoding="utf-8")
 
     async def index(_request: Request) -> Response:
         html = index_template.replace("__TIME_TRACKER_TOKEN__", launch_token)
         return HTMLResponse(html)
 
-    async def state(_request: Request) -> Response:
-        try:
-            active = await asyncio.to_thread(client.get_active)
-        except AgentRequestError as error:
-            return _agent_error(error)
-        return JSONResponse({"active": _timer_json(active)})
-
-    async def stop(_request: Request) -> Response:
-        try:
-            completed = await asyncio.to_thread(client.stop)
-        except AgentRequestError as error:
-            return _agent_error(error)
-        return JSONResponse({"completed": _timer_json(completed)})
-
     app = Starlette(
         routes=[
             Route("/", index),
-            Route("/api/state", state),
-            Route("/api/timer/stop", stop, methods=["POST"]),
-        ]
+            *WebApi(client).routes(),
+            Mount(
+                "/assets",
+                app=StaticFiles(directory=str(static_root.joinpath("assets"))),
+                name="assets",
+            ),
+        ],
+        exception_handlers={
+            InputError: input_error_response,
+            ValueError: input_error_response,
+        },
     )
     return SessionSecurityMiddleware(app, settings=settings, token=launch_token)
-
-
-def _agent_error(error: AgentRequestError) -> JSONResponse:
-    return JSONResponse(
-        {"error": {"code": error.code, "message": str(error)}},
-        status_code=400,
-    )
-
-
-def _timer_json(timer: ActiveTimer | CompletedTimer | None) -> object:
-    if timer is None:
-        return None
-    data = asdict(timer)
-    data["started_at"] = timer.started_at.isoformat()
-    if isinstance(timer, CompletedTimer):
-        data["stopped_at"] = timer.stopped_at.isoformat()
-    return data
 
 
 def run_web_server(
@@ -299,7 +263,10 @@ def run_web_server(
         daemon=True,
     )
     announcer.start()
-    server.run()
+    try:
+        server.run()
+    except KeyboardInterrupt:
+        pass
 
 
 def _announce_ready(server: uvicorn.Server, url: str, open_browser: bool) -> None:

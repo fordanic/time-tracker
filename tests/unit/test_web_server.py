@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import cast
 
 import pytest
 from starlette.testclient import TestClient
 
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
+from time_tracker.web.api import WebAgent
 from time_tracker.web.server import (
     MAX_JSON_BODY_BYTES,
     WebServerSettings,
@@ -34,6 +36,9 @@ class FakeAgent:
     def get_active(self) -> ActiveTimer | None:
         return self.active
 
+    def get_reminder(self) -> None:
+        return None
+
     def stop(self) -> CompletedTimer | None:
         self.stop_calls += 1
         active = self.active
@@ -50,7 +55,9 @@ def agent() -> FakeAgent:
 
 @pytest.fixture
 def client(agent: FakeAgent) -> TestClient:
-    app = create_web_app(agent, WebServerSettings(port=PORT), token=TOKEN)
+    app = create_web_app(
+        cast(WebAgent, agent), WebServerSettings(port=PORT), token=TOKEN
+    )
     return TestClient(app, base_url=ORIGIN)
 
 
@@ -77,12 +84,16 @@ def test_index_embeds_launch_token_and_security_headers(client: TestClient) -> N
     assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
     assert "access-control-allow-origin" not in response.headers
 
+    asset = client.get("/assets/app.js")
+    assert asset.status_code == 200
+    assert asset.headers["content-type"].startswith("text/javascript")
+
 
 def test_state_returns_authoritative_timer(client: TestClient) -> None:
     response = client.get("/api/state")
 
     assert response.status_code == 200
-    assert response.json()["active"] == {
+    assert response.json()["data"]["active"] == {
         "entry_id": 7,
         "project": "Project",
         "activity": "Activity",
@@ -149,7 +160,9 @@ def test_valid_mutation_is_durable_response_and_has_no_get_route(
     response = client.post("/api/timer/stop", content="{}", headers=mutation_headers())
 
     assert response.status_code == 200
-    assert response.json()["completed"]["stopped_at"] == ("2026-08-12T09:00:00+00:00")
+    assert response.json()["data"]["completed"]["stopped_at"] == (
+        "2026-08-12T09:00:00+00:00"
+    )
     assert agent.stop_calls == 1
     assert client.get("/api/timer/stop").status_code == 405
 

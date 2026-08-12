@@ -22,7 +22,7 @@ time-tracker = "time_tracker.cli:run"
 
 [dependency-groups]
 dev = [
-  "httpx",
+  "httpx2",
   "mypy",
   "pyinstaller",
   "pytest",
