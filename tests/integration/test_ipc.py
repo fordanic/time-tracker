@@ -25,6 +25,8 @@ from time_tracker.application.tracking import (
 from time_tracker.infrastructure.configuration import load_config
 from time_tracker.infrastructure.instance_lock import (
     AgentAlreadyRunningError,
+    ForegroundAlreadyRunningError,
+    foreground_lock,
     instance_lock,
 )
 from time_tracker.infrastructure.ipc import (
@@ -351,6 +353,18 @@ def test_instance_lock_rejects_a_second_agent(tmp_path: Path) -> None:
         with pytest.raises(AgentAlreadyRunningError):
             with instance_lock(paths.lock):
                 raise AssertionError("the second process lock was acquired")
+
+
+def test_foreground_lock_rejects_simultaneous_interfaces(tmp_path: Path) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+
+    with foreground_lock(paths.foreground_lock):
+        with pytest.raises(
+            ForegroundAlreadyRunningError,
+            match="another Time Tracker interface is already running",
+        ):
+            with foreground_lock(paths.foreground_lock):
+                raise AssertionError("the second foreground lock was acquired")
 
 
 def test_agent_can_start_as_a_separate_process(tmp_path: Path) -> None:

@@ -12,7 +12,9 @@ license = { file = "LICENSE" }
 dependencies = [
   "desktop-notifier",
   "platformdirs",
+  "starlette",
   "textual",
+  "uvicorn",
 ]
 
 [project.scripts]
@@ -20,6 +22,7 @@ time-tracker = "time_tracker.cli:run"
 
 [dependency-groups]
 dev = [
+  "httpx",
   "mypy",
   "pyinstaller",
   "pytest",

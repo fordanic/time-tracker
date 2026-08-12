@@ -14,6 +14,10 @@ class AgentAlreadyRunningError(RuntimeError):
     """Another process already owns the background-agent lock."""
 
 
+class ForegroundAlreadyRunningError(RuntimeError):
+    """Another TUI or web process already owns the foreground lock."""
+
+
 class _FcntlModule(Protocol):
     LOCK_EX: int
     LOCK_NB: int
@@ -32,6 +36,28 @@ class _MsvcrtModule(Protocol):
 @contextmanager
 def instance_lock(path: Path) -> Iterator[None]:
     """Hold a non-blocking exclusive process lock for the context lifetime."""
+    with _process_lock(
+        path,
+        AgentAlreadyRunningError("another Time Tracker agent is already running"),
+    ):
+        yield
+
+
+@contextmanager
+def foreground_lock(path: Path) -> Iterator[None]:
+    """Reject simultaneous TUI and web foreground processes."""
+    with _process_lock(
+        path,
+        ForegroundAlreadyRunningError(
+            "another Time Tracker interface is already running; close it first"
+        ),
+    ):
+        yield
+
+
+@contextmanager
+def _process_lock(path: Path, unavailable_error: RuntimeError) -> Iterator[None]:
+    """Hold a non-blocking exclusive process lock with a caller-specific error."""
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
     try:
@@ -41,9 +67,7 @@ def instance_lock(path: Path) -> Iterator[None]:
             else:
                 unlock = _acquire_posix_lock(descriptor)
         except OSError as error:
-            raise AgentAlreadyRunningError(
-                "another Time Tracker agent is already running"
-            ) from error
+            raise unavailable_error from error
         try:
             yield
         finally:

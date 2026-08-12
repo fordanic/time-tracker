@@ -34,6 +34,44 @@ def test_no_arguments_launches_the_tui(
     assert launched
 
 
+def test_web_flag_launches_loopback_server_with_default_behavior(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    received: tuple[int, bool] | None = None
+
+    def fake_launch(port: int, *, open_browser: bool) -> None:
+        nonlocal received
+        received = (port, open_browser)
+
+    monkeypatch.setattr("time_tracker.cli.launch_web", fake_launch)
+
+    assert main(["--web"]) == 0
+    assert received == (47831, True)
+
+
+def test_web_launch_accepts_explicit_port_and_no_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    received: tuple[int, bool] | None = None
+
+    def fake_launch(port: int, *, open_browser: bool) -> None:
+        nonlocal received
+        received = (port, open_browser)
+
+    monkeypatch.setattr("time_tracker.cli.launch_web", fake_launch)
+
+    assert main(["--web", "--port", "48123", "--no-open"]) == 0
+    assert received == (48123, False)
+
+
+@pytest.mark.parametrize("arguments", [["--no-open"], ["--port", "48123"]])
+def test_web_only_options_require_web(arguments: list[str]) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        main(arguments)
+
+    assert exit_info.value.code == 2
+
+
 def test_config_path_flag_reports_platform_path(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
