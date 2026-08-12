@@ -15,8 +15,9 @@ endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help prepare-venv sync run stop-agent format format-check lint typecheck test \
-	test-unit test-integration test-e2e check ci build smoke-packaged \
+.PHONY: help prepare-venv python-sync web-sync sync run run-web stop-agent format \
+	format-check lint typecheck test test-unit test-integration test-e2e test-web \
+	web-build check ci build smoke-packaged \
 	smoke-notification set-version release-artifact clean clear-database \
 	seed-test-data clear-local
 
@@ -28,6 +29,7 @@ help:
 		'  make prepare-venv      Remove an unusable generated virtual environment' \
 		'  make sync              Sync the locked development environment' \
 		'  make run               Run the Textual app' \
+		'  make run-web           Run the local web app' \
 		'  make stop-agent        Stop the background agent' \
 		'  make format            Format Python sources' \
 		'  make format-check      Check Python source formatting' \
@@ -37,6 +39,8 @@ help:
 		'  make test-unit         Run unit tests' \
 		'  make test-integration  Run integration tests' \
 		'  make test-e2e          Run end-to-end tests' \
+		'  make test-web          Run web unit and Chromium tests' \
+		'  make web-build         Build committed production web assets' \
 		'  make check             Run formatting, lint, types, and tests' \
 		'  make ci                Sync and run the complete CI check set' \
 		'  make build             Build a native executable in dist/' \
@@ -62,28 +66,41 @@ prepare-venv:
 		fi; \
 	fi
 
-sync: prepare-venv
+python-sync: prepare-venv
 	$(UV) sync --all-groups --locked
 
-run: sync
+web-sync:
+	cd web && npm ci
+	cd web && npx playwright install chromium
+
+sync: python-sync web-sync
+
+run: python-sync
 	$(UV) run $(APP_NAME)
+
+run-web: python-sync
+	$(UV) run $(APP_NAME) --web
 
 stop-agent: prepare-venv
 	$(UV) run $(APP_NAME) --stop-agent
 
 format: prepare-venv
 	$(UV) run ruff format .
+	cd web && npm run format
 
 format-check: prepare-venv
 	$(UV) run ruff format --check .
+	cd web && npm run format:check
 
 lint: prepare-venv
 	$(UV) run ruff check .
+	cd web && npm run lint
 
 typecheck: prepare-venv
 	$(UV) run mypy
+	cd web && npm run typecheck
 
-test: test-unit test-integration test-e2e
+test: test-unit test-integration test-e2e test-web
 
 test-unit: prepare-venv
 	$(UV) run pytest tests/unit
@@ -94,11 +111,18 @@ test-integration: prepare-venv
 test-e2e: prepare-venv
 	$(UV) run pytest tests/e2e
 
+test-web: prepare-venv
+	cd web && npm run test
+	cd web && npm run test:e2e
+
+web-build:
+	cd web && npm run build
+
 check: format-check lint typecheck test
 
 ci: sync check
 
-build: sync
+build: sync web-build
 	$(UV) run python scripts/build.py
 
 smoke-packaged: prepare-venv
@@ -115,7 +139,7 @@ release-artifact: sync check build smoke-packaged
 
 clean:
 	rm -rf build dist .mypy_cache .pytest_cache .ruff_cache \
-		src/time_tracker.egg-info
+		src/time_tracker.egg-info web/playwright-report web/test-results
 
 clear-database: prepare-venv
 	$(UV) run python -m time_tracker.infrastructure.local_files \

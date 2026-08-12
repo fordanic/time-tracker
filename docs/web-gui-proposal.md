@@ -222,10 +222,8 @@ Loopback is still a network boundary. The first release must:
 
 ```text
 src/time_tracker/web/
-  app.py              # ASGI factory, routes, middleware, lifecycle
-  gateway.py          # serialized IPC adapter and response shaping
-  schemas.py          # typed request/response validation
-  security.py         # Host, Origin, token, headers, and limits
+  server.py           # ASGI factory, security middleware, assets, lifecycle
+  api.py              # serialized IPC adapter, validation, and projections
   static/             # committed production build consumed by PyInstaller
 
 web/
@@ -235,9 +233,12 @@ web/
   src/                # Preact components, API client, CSS, tests
 
 tests/
-  unit/web/
+  unit/test_web_server.py
   integration/test_web_api.py
-  e2e/test_web_gui.py
+  e2e/run_web_fixture.py
+
+web/e2e/
+  app.spec.ts         # real-agent Chromium workflow and responsive gates
 ```
 
 The production frontend build must be deterministic and checked for drift. The
@@ -264,6 +265,8 @@ ship Node.js.
 
 ### Slice 1 — server skeleton and secure shell
 
+**Implementation status:** Complete on the review branch.
+
 - Add dependencies, CLI lifecycle, loopback binding, security middleware,
   static-asset packaging, health/bootstrap endpoints, and connection errors.
 - Add `time-tracker --web` plus `--no-open` and optional `--port`, using stable
@@ -273,6 +276,8 @@ ship Node.js.
 
 ### Slice 2 — Track parity
 
+**Implementation status:** Complete on the review branch.
+
 - Implement persistent shell, active recovery, elapsed rendering, recent deck,
   classified actions, manual capture, Stop, Edit active, reminders, snooze, and
   today's total.
@@ -280,6 +285,8 @@ ship Node.js.
   IPC → agent → SQLite and back.
 
 ### Slice 3 — Review parity
+
+**Implementation status:** Complete on the review branch.
 
 - Add shared filters and three representations, responsive table/cards,
   correction, missed entry, confirmed deletion, and filtered export with
@@ -289,10 +296,17 @@ ship Node.js.
 
 ### Slice 4 — Manage and Settings parity
 
+**Implementation status:** Complete on the review branch.
+
 - Add hierarchical archive/restore/create flows and exact confirmations.
 - Add reminder/window/snooze/idle/delimiter settings and browser appearance.
 
 ### Slice 5 — accessibility, packaging, and platform validation
+
+**Implementation status:** Source checks, Chromium, responsive browser inspection,
+and packaged lifecycle automation are complete on the review branch. Cross-platform
+packaged runs plus interactive Safari, Firefox, and WSL validation remain release
+gates recorded in README Status.
 
 - Complete keyboard and screen-reader review at 320, 720, and 1280 px; test light
   and dark appearance, 200% zoom, and reduced motion.
