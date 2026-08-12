@@ -29,13 +29,16 @@ test("responsive browser workflow stays durable across all four views", async ({
   });
   await expect(quickNote).toBeFocused();
   await quickNote.fill("Browser E2E");
-  await quickNote.press("Enter");
+  await quickNote.press("Control+Enter");
   await expect(
     page.getByRole("heading", { name: "Launch work / Documentation" }),
   ).toBeVisible();
   await expect(page.getByText("Switch saved.")).toBeVisible();
 
-  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur());
+  const project = page.getByRole("combobox", { name: "Project" });
+  await project.focus();
+  await project.press("Escape");
+  await expect(page.getByText(/View shortcut ready/)).toBeVisible();
   await page.keyboard.press("r");
   await expect(
     page.getByRole("heading", { name: "Completed time" }),
@@ -71,13 +74,15 @@ test("responsive browser workflow stays durable across all four views", async ({
   await expect(page.locator("html")).toHaveAttribute("data-appearance", "dark");
 
   await page.getByRole("button", { name: "Track" }).click();
-  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur());
-  await page.keyboard.press("u");
+  const note = page.getByRole("textbox", { name: /^Note optional$/ });
+  await note.focus();
+  await note.press("Control+Shift+Enter");
   await expect(
     page.getByText("Active details updated without restarting time."),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Stop" })).toBeEnabled();
-  await page.keyboard.press("x");
+  await note.focus();
+  await note.press("Control+Alt+Enter");
   await expect(
     page.getByRole("heading", { name: "No active timer" }),
   ).toBeVisible();

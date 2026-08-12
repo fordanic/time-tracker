@@ -403,6 +403,20 @@ button.full kbd {
   gap: 0.35rem 1rem;
   padding-top: 0.45rem;
 }
+.view-shortcut-ready {
+  width: fit-content;
+  margin-top: 0.35rem;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--accent);
+  border-radius: 7px;
+  color: var(--accent-strong);
+  background: var(--surface-raised);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+.view-shortcut-ready kbd {
+  margin-inline: 0.12rem;
+}
 
 .review-layout {
   display: grid;

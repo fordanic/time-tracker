@@ -124,11 +124,11 @@ describe("App", () => {
     render(<App />);
     await screen.findByText("Recent work");
 
-    fireEvent.keyDown(window, { key: "r" });
+    fireEvent.keyDown(window, { key: "R", shiftKey: true });
     expect(
       screen.getByRole("heading", { name: "Completed time" }),
     ).toBeTruthy();
-    fireEvent.keyDown(window, { key: "?" });
+    fireEvent.keyDown(window, { key: "?", shiftKey: true });
     expect(screen.getByText("select recent work")).toBeTruthy();
 
     const destination = screen.getByRole("textbox", {
@@ -139,6 +139,55 @@ describe("App", () => {
     expect(
       screen.getByRole("heading", { name: "Completed time" }),
     ).toBeTruthy();
+  });
+
+  it("uses a timed Escape chord to change views from editable fields", async () => {
+    render(<App />);
+    await screen.findByText("Recent work");
+    const project = screen.getByRole("combobox", { name: "Project" });
+    project.focus();
+
+    fireEvent.keyDown(project, { key: "Escape" });
+    expect(document.activeElement).not.toBe(project);
+    expect(screen.getByText(/View shortcut ready/)).toBeTruthy();
+    fireEvent.keyDown(window, { key: "r" });
+
+    expect(
+      screen.getByRole("heading", { name: "Completed time" }),
+    ).toBeTruthy();
+    expect(screen.queryByText(/View shortcut ready/)).toBeNull();
+  });
+
+  it("cancels the editable-field view chord on another key", async () => {
+    render(<App />);
+    await screen.findByText("Recent work");
+    const project = screen.getByRole("combobox", { name: "Project" });
+    project.focus();
+
+    fireEvent.keyDown(project, { key: "Escape" });
+    fireEvent.keyDown(window, { key: "a" });
+    project.focus();
+    fireEvent.keyDown(project, { key: "r" });
+
+    expect(screen.getByText("Recent work")).toBeTruthy();
+    expect(screen.queryByText(/View shortcut ready/)).toBeNull();
+  });
+
+  it("expires the editable-field view chord after 1.5 seconds", async () => {
+    render(<App />);
+    await screen.findByText("Recent work");
+    const project = screen.getByRole("combobox", { name: "Project" });
+    project.focus();
+
+    fireEvent.keyDown(project, { key: "Escape" });
+    await waitFor(
+      () => expect(screen.queryByText(/View shortcut ready/)).toBeNull(),
+      { timeout: 1800 },
+    );
+    project.focus();
+    fireEvent.keyDown(project, { key: "r" });
+
+    expect(screen.getByText("Recent work")).toBeTruthy();
   });
 
   it("confirms an already-selected deck item with Enter", async () => {
@@ -198,14 +247,29 @@ describe("App", () => {
         ([path]) => String(path) === "/api/timer/start",
       ),
     ).toBe(false);
-    activity.blur();
-    fireEvent.keyDown(window, { key: "g" });
+    fireEvent.keyDown(activity, { key: "Enter", ctrlKey: true, repeat: true });
+    fireEvent.keyDown(activity, {
+      key: "Enter",
+      ctrlKey: true,
+      isComposing: true,
+    });
+    expect(
+      fetchMock.mock.calls.some(
+        ([path]) => String(path) === "/api/timer/start",
+      ),
+    ).toBe(false);
+    fireEvent.keyDown(activity, { key: "Enter", ctrlKey: true });
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/timer/start",
         expect.objectContaining({ method: "POST" }),
       ),
     );
+    expect(
+      fetchMock.mock.calls.filter(
+        ([path]) => String(path) === "/api/timer/start",
+      ),
+    ).toHaveLength(1);
   });
 
   it("updates and stops the active timer with Track shortcuts", async () => {
@@ -243,6 +307,60 @@ describe("App", () => {
         expect.objectContaining({ method: "POST" }),
       ),
     );
+  });
+
+  it("updates and stops from an editable Track field with modifiers", async () => {
+    bootstrapResponse = {
+      ...bootstrap,
+      active: {
+        entry_id: 7,
+        project: "Client",
+        activity: "Build",
+        note: "Active note",
+        started_at: "2026-08-12T08:00:00+00:00",
+      },
+    };
+    render(<App />);
+    await screen.findByRole("heading", { name: "Client / Build" });
+    await new Promise((resolve) => window.setTimeout(resolve, 50));
+    const note = screen.getByRole("textbox", { name: /^Note optional$/ });
+    note.focus();
+
+    fireEvent.keyDown(note, {
+      key: "Enter",
+      ctrlKey: true,
+      shiftKey: true,
+    });
+    await screen.findByText("Active details updated without restarting time.");
+    expect(
+      fetchMock.mock.calls.filter(
+        ([path]) => String(path) === "/api/timer/edit",
+      ),
+    ).toHaveLength(1);
+
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "Stop" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false),
+    );
+    note.focus();
+    fireEvent.keyDown(note, {
+      key: "Enter",
+      ctrlKey: true,
+      altKey: true,
+    });
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/timer/stop",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    expect(
+      fetchMock.mock.calls.filter(
+        ([path]) => String(path) === "/api/timer/stop",
+      ),
+    ).toHaveLength(1);
   });
 
   it("applies review filters automatically without an apply button", async () => {
@@ -283,5 +401,11 @@ describe("App", () => {
         .getByRole("combobox", { name: "Activity" })
         .getAttribute("list"),
     ).toBe("review-entry-activity-options");
+    const editorProject = within(editor).getByRole("combobox", {
+      name: "Project",
+    });
+    editorProject.focus();
+    fireEvent.keyDown(editorProject, { key: "Escape" });
+    expect(screen.queryByText(/View shortcut ready/)).toBeNull();
   });
 });

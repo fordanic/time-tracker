@@ -126,9 +126,13 @@ and Settings; `Ctrl+K` shows all shortcuts.
 In the web interface, `1` through `5` select and focus recent work, `Tab` moves
 from that selection to its optional note, and `Enter` confirms from either place.
 Use the browser-safe `T`, `R`, `M`, and `S` keys to change views while focus is
-outside an editable field. On Track, `G` starts or switches, `U` updates the
-active entry, and `X` stops it; `?` toggles the visible shortcut guide. Review
-filters refresh automatically as they change.
+outside an editable field. While editing outside a dialog, press `Escape` and
+then `T`, `R`, `M`, or `S` within 1.5 seconds to change views. On Track, `G`
+starts or switches, `U` updates the active entry, and `X` stops it. The same
+actions work from editable fields with `Ctrl`/`Command`+`Enter`,
+`Ctrl`/`Command`+`Shift`+`Enter`, and
+`Ctrl`/`Command`+`Alt`/`Option`+`Enter`, respectively. `?` toggles the visible
+shortcut guide. Review filters refresh automatically as they change.
 
 Closing the TUI does not stop the background process or an active timer. Stop
 only the background process with:

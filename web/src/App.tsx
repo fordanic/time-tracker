@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "preact/hooks";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { get } from "./api.ts";
 import { ManageView } from "./ManageView.tsx";
 import { ReviewView } from "./ReviewView.tsx";
@@ -18,6 +18,9 @@ export function App() {
   const [connected, setConnected] = useState(true);
   const [clock, setClock] = useState(Date.now());
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [viewShortcutArmed, setViewShortcutArmed] = useState(false);
+  const viewShortcutArmedRef = useRef(false);
+  const viewShortcutTimer = useRef<number | null>(null);
 
   const refresh = useCallback(async (message?: string) => {
     try {
@@ -44,34 +47,77 @@ export function App() {
 
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
-      if (event.altKey || event.ctrlKey || event.metaKey) return;
       const target = event.target;
-      if (
+      const editable =
         target instanceof HTMLInputElement ||
         target instanceof HTMLTextAreaElement ||
         target instanceof HTMLSelectElement ||
-        (target instanceof HTMLElement && target.isContentEditable)
-      )
-        return;
-      if (event.key === "?") {
-        event.preventDefault();
-        setShortcutsOpen((open) => !open);
-        return;
-      }
+        (target instanceof HTMLElement && target.isContentEditable);
+      const inDialog =
+        target instanceof HTMLElement &&
+        Boolean(target.closest('[role="dialog"], dialog'));
       const destination: Record<string, View> = {
         t: "track",
         r: "review",
         m: "manage",
         s: "settings",
       };
+      const disarmViewShortcut = () => {
+        viewShortcutArmedRef.current = false;
+        setViewShortcutArmed(false);
+        if (viewShortcutTimer.current !== null) {
+          window.clearTimeout(viewShortcutTimer.current);
+          viewShortcutTimer.current = null;
+        }
+      };
+
+      if (event.repeat || event.isComposing) return;
+      if (
+        event.key === "Escape" &&
+        editable &&
+        !inDialog &&
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.shiftKey
+      ) {
+        event.preventDefault();
+        (target as HTMLElement).blur();
+        disarmViewShortcut();
+        viewShortcutArmedRef.current = true;
+        setViewShortcutArmed(true);
+        viewShortcutTimer.current = window.setTimeout(disarmViewShortcut, 1500);
+        return;
+      }
+
       const next = destination[event.key.toLowerCase()];
+      if (viewShortcutArmedRef.current) {
+        disarmViewShortcut();
+        if (next && !event.altKey && !event.ctrlKey && !event.metaKey) {
+          event.preventDefault();
+          setView(next);
+        }
+        return;
+      }
+
+      if (event.altKey || event.ctrlKey || event.metaKey) return;
+      if (editable) return;
+      if (event.key === "?") {
+        event.preventDefault();
+        setShortcutsOpen((open) => !open);
+        return;
+      }
       if (next) {
         event.preventDefault();
         setView(next);
       }
     };
     window.addEventListener("keydown", listener);
-    return () => window.removeEventListener("keydown", listener);
+    return () => {
+      window.removeEventListener("keydown", listener);
+      if (viewShortcutTimer.current !== null)
+        window.clearTimeout(viewShortcutTimer.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -196,6 +242,15 @@ export function App() {
             <kbd>X</kbd> Stop
           </span>
           <span>
+            <kbd>Ctrl/⌘ + Enter</kbd> Start / switch while editing
+          </span>
+          <span>
+            <kbd>Ctrl/⌘ + Shift + Enter</kbd> Update while editing
+          </span>
+          <span>
+            <kbd>Ctrl/⌘ + Alt/⌥ + Enter</kbd> Stop while editing
+          </span>
+          <span>
             <kbd>T</kbd> Track
           </span>
           <span>
@@ -207,8 +262,18 @@ export function App() {
           <span>
             <kbd>S</kbd> Settings
           </span>
+          <span>
+            <kbd>Esc, T/R/M/S</kbd> change view while editing
+          </span>
         </div>
       </details>
+
+      {viewShortcutArmed && (
+        <div class="view-shortcut-ready" role="status" aria-live="polite">
+          View shortcut ready: press <kbd>T</kbd>, <kbd>R</kbd>, <kbd>M</kbd>,
+          or <kbd>S</kbd>.
+        </div>
+      )}
 
       <div class="status" role="status" aria-live="polite">
         {status}
