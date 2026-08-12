@@ -1138,14 +1138,14 @@ async def test_review_deletes_selected_entry_and_rounds_duration_up(
             await _wait_for_ui(
                 pilot,
                 lambda: (
-                    client.list_completed() == []
-                    and "Deleted Client / Overnight"
+                    "Deleted Client / Overnight"
                     in str(app.query_one("#message", Static).render())
                 ),
                 "selected entry was not deleted",
             )
 
             assert history.row_count == 0
+            assert client.list_completed() == []
             assert client.get_active() == active
             assert completed_active.entry_id != active.entry_id
             assert "Deleted Client / Overnight" in str(
@@ -1734,14 +1734,21 @@ async def test_user_selects_a_color_palette_in_settings(tmp_path: Path) -> None:
             assert palette.value == "textual-dark"
 
             for available in sorted(app.available_themes):
+
+                def palette_is_saved(expected: str = available) -> bool:
+                    return app.theme == expected and app._saved_theme == expected
+
                 palette.value = available
-                await pilot.pause()
-                assert app.theme == available
+                await _wait_for_ui(
+                    pilot,
+                    palette_is_saved,
+                    f"the {available} palette was not applied and persisted",
+                )
 
             palette.value = "gruvbox"
             await _wait_for_ui(
                 pilot,
-                lambda: client.get_theme() == "gruvbox",
+                lambda: app.theme == "gruvbox" and app._saved_theme == "gruvbox",
                 "the selected palette was not persisted",
             )
             assert app.theme == "gruvbox"
@@ -1750,7 +1757,7 @@ async def test_user_selects_a_color_palette_in_settings(tmp_path: Path) -> None:
             app.theme = "nord"
             await _wait_for_ui(
                 pilot,
-                lambda: palette.value == "nord",
+                lambda: palette.value == "nord" and app._saved_theme == "nord",
                 "Settings did not follow a palette applied elsewhere",
             )
             assert client.get_theme() == "nord"

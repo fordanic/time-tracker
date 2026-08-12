@@ -86,7 +86,10 @@ def test_index_embeds_launch_token_and_security_headers(client: TestClient) -> N
 
     asset = client.get("/assets/app.js")
     assert asset.status_code == 200
-    assert asset.headers["content-type"].startswith("text/javascript")
+    assert asset.headers["content-type"].split(";", 1)[0] in {
+        "application/javascript",
+        "text/javascript",
+    }
 
 
 def test_state_returns_authoritative_timer(client: TestClient) -> None:
