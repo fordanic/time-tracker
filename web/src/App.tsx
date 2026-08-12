@@ -17,6 +17,7 @@ export function App() {
   const [status, setStatus] = useState("Loading local data…");
   const [connected, setConnected] = useState(true);
   const [clock, setClock] = useState(Date.now());
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   const refresh = useCallback(async (message?: string) => {
     try {
@@ -39,6 +40,38 @@ export function App() {
   useEffect(() => {
     const timer = window.setInterval(() => setClock(Date.now()), 1000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => {
+      if (event.altKey || event.ctrlKey || event.metaKey) return;
+      const target = event.target;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      )
+        return;
+      if (event.key === "?") {
+        event.preventDefault();
+        setShortcutsOpen((open) => !open);
+        return;
+      }
+      const destination: Record<string, View> = {
+        t: "track",
+        r: "review",
+        m: "manage",
+        s: "settings",
+      };
+      const next = destination[event.key.toLowerCase()];
+      if (next) {
+        event.preventDefault();
+        setView(next);
+      }
+    };
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
   }, []);
 
   useEffect(() => {
@@ -126,15 +159,47 @@ export function App() {
         {(["track", "review", "manage", "settings"] as const).map((item) => (
           <button
             key={item}
+            aria-label={item[0]?.toUpperCase() + item.slice(1)}
             class={view === item ? "selected" : ""}
             aria-current={view === item ? "page" : undefined}
             onClick={() => setView(item)}
           >
+            <kbd aria-hidden="true">{item[0]?.toUpperCase()}</kbd>
             {item[0]?.toUpperCase()}
             {item.slice(1)}
           </button>
         ))}
       </nav>
+
+      <details
+        class="shortcut-help"
+        open={shortcutsOpen}
+        onToggle={(event) => setShortcutsOpen(event.currentTarget.open)}
+      >
+        <summary>
+          Keyboard shortcuts <kbd>?</kbd>
+        </summary>
+        <div>
+          <span>
+            <kbd>1–5</kbd> select recent work
+          </span>
+          <span>
+            <kbd>Enter</kbd> confirm selected work
+          </span>
+          <span>
+            <kbd>T</kbd> Track
+          </span>
+          <span>
+            <kbd>R</kbd> Review
+          </span>
+          <span>
+            <kbd>M</kbd> Manage
+          </span>
+          <span>
+            <kbd>S</kbd> Settings
+          </span>
+        </div>
+      </details>
 
       <div class="status" role="status" aria-live="polite">
         {status}

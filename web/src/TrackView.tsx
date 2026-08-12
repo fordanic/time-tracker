@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { post } from "./api.ts";
-import type { Bootstrap, RecentActivity, Timer } from "./types.ts";
+import { ProjectActivityFields } from "./ProjectActivityFields.tsx";
+import type { Bootstrap, Timer } from "./types.ts";
 import { duration } from "./utils.ts";
 
 interface Props {
@@ -10,19 +11,99 @@ interface Props {
   refresh: (message?: string) => Promise<void>;
 }
 
+type TrackAction = "start" | "switch" | "restart" | "already_tracking";
+
+function actionCopy(action: TrackAction | null, ready: boolean) {
+  if (!ready) return "Choose a project and activity to preview the action.";
+  if (!action) return "Checking action…";
+  if (action === "switch") return "Will switch from the current timer.";
+  if (action === "restart") return "Will restart this timer with the new note.";
+  if (action === "already_tracking")
+    return "No change — this work is already active.";
+  return "Will start a new timer.";
+}
+
+function actionLabel(action: TrackAction | null, ready = true) {
+  if (!ready) return "Waiting";
+  if (action === "already_tracking") return "No change";
+  if (!action) return "Checking";
+  return `${action[0]?.toUpperCase()}${action.slice(1)}`;
+}
+
 export function TrackView({ data, connected, announce, refresh }: Props) {
-  const [recent, setRecent] = useState<RecentActivity | null>(null);
+  const [recentIndex, setRecentIndex] = useState<number | null>(null);
   const [quickNote, setQuickNote] = useState("");
   const [project, setProject] = useState("");
   const [activity, setActivity] = useState("");
   const [note, setNote] = useState("");
-  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [quickAction, setQuickAction] = useState<TrackAction | null>(null);
+  const [manualAction, setManualAction] = useState<TrackAction | null>(null);
   const [busy, setBusy] = useState(false);
+  const recentButtons = useRef<Array<HTMLButtonElement | null>>([]);
   const disabled = busy || !connected;
-  const activities = useMemo(
-    () => data.activities[project] ?? [],
-    [data, project],
-  );
+  const recent =
+    recentIndex === null ? null : (data.recent[recentIndex] ?? null);
+  const activeKey = data.active
+    ? `${data.active.entry_id}\u0000${data.active.project}\u0000${data.active.activity}\u0000${data.active.note ?? ""}`
+    : "";
+
+  useEffect(() => {
+    if (!recent) {
+      setQuickAction(null);
+      return;
+    }
+    let cancelled = false;
+    setQuickAction(null);
+    const timeout = window.setTimeout(async () => {
+      try {
+        const result = await post<{ action: TrackAction }>(
+          "/api/track/classify",
+          {
+            project: recent.project,
+            activity: recent.activity,
+            note: quickNote || null,
+            quick: true,
+          },
+        );
+        if (!cancelled) setQuickAction(result.action);
+      } catch {
+        if (!cancelled) setQuickAction(null);
+      }
+    }, 180);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [activeKey, quickNote, recent]);
+
+  useEffect(() => {
+    if (!project || !activity) {
+      setManualAction(null);
+      return;
+    }
+    let cancelled = false;
+    setManualAction(null);
+    const timeout = window.setTimeout(async () => {
+      try {
+        const result = await post<{ action: TrackAction }>(
+          "/api/track/classify",
+          {
+            project,
+            activity,
+            note: note || null,
+            quick: false,
+          },
+        );
+        if (!cancelled) setManualAction(result.action);
+      } catch {
+        if (!cancelled) setManualAction(null);
+      }
+    }, 180);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [activity, activeKey, note, project]);
 
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
@@ -37,8 +118,11 @@ export function TrackView({ data, connected, announce, refresh }: Props) {
       const selection = data.recent[index];
       if (index >= 0 && selection) {
         event.preventDefault();
-        setRecent(selection);
-        setPendingAction(null);
+        setRecentIndex(index);
+        setQuickAction(null);
+        window.requestAnimationFrame(() =>
+          recentButtons.current[index]?.focus(),
+        );
       }
     };
     window.addEventListener("keydown", listener);
@@ -49,23 +133,25 @@ export function TrackView({ data, connected, announce, refresh }: Props) {
     targetProject: string,
     targetActivity: string,
     targetNote: string,
+    quick: boolean,
   ) => {
     setBusy(true);
     try {
-      const classified = await post<{ action: string }>("/api/track/classify", {
-        project: targetProject,
-        activity: targetActivity,
-        note: targetNote || null,
-        quick:
-          recent?.project === targetProject &&
-          recent?.activity === targetActivity,
-      });
+      const classified = await post<{ action: TrackAction }>(
+        "/api/track/classify",
+        {
+          project: targetProject,
+          activity: targetActivity,
+          note: targetNote || null,
+          quick,
+        },
+      );
       if (classified.action === "already_tracking") {
         announce("That project, activity, and note are already active.");
-        setPendingAction("No change");
+        if (quick) setQuickAction("already_tracking");
+        else setManualAction("already_tracking");
         return;
       }
-      setPendingAction(classified.action);
       await post<{ active: Timer }>("/api/timer/start", {
         project: targetProject,
         activity: targetActivity,
@@ -73,7 +159,7 @@ export function TrackView({ data, connected, announce, refresh }: Props) {
       });
       setNote("");
       setQuickNote("");
-      setRecent(null);
+      setRecentIndex(null);
       await refresh(
         `${classified.action[0]?.toUpperCase()}${classified.action.slice(1)} saved.`,
       );
@@ -140,15 +226,48 @@ export function TrackView({ data, connected, announce, refresh }: Props) {
           </div>
           <span class="hint">Keys 1–5</span>
         </div>
-        <div class="recent-deck" aria-label="Recent work">
+        <div class="recent-deck" role="radiogroup" aria-label="Recent work">
           {data.recent.length ? (
             data.recent.slice(0, 5).map((item, index) => (
               <button
                 key={`${item.project}/${item.activity}`}
-                class={recent === item ? "recent selected" : "recent"}
+                ref={(element) => {
+                  recentButtons.current[index] = element;
+                }}
+                type="button"
+                role="radio"
+                aria-checked={recentIndex === index}
+                tabIndex={
+                  recentIndex === index || (recentIndex === null && index === 0)
+                    ? 0
+                    : -1
+                }
+                class={recentIndex === index ? "recent selected" : "recent"}
                 onClick={() => {
-                  setRecent(item);
-                  setPendingAction(null);
+                  setRecentIndex(index);
+                  setQuickAction(null);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && recentIndex === index) {
+                    event.preventDefault();
+                    void applyStart(
+                      item.project,
+                      item.activity,
+                      quickNote,
+                      true,
+                    );
+                    return;
+                  }
+                  if (event.key !== "ArrowDown" && event.key !== "ArrowUp")
+                    return;
+                  event.preventDefault();
+                  const direction = event.key === "ArrowDown" ? 1 : -1;
+                  const next =
+                    (index + direction + data.recent.slice(0, 5).length) %
+                    data.recent.slice(0, 5).length;
+                  setRecentIndex(next);
+                  setQuickAction(null);
+                  recentButtons.current[next]?.focus();
                 }}
               >
                 <kbd>{index + 1}</kbd>
@@ -166,19 +285,41 @@ export function TrackView({ data, connected, announce, refresh }: Props) {
           Quick-switch note <span>optional</span>
           <input
             value={quickNote}
-            onInput={(event) => setQuickNote(event.currentTarget.value)}
+            onInput={(event) => {
+              setQuickNote(event.currentTarget.value);
+              setQuickAction(null);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && recent) {
+                event.preventDefault();
+                void applyStart(
+                  recent.project,
+                  recent.activity,
+                  quickNote,
+                  true,
+                );
+              }
+            }}
           />
         </label>
+        <div
+          class={`action-preview ${quickAction ?? "pending"}`}
+          role="status"
+          aria-live="polite"
+        >
+          <strong>{actionLabel(quickAction, Boolean(recent))}</strong>
+          <span>{actionCopy(quickAction, Boolean(recent))}</span>
+        </div>
         <button
           class="primary full"
-          disabled={disabled || !recent}
+          disabled={disabled || !recent || quickAction === "already_tracking"}
           onClick={() =>
             recent &&
-            void applyStart(recent.project, recent.activity, quickNote)
+            void applyStart(recent.project, recent.activity, quickNote, true)
           }
         >
-          {pendingAction
-            ? `${pendingAction} selected work`
+          {quickAction && quickAction !== "already_tracking"
+            ? `${actionLabel(quickAction)} selected work`
             : "Apply selected work"}
         </button>
       </section>
@@ -187,47 +328,62 @@ export function TrackView({ data, connected, announce, refresh }: Props) {
         <span class="eyebrow">MANUAL CAPTURE</span>
         <h2>What are you working on?</h2>
         <div class="field-row">
-          <label>
-            Project
-            <input
-              list="project-options"
-              value={project}
-              onInput={(event) => setProject(event.currentTarget.value)}
-            />
-            <datalist id="project-options">
-              {data.projects.map((item) => (
-                <option key={item}>{item}</option>
-              ))}
-            </datalist>
-          </label>
-          <label>
-            Activity
-            <input
-              list="activity-options"
-              value={activity}
-              onInput={(event) => setActivity(event.currentTarget.value)}
-            />
-            <datalist id="activity-options">
-              {activities.map((item) => (
-                <option key={item}>{item}</option>
-              ))}
-            </datalist>
-          </label>
+          <ProjectActivityFields
+            idPrefix="track"
+            project={project}
+            activity={activity}
+            projects={data.projects}
+            activities={data.activities}
+            onProjectChange={(value) => {
+              setProject(value);
+              setManualAction(null);
+            }}
+            onActivityChange={(value) => {
+              setActivity(value);
+              setManualAction(null);
+            }}
+          />
         </div>
         <label>
           Note <span>optional</span>
           <input
             value={note}
-            onInput={(event) => setNote(event.currentTarget.value)}
+            onInput={(event) => {
+              setNote(event.currentTarget.value);
+              setManualAction(null);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && project && activity) {
+                event.preventDefault();
+                void applyStart(project, activity, note, false);
+              }
+            }}
           />
         </label>
+        <div
+          class={`action-preview ${manualAction ?? "pending"}`}
+          role="status"
+          aria-live="polite"
+        >
+          <strong>
+            {actionLabel(manualAction, Boolean(project && activity))}
+          </strong>
+          <span>{actionCopy(manualAction, Boolean(project && activity))}</span>
+        </div>
         <div class="button-row">
           <button
             class="primary"
-            disabled={disabled || !project || !activity}
-            onClick={() => void applyStart(project, activity, note)}
+            disabled={
+              disabled ||
+              !project ||
+              !activity ||
+              manualAction === "already_tracking"
+            }
+            onClick={() => void applyStart(project, activity, note, false)}
           >
-            Start / switch
+            {manualAction && manualAction !== "already_tracking"
+              ? actionLabel(manualAction)
+              : "Start / switch"}
           </button>
           <button
             disabled={disabled || !data.active}

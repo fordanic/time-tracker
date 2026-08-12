@@ -123,6 +123,12 @@ separate note fields, then press `F5` or its Start action. Stop and Update curre
 timer controls follow that action. `F1` through `F4` open Track, Review, Manage,
 and Settings; `Ctrl+K` shows all shortcuts.
 
+In the web interface, `1` through `5` select and focus recent work, `Tab` moves
+from that selection to its optional note, and `Enter` confirms from either place.
+Use the browser-safe `T`, `R`, `M`, and `S` keys to change views while focus is
+outside an editable field; `?` toggles the visible shortcut guide. Review filters
+refresh automatically as they change.
+
 Closing the TUI does not stop the background process or an active timer. Stop
 only the background process with:
 

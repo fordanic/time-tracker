@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { post } from "./api.ts";
+import { ProjectActivityFields } from "./ProjectActivityFields.tsx";
 import type { Bootstrap, ReviewData, ReviewFilter, Segment } from "./types.ts";
 import { duration, localInputValue, offsetInstant } from "./utils.ts";
 
@@ -39,11 +40,14 @@ export function ReviewView({ data, connected, announce, refresh }: Props) {
   const [destination, setDestination] = useState("");
   const [overwritePending, setOverwritePending] = useState(false);
   const [busy, setBusy] = useState(false);
+  const querySequence = useRef(0);
 
-  const query = async (nextFilter = filter) => {
+  const query = async (nextFilter = filter, announceSuccess = false) => {
+    const sequence = ++querySequence.current;
     setBusy(true);
     try {
       const result = await post<ReviewData>("/api/review/query", nextFilter);
+      if (sequence !== querySequence.current) return;
       setReview(result);
       if (
         selected &&
@@ -52,15 +56,27 @@ export function ReviewView({ data, connected, announce, refresh }: Props) {
         )
       )
         setSelected(null);
-      announce("Review refreshed.");
+      if (announceSuccess) announce("Review refreshed.");
     } catch (error) {
-      announce(error instanceof Error ? error.message : "Review failed");
+      if (sequence === querySequence.current)
+        announce(error instanceof Error ? error.message : "Review failed");
     } finally {
-      setBusy(false);
+      if (sequence === querySequence.current) setBusy(false);
     }
   };
 
-  useEffect(() => void query(emptyFilter), []);
+  useEffect(() => {
+    if (filter.preset === "custom" && (!filter.start_date || !filter.end_date))
+      return;
+    const timeout = window.setTimeout(() => void query(filter), 220);
+    return () => window.clearTimeout(timeout);
+  }, [
+    filter.activity,
+    filter.end_date,
+    filter.preset,
+    filter.project,
+    filter.start_date,
+  ]);
 
   const activities = useMemo(() => {
     if (!filter.project)
@@ -73,6 +89,26 @@ export function ReviewView({ data, connected, announce, refresh }: Props) {
       ),
     );
   }, [data.completed, filter.project]);
+
+  const entryProjects = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...data.projects,
+          ...data.completed.map((item) => item.project),
+        ]),
+      ),
+    [data.completed, data.projects],
+  );
+  const entryActivities = useMemo(() => {
+    const choices: Record<string, string[]> = { ...data.activities };
+    for (const item of data.completed) {
+      choices[item.project] = Array.from(
+        new Set([...(choices[item.project] ?? []), item.activity]),
+      );
+    }
+    return choices;
+  }, [data.activities, data.completed]);
 
   const loadSelected = () => {
     if (!selected) return;
@@ -125,7 +161,7 @@ export function ReviewView({ data, connected, announce, refresh }: Props) {
           ? "Entry correction saved."
           : "Missed time added.",
       );
-      await query();
+      await query(filter);
     } catch (error) {
       announce(error instanceof Error ? error.message : "Entry save failed");
     } finally {
@@ -148,7 +184,7 @@ export function ReviewView({ data, connected, announce, refresh }: Props) {
       setDeletePending(false);
       setSelected(null);
       await refresh("Completed entry permanently deleted.");
-      await query();
+      await query(filter);
     } catch (error) {
       announce(error instanceof Error ? error.message : "Delete failed");
     } finally {
@@ -281,13 +317,6 @@ export function ReviewView({ data, connected, announce, refresh }: Props) {
               ))}
             </select>
           </label>
-          <button
-            class="primary apply-filter"
-            disabled={busy}
-            onClick={() => void query()}
-          >
-            Apply filters
-          </button>
         </div>
         <div class="segmented" aria-label="Review representation">
           {(["completed", "daily", "range"] as const).map((item) => (
@@ -392,27 +421,16 @@ export function ReviewView({ data, connected, announce, refresh }: Props) {
           <h2 id="editor-title">
             {editorMode === "correct" ? "Correct entry" : "Add missed time"}
           </h2>
-          <div class="field-row">
-            <label>
-              Project
-              <input
-                value={entry.project}
-                onInput={(event) =>
-                  setEntry({ ...entry, project: event.currentTarget.value })
-                }
-              />
-            </label>
-            <label>
-              Activity
-              <input
-                value={entry.activity}
-                onInput={(event) =>
-                  setEntry({ ...entry, activity: event.currentTarget.value })
-                }
-              />
-            </label>
-          </div>
-          <div class="field-row">
+          <div class="entry-form-grid">
+            <ProjectActivityFields
+              idPrefix="review-entry"
+              project={entry.project}
+              activity={entry.activity}
+              projects={entryProjects}
+              activities={entryActivities}
+              onProjectChange={(project) => setEntry({ ...entry, project })}
+              onActivityChange={(activity) => setEntry({ ...entry, activity })}
+            />
             <label>
               Started
               <input
@@ -433,16 +451,16 @@ export function ReviewView({ data, connected, announce, refresh }: Props) {
                 }
               />
             </label>
+            <label class="wide-field">
+              Note <span>optional</span>
+              <input
+                value={entry.note}
+                onInput={(event) =>
+                  setEntry({ ...entry, note: event.currentTarget.value })
+                }
+              />
+            </label>
           </div>
-          <label>
-            Note <span>optional</span>
-            <input
-              value={entry.note}
-              onInput={(event) =>
-                setEntry({ ...entry, note: event.currentTarget.value })
-              }
-            />
-          </label>
           <div class="button-row">
             <button
               class="primary"

@@ -17,21 +17,36 @@ test("responsive browser workflow stays durable across all four views", async ({
     expect(sizes.scroll).toBe(sizes.client);
   }
 
-  await page.getByRole("combobox", { name: "Project" }).fill("Launch work");
-  await page.getByRole("combobox", { name: "Activity" }).fill("Documentation");
-  await page
-    .getByRole("textbox", { name: "Note optional", exact: true })
-    .fill("Browser E2E");
-  await page.getByRole("button", { name: "Start / switch" }).click();
+  const recent = page.getByRole("radio", { name: /Documentation/ });
+  await recent.click();
+  await expect(
+    page.getByText("Will switch from the current timer."),
+  ).toBeVisible();
+  await recent.focus();
+  await page.keyboard.press("Tab");
+  const quickNote = page.getByRole("textbox", {
+    name: "Quick-switch note optional",
+  });
+  await expect(quickNote).toBeFocused();
+  await quickNote.fill("Browser E2E");
+  await quickNote.press("Enter");
   await expect(
     page.getByRole("heading", { name: "Launch work / Documentation" }),
   ).toBeVisible();
   await expect(page.getByText("Switch saved.")).toBeVisible();
 
-  await page.getByRole("button", { name: "Review" }).click();
+  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur());
+  await page.keyboard.press("r");
   await expect(
     page.getByRole("heading", { name: "Completed time" }),
   ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Apply filters" })).toHaveCount(
+    0,
+  );
+  await page
+    .getByRole("combobox", { name: "Date range" })
+    .selectOption("today");
+  await expect(page.getByText("Responsive shell")).toBeVisible();
   await page.getByRole("button", { name: "Range totals" }).click();
   await expect(page.getByRole("cell", { name: "Web GUI" })).toBeVisible();
 
