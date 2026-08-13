@@ -1,11 +1,12 @@
 # Time Tracker
 
-Time Tracker is a local-first, keyboard-driven terminal application for recording
-time against activities within projects. It runs on Linux, Windows, and macOS,
+Time Tracker is a local-first, keyboard-driven application for recording time
+against activities within projects. It provides a default terminal interface and
+an optional same-machine web interface. It runs on Linux, Windows, and macOS,
 stores data locally, and does not require an account or internet connection.
 
-The Textual interface talks to a persistent local background process. Closing the
-TUI leaves the background process, active timer, and reminders running.
+Both interfaces talk to a persistent local background process. Closing the TUI
+or web server leaves the background process, active timer, and reminders running.
 
 ## Features
 
@@ -23,6 +24,8 @@ TUI leaves the background process, active timer, and reminders running.
 - Choose a color palette in Settings that is applied immediately and restored on
   the next launch.
 - Use Track, Review, Manage, and Settings workflows entirely from the keyboard.
+- Use the same workflows in a responsive local web UI from phone-sized to desktop
+  browser widths, without LAN access or hosted services.
 
 ## Requirements and architecture
 
@@ -54,7 +57,10 @@ src/time_tracker/
   infrastructure/  SQLite, IPC, configuration, notifications, and OS adapters
   agent/           Persistent background process and reminder scheduler
   tui/             Textual user interface
+  web/             Secure loopback HTTP adapter and compiled browser assets
   cli.py           Command-line entry point
+
+web/               Preact/TypeScript source, tests, and build configuration
 
 tests/
   unit/            Isolated behavior tests
@@ -72,6 +78,7 @@ independent of Textual, SQLite, IPC, and operating-system integrations.
 
 - CPython 3.14 or newer
 - [uv](https://docs.astral.sh/uv/)
+- Node.js 22 or newer for frontend development and native package builds
 - GNU Make for the convenience targets
 
 Native packages are built on their target operating system; PyInstaller builds
@@ -97,12 +104,36 @@ Or use the Make target, which syncs first:
 make run
 ```
 
+Start the optional web interface on the fixed same-machine origin
+`http://127.0.0.1:47831`:
+
+```shell
+uv run time-tracker --web
+```
+
+The page opens after the server is ready. Use `--no-open` to print the URL for
+manual opening, or `--port PORT` to choose a different loopback port. The server
+cannot listen on LAN interfaces. The TUI remains the default, and Time Tracker
+rejects launching the TUI and web interface simultaneously.
+
 Select recent work with `1` through `5`, optionally enter its quick-switch note,
 and press `Enter` to confirm Start or Switch. A selected current pair remains a
 no-op. For work outside the deck, use Manual entry's project, activity, and
 separate note fields, then press `F5` or its Start action. Stop and Update current
 timer controls follow that action. `F1` through `F4` open Track, Review, Manage,
 and Settings; `Ctrl+K` shows all shortcuts.
+
+In the web interface, `1` through `5` select and focus recent work, `Tab` moves
+from that selection to its optional note, and `Enter` confirms from either place.
+A recent-work selection also fills the Manual entry project and activity while
+leaving its note unchanged. Use the browser-safe `T`, `R`, `M`, and `S` keys to
+change views while focus is outside an editable field. While editing outside a
+dialog, press `Escape` and then `T`, `R`, `M`, or `S` within 1.5 seconds to change
+views. On Track, `G` starts or switches, `U` updates the active entry, and `X`
+stops it. The same actions work from editable fields with
+`Ctrl`/`Command`+`Enter`, `Ctrl`/`Command`+`Shift`+`Enter`, and
+`Ctrl`/`Command`+`Alt`/`Option`+`Enter`, respectively. `?` toggles the visible
+shortcut guide. Review filters refresh automatically as they change.
 
 Closing the TUI does not stop the background process or an active timer. Stop
 only the background process with:
@@ -178,6 +209,8 @@ make format
 make test-unit
 make test-integration
 make test-e2e
+make test-web
+make web-build
 make check
 make build
 ```
@@ -205,13 +238,20 @@ and notes. Every weekday has entries and weekends have none. The command stops
 the agent before writing and refuses to mix simulated entries into a non-empty
 database.
 
-Before committing, run the complete check set:
+Before committing, sync both locked environments and run the complete check set:
 
 ```shell
+make sync
 uv run ruff format --check .
 uv run ruff check .
 uv run mypy
 uv run pytest
+cd web && npm run format:check
+cd web && npm run lint
+cd web && npm run typecheck
+cd web && npm run test
+cd web && npm run test:e2e
+cd web && npm run build
 ```
 
 `make check` runs the same checks after the environment has been synced.
@@ -241,7 +281,8 @@ Repository-specific agent instructions are in [AGENTS.md](AGENTS.md).
 
 ## Status
 
-The initial product baseline and selected TUI roadmap features are implemented:
+The initial product baseline, selected TUI roadmap features, and local web GUI
+are implemented:
 
 - durable single-timer start, switch, restart, stop, recovery, and active-detail
   editing;
@@ -255,7 +296,18 @@ The initial product baseline and selected TUI roadmap features are implemented:
 - responsive Track, Review, Manage, and Settings views with keyboard shortcuts;
   and
 - a five-item quick-switch deck with deliberate selection, optional-note, and
-  Enter-confirmation behavior.
+  Enter-confirmation behavior; and
+- a loopback-only responsive Preact web interface with Track, Review, Manage, and
+  Settings parity, browser-local appearance, strict same-origin launch security,
+  and serialized IPC through the existing single-writer agent.
+
+On August 12, 2026, the web UI passed Python adapter integration tests, frontend
+format/lint/type/unit/build checks, a real-agent Chromium end-to-end workflow,
+and interactive in-app-browser inspection at 320, 720, and desktop widths. The
+compiled browser payload is approximately 39 KB JavaScript and 9 KB CSS before
+compression, with no third-party runtime requests. The extended frozen macOS
+arm64 TUI-and-web lifecycle also passed; the resulting app bundle is 27 MB and
+contains the 56 KB compiled web shell without a Node runtime.
 
 The check workflow builds and exercises the packaged lifecycle on Linux, Windows,
 and macOS; all three jobs passed on July 25, 2026. A local macOS arm64 app-bundle
@@ -274,6 +326,9 @@ Known outstanding validation:
 - run the native-notification smoke on interactive Linux and Windows desktops;
 - validate idle-duration detection on supported interactive Linux X11 and
   Windows desktop sessions;
+- validate the local web UI interactively in Safari, Firefox, and WSL;
+- run the extended packaged TUI-and-web lifecycle on Linux and Windows release
+  artifacts;
 - run the GitHub release workflow end to end for a release candidate, verifying
   its Linux, Windows, and macOS archives, checksums, native version metadata,
   annotated tag, and prerelease state; and

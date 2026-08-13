@@ -1,0 +1,596 @@
+import { useEffect, useRef, useState } from "preact/hooks";
+import { post } from "./api.ts";
+import { ProjectActivityFields } from "./ProjectActivityFields.tsx";
+import type { Bootstrap, Timer } from "./types.ts";
+import { duration } from "./utils.ts";
+
+interface Props {
+  data: Bootstrap;
+  connected: boolean;
+  announce: (message: string) => void;
+  refresh: (message?: string) => Promise<void>;
+}
+
+type TrackAction = "start" | "switch" | "restart" | "already_tracking";
+
+function actionCopy(action: TrackAction | null, ready: boolean) {
+  if (!ready) return "Choose a project and activity to preview the action.";
+  if (!action) return "Checking action…";
+  if (action === "switch") return "Will switch from the current timer.";
+  if (action === "restart") return "Will restart this timer with the new note.";
+  if (action === "already_tracking")
+    return "No change — this work is already active.";
+  return "Will start a new timer.";
+}
+
+function actionLabel(action: TrackAction | null, ready = true) {
+  if (!ready) return "Waiting";
+  if (action === "already_tracking") return "No change";
+  if (!action) return "Checking";
+  return `${action[0]?.toUpperCase()}${action.slice(1)}`;
+}
+
+export function TrackView({ data, connected, announce, refresh }: Props) {
+  const [recentIndex, setRecentIndex] = useState<number | null>(null);
+  const [quickNote, setQuickNote] = useState("");
+  const [project, setProject] = useState("");
+  const [activity, setActivity] = useState("");
+  const [note, setNote] = useState("");
+  const [quickAction, setQuickAction] = useState<TrackAction | null>(null);
+  const [manualAction, setManualAction] = useState<TrackAction | null>(null);
+  const [busy, setBusy] = useState(false);
+  const recentButtons = useRef<Array<HTMLButtonElement | null>>([]);
+  const disabled = busy || !connected;
+  const recent =
+    recentIndex === null ? null : (data.recent[recentIndex] ?? null);
+  const activeKey = data.active
+    ? `${data.active.entry_id}\u0000${data.active.project}\u0000${data.active.activity}\u0000${data.active.note ?? ""}`
+    : "";
+
+  useEffect(() => {
+    if (!recent) {
+      setQuickAction(null);
+      return;
+    }
+    let cancelled = false;
+    setQuickAction(null);
+    const timeout = window.setTimeout(async () => {
+      try {
+        const result = await post<{ action: TrackAction }>(
+          "/api/track/classify",
+          {
+            project: recent.project,
+            activity: recent.activity,
+            note: quickNote || null,
+            quick: true,
+          },
+        );
+        if (!cancelled) setQuickAction(result.action);
+      } catch {
+        if (!cancelled) setQuickAction(null);
+      }
+    }, 180);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [activeKey, quickNote, recent]);
+
+  useEffect(() => {
+    if (!project || !activity) {
+      setManualAction(null);
+      return;
+    }
+    let cancelled = false;
+    setManualAction(null);
+    const timeout = window.setTimeout(async () => {
+      try {
+        const result = await post<{ action: TrackAction }>(
+          "/api/track/classify",
+          {
+            project,
+            activity,
+            note: note || null,
+            quick: false,
+          },
+        );
+        if (!cancelled) setManualAction(result.action);
+      } catch {
+        if (!cancelled) setManualAction(null);
+      }
+    }, 180);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [activity, activeKey, note, project]);
+
+  const applyStart = async (
+    targetProject: string,
+    targetActivity: string,
+    targetNote: string,
+    quick: boolean,
+  ) => {
+    setBusy(true);
+    try {
+      const classified = await post<{ action: TrackAction }>(
+        "/api/track/classify",
+        {
+          project: targetProject,
+          activity: targetActivity,
+          note: targetNote || null,
+          quick,
+        },
+      );
+      if (classified.action === "already_tracking") {
+        announce("That project, activity, and note are already active.");
+        if (quick) setQuickAction("already_tracking");
+        else setManualAction("already_tracking");
+        return;
+      }
+      await post<{ active: Timer }>("/api/timer/start", {
+        project: targetProject,
+        activity: targetActivity,
+        note: targetNote || null,
+      });
+      setNote("");
+      setQuickNote("");
+      setRecentIndex(null);
+      await refresh(
+        `${classified.action[0]?.toUpperCase()}${classified.action.slice(1)} saved.`,
+      );
+    } catch (error) {
+      announce(
+        error instanceof Error ? error.message : "Tracking action failed",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const stop = async () => {
+    setBusy(true);
+    try {
+      await post("/api/timer/stop");
+      await refresh("Timer stopped and saved.");
+    } catch (error) {
+      announce(error instanceof Error ? error.message : "Stop failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const update = async () => {
+    setBusy(true);
+    try {
+      await post("/api/timer/edit", {
+        project: project || data.active?.project || "",
+        activity: activity || data.active?.activity || "",
+        note: note || null,
+      });
+      await refresh("Active details updated without restarting time.");
+    } catch (error) {
+      announce(error instanceof Error ? error.message : "Update failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const selectRecent = (index: number) => {
+    const selection = data.recent[index];
+    if (!selection) return;
+    setRecentIndex(index);
+    setProject(selection.project);
+    setActivity(selection.activity);
+    setQuickAction(null);
+    setManualAction(null);
+  };
+
+  const shortcutState = useRef({
+    recentItems: data.recent,
+    active: data.active,
+    disabled,
+    recent,
+    quickAction,
+    quickNote,
+    project,
+    activity,
+    note,
+    manualAction,
+    applyStart,
+    update,
+    stop,
+    announce,
+    selectRecent,
+  });
+  shortcutState.current = {
+    recentItems: data.recent,
+    active: data.active,
+    disabled,
+    recent,
+    quickAction,
+    quickNote,
+    project,
+    activity,
+    note,
+    manualAction,
+    applyStart,
+    update,
+    stop,
+    announce,
+    selectRecent,
+  };
+
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => {
+      if (event.repeat || event.isComposing) return;
+      const target = event.target;
+      const editable =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        (target instanceof HTMLElement && target.isContentEditable);
+      const primaryModifier = event.ctrlKey || event.metaKey;
+      let actionKey: "g" | "u" | "x" | null = null;
+      if (event.key === "Enter" && primaryModifier) {
+        if (event.altKey && !event.shiftKey) actionKey = "x";
+        else if (event.shiftKey && !event.altKey) actionKey = "u";
+        else if (!event.altKey && !event.shiftKey) actionKey = "g";
+      }
+
+      if (event.altKey || event.ctrlKey || event.metaKey) {
+        if (!actionKey) return;
+      } else if (editable) return;
+
+      const state = shortcutState.current;
+      if (!actionKey) {
+        const index = Number(event.key) - 1;
+        const selection = state.recentItems[index];
+        if (index >= 0 && selection) {
+          event.preventDefault();
+          state.selectRecent(index);
+          window.requestAnimationFrame(() =>
+            recentButtons.current[index]?.focus(),
+          );
+          return;
+        }
+      }
+
+      const key = actionKey ?? event.key.toLowerCase();
+      if (key !== "g" && key !== "u" && key !== "x") return;
+      event.preventDefault();
+      if (state.disabled) {
+        state.announce("Tracking controls are currently unavailable.");
+        return;
+      }
+      if (key === "g") {
+        if (state.recent) {
+          if (state.quickAction === "already_tracking") {
+            state.announce("That project and activity are already active.");
+            return;
+          }
+          void state.applyStart(
+            state.recent.project,
+            state.recent.activity,
+            state.quickNote,
+            true,
+          );
+          return;
+        }
+        if (state.project && state.activity) {
+          if (state.manualAction === "already_tracking") {
+            state.announce(
+              "That project, activity, and note are already active.",
+            );
+            return;
+          }
+          void state.applyStart(
+            state.project,
+            state.activity,
+            state.note,
+            false,
+          );
+          return;
+        }
+        state.announce(
+          "Select recent work or enter a project and activity first.",
+        );
+        return;
+      }
+      if (!state.active) {
+        state.announce("There is no active timer for that action.");
+        return;
+      }
+      if (key === "u") void state.update();
+      else void state.stop();
+    };
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, []);
+
+  const reminderAction = async (kind: "confirm" | "snooze") => {
+    setBusy(true);
+    try {
+      await post(`/api/reminder/${kind}`);
+      await refresh(
+        kind === "confirm" ? "Active work confirmed." : "Reminder snoozed.",
+      );
+    } catch (error) {
+      announce(
+        error instanceof Error ? error.message : "Reminder action failed",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div class="track-grid">
+      <section class="panel deck-panel">
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">QUICK SWITCH</span>
+            <h2>Recent work</h2>
+          </div>
+          <span class="hint">Keys 1–5</span>
+        </div>
+        <div class="recent-deck" role="radiogroup" aria-label="Recent work">
+          {data.recent.length ? (
+            data.recent.slice(0, 5).map((item, index) => (
+              <button
+                key={`${item.project}/${item.activity}`}
+                ref={(element) => {
+                  recentButtons.current[index] = element;
+                }}
+                type="button"
+                role="radio"
+                aria-checked={recentIndex === index}
+                tabIndex={
+                  recentIndex === index || (recentIndex === null && index === 0)
+                    ? 0
+                    : -1
+                }
+                class={recentIndex === index ? "recent selected" : "recent"}
+                onClick={() => selectRecent(index)}
+                onKeyDown={(event) => {
+                  if (
+                    event.key === "Enter" &&
+                    !event.altKey &&
+                    !event.ctrlKey &&
+                    !event.metaKey &&
+                    !event.shiftKey &&
+                    !event.isComposing &&
+                    !event.repeat &&
+                    recentIndex === index
+                  ) {
+                    event.preventDefault();
+                    void applyStart(
+                      item.project,
+                      item.activity,
+                      quickNote,
+                      true,
+                    );
+                    return;
+                  }
+                  if (event.key !== "ArrowDown" && event.key !== "ArrowUp")
+                    return;
+                  event.preventDefault();
+                  const direction = event.key === "ArrowDown" ? 1 : -1;
+                  const next =
+                    (index + direction + data.recent.slice(0, 5).length) %
+                    data.recent.slice(0, 5).length;
+                  selectRecent(next);
+                  recentButtons.current[next]?.focus();
+                }}
+              >
+                <kbd>{index + 1}</kbd>
+                <span>
+                  <strong>{item.project}</strong>
+                  <small>{item.activity}</small>
+                </span>
+              </button>
+            ))
+          ) : (
+            <p class="muted">Completed activities will appear here.</p>
+          )}
+        </div>
+        <label>
+          Quick-switch note <span>optional</span>
+          <input
+            value={quickNote}
+            onInput={(event) => {
+              setQuickNote(event.currentTarget.value);
+              setQuickAction(null);
+            }}
+            onKeyDown={(event) => {
+              if (
+                event.key === "Enter" &&
+                !event.altKey &&
+                !event.ctrlKey &&
+                !event.metaKey &&
+                !event.shiftKey &&
+                !event.isComposing &&
+                !event.repeat &&
+                recent
+              ) {
+                event.preventDefault();
+                void applyStart(
+                  recent.project,
+                  recent.activity,
+                  quickNote,
+                  true,
+                );
+              }
+            }}
+          />
+        </label>
+        <div
+          class={`action-preview ${quickAction ?? "pending"}`}
+          role="status"
+          aria-live="polite"
+        >
+          <strong>{actionLabel(quickAction, Boolean(recent))}</strong>
+          <span>{actionCopy(quickAction, Boolean(recent))}</span>
+        </div>
+        <button
+          class="primary full"
+          aria-label={
+            quickAction && quickAction !== "already_tracking"
+              ? `${actionLabel(quickAction)} selected work`
+              : "Apply selected work"
+          }
+          aria-keyshortcuts="G Control+Enter Meta+Enter"
+          disabled={disabled || !recent || quickAction === "already_tracking"}
+          onClick={() =>
+            recent &&
+            void applyStart(recent.project, recent.activity, quickNote, true)
+          }
+        >
+          <kbd aria-hidden="true">G</kbd>
+          {quickAction && quickAction !== "already_tracking"
+            ? `${actionLabel(quickAction)} selected work`
+            : "Apply selected work"}
+        </button>
+      </section>
+
+      <section class="panel capture-panel">
+        <span class="eyebrow">MANUAL CAPTURE</span>
+        <h2>What are you working on?</h2>
+        <div class="field-row">
+          <ProjectActivityFields
+            idPrefix="track"
+            project={project}
+            activity={activity}
+            projects={data.projects}
+            activities={data.activities}
+            onProjectChange={(value) => {
+              setProject(value);
+              setManualAction(null);
+            }}
+            onActivityChange={(value) => {
+              setActivity(value);
+              setManualAction(null);
+            }}
+          />
+        </div>
+        <label>
+          Note <span>optional</span>
+          <input
+            value={note}
+            onInput={(event) => {
+              setNote(event.currentTarget.value);
+              setManualAction(null);
+            }}
+            onKeyDown={(event) => {
+              if (
+                event.key === "Enter" &&
+                !event.altKey &&
+                !event.ctrlKey &&
+                !event.metaKey &&
+                !event.shiftKey &&
+                !event.isComposing &&
+                !event.repeat &&
+                project &&
+                activity
+              ) {
+                event.preventDefault();
+                void applyStart(project, activity, note, false);
+              }
+            }}
+          />
+        </label>
+        <div
+          class={`action-preview ${manualAction ?? "pending"}`}
+          role="status"
+          aria-live="polite"
+        >
+          <strong>
+            {actionLabel(manualAction, Boolean(project && activity))}
+          </strong>
+          <span>{actionCopy(manualAction, Boolean(project && activity))}</span>
+        </div>
+        <div class="button-row">
+          <button
+            class="primary"
+            aria-label={
+              manualAction && manualAction !== "already_tracking"
+                ? actionLabel(manualAction)
+                : "Start / switch"
+            }
+            aria-keyshortcuts="G Control+Enter Meta+Enter"
+            disabled={
+              disabled ||
+              !project ||
+              !activity ||
+              manualAction === "already_tracking"
+            }
+            onClick={() => void applyStart(project, activity, note, false)}
+          >
+            <kbd aria-hidden="true">G</kbd>
+            {manualAction && manualAction !== "already_tracking"
+              ? actionLabel(manualAction)
+              : "Start / switch"}
+          </button>
+          <button
+            aria-label="Update active"
+            aria-keyshortcuts="U Control+Shift+Enter Meta+Shift+Enter"
+            disabled={disabled || !data.active}
+            onClick={() => void update()}
+          >
+            <kbd aria-hidden="true">U</kbd>
+            Update active
+          </button>
+          <button
+            class="danger"
+            aria-label="Stop"
+            aria-keyshortcuts="X Control+Alt+Enter Meta+Alt+Enter"
+            disabled={disabled || !data.active}
+            onClick={() => void stop()}
+          >
+            <kbd aria-hidden="true">X</kbd>
+            Stop
+          </button>
+        </div>
+        <div class="metric">
+          <span>Today’s completed time</span>
+          <strong>{duration(data.today_completed_seconds)}</strong>
+        </div>
+      </section>
+
+      {data.reminder && (
+        <section class="panel reminder-panel" aria-labelledby="reminder-title">
+          <span class="eyebrow">REMINDER</span>
+          <h2 id="reminder-title">
+            {data.reminder.kind === "active"
+              ? "Still active?"
+              : "Ready to track?"}
+          </h2>
+          <p>
+            {data.reminder.reason === "idle"
+              ? "Your device has been idle. "
+              : ""}
+            {data.reminder.project &&
+              `${data.reminder.project} / ${data.reminder.activity ?? ""}`}
+          </p>
+          <div class="button-row">
+            {data.reminder.kind === "active" && (
+              <button
+                class="primary"
+                disabled={disabled}
+                onClick={() => void reminderAction("confirm")}
+              >
+                Still active
+              </button>
+            )}
+            <button
+              disabled={disabled}
+              onClick={() => void reminderAction("snooze")}
+            >
+              Snooze
+            </button>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}

@@ -81,6 +81,11 @@ class AgentPaths:
         if self.family == "AF_UNIX":
             Path(self.address).parent.mkdir(parents=True, exist_ok=True)
 
+    @property
+    def foreground_lock(self) -> Path:
+        """Return the sibling lock shared by TUI and web foreground processes."""
+        return self.lock.with_name("foreground.lock")
+
     def authkey(self) -> bytes:
         """Load or atomically create the per-user IPC authentication secret."""
         self.prepare()

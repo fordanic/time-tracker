@@ -101,6 +101,8 @@ def main() -> None:
         "--collect-data",
         "time_tracker.infrastructure.migrations",
         "--collect-data",
+        "time_tracker.web",
+        "--collect-data",
         "desktop_notifier",
         "--hidden-import",
         "desktop_notifier.resources",

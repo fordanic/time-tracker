@@ -10,6 +10,10 @@ from pathlib import Path
 from time_tracker import __version__
 from time_tracker.agent.server import serve
 from time_tracker.infrastructure.configuration import ConfigurationError, load_config
+from time_tracker.infrastructure.instance_lock import (
+    ForegroundAlreadyRunningError,
+    foreground_lock,
+)
 from time_tracker.infrastructure.ipc import (
     AgentClient,
     AgentUnavailableError,
@@ -32,6 +36,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--stop-agent",
         action="store_true",
         help="stop the background process without closing an active timer",
+    )
+    parser.add_argument(
+        "--web",
+        action="store_true",
+        help="run the optional same-machine web interface",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=47831,
+        help="loopback port for --web (default: 47831)",
+    )
+    parser.add_argument(
+        "--no-open",
+        action="store_true",
+        help="with --web, print the URL instead of opening a browser",
     )
     parser.add_argument(
         "--config-path",
@@ -57,6 +77,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         help=argparse.SUPPRESS,
     )
     arguments = parser.parse_args(argv)
+    if not arguments.web and (arguments.port != 47831 or arguments.no_open):
+        parser.error("--port and --no-open require --web")
+    if arguments.web and (
+        arguments.stop_agent
+        or arguments.config_path
+        or arguments.packaged_smoke is not None
+        or arguments.notification_smoke is not None
+        or arguments.agent
+    ):
+        parser.error("--web cannot be combined with another launch mode")
+    if not 1 <= arguments.port <= 65535:
+        parser.error("--port must be between 1 and 65535")
     if arguments.agent:
         internal_values = (
             arguments.database,
@@ -99,8 +131,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("native notification smoke dispatched")
         return 0
     try:
-        launch_tui()
-    except ConfigurationError as error:
+        if arguments.web:
+            launch_web(arguments.port, open_browser=not arguments.no_open)
+        else:
+            launch_tui()
+    except (ConfigurationError, ForegroundAlreadyRunningError) as error:
         parser.error(str(error))
     return 0
 
@@ -109,8 +144,20 @@ def launch_tui() -> None:
     """Start or reconnect to the background process, then run Textual."""
     paths = AgentPaths.defaults()
     load_config(paths.config)
-    client = ensure_agent_running(paths)
-    TimeTrackerApp(client).run()
+    with foreground_lock(paths.foreground_lock):
+        client = ensure_agent_running(paths)
+        TimeTrackerApp(client).run()
+
+
+def launch_web(port: int, *, open_browser: bool) -> None:
+    """Start the optional loopback-only web interface."""
+    from time_tracker.web.server import run_web_server
+
+    paths = AgentPaths.defaults()
+    load_config(paths.config)
+    with foreground_lock(paths.foreground_lock):
+        client = ensure_agent_running(paths)
+        run_web_server(client, port=port, open_browser=open_browser)
 
 
 async def _send_notification_smoke(directory: Path) -> None:

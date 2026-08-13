@@ -35,10 +35,34 @@ jobs:
         with:
           enable-cache: true
           python-version: "3.14"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
       - run: uv sync --all-groups --locked
+      - run: npm ci
+        working-directory: web
       - run: uv run ruff format --check .
       - run: uv run ruff check .
       - run: uv run mypy
       - run: uv run pytest
+      - run: npm run format:check
+        working-directory: web
+      - run: npm run lint
+        working-directory: web
+      - run: npm run typecheck
+        working-directory: web
+      - run: npm run test
+        working-directory: web
+      - if: matrix.os == 'ubuntu-latest'
+        run: npx playwright install --with-deps chromium
+        working-directory: web
+      - if: matrix.os == 'ubuntu-latest'
+        run: npm run test:e2e
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+      - run: git diff --exit-code -- src/time_tracker/web/static
       - run: uv run python scripts/build.py
       - run: uv run python scripts/run_packaged_smoke.py
