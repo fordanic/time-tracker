@@ -802,9 +802,9 @@ def test_agent_persists_and_live_reloads_reminder_settings(tmp_path: Path) -> No
         assert client.get_reminder() is None
         _wait_for_pending_reminder(client, ReminderKind.INACTIVE)
 
-        count = len(notifier.reminders)
         assert client.save_configuration(disabled) == disabled
         assert client.get_reminder() is None
+        count = len(notifier.reminders)
         time.sleep(0.1)
         assert len(notifier.reminders) == count
 

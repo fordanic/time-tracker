@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -216,11 +217,16 @@ describe("App", () => {
     const project = screen.getByRole("combobox", { name: "Project" });
     project.focus();
 
-    fireEvent.keyDown(project, { key: "Escape" });
-    await waitFor(
-      () => expect(screen.queryByText(/View shortcut ready/)).toBeNull(),
-      { timeout: 1800 },
-    );
+    vi.useFakeTimers();
+    try {
+      fireEvent.keyDown(project, { key: "Escape" });
+      act(() => {
+        vi.advanceTimersByTime(1500);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(screen.queryByText(/View shortcut ready/)).toBeNull();
     project.focus();
     fireEvent.keyDown(project, { key: "r" });
 
