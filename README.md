@@ -113,8 +113,11 @@ uv run time-tracker --web
 
 The page opens after the server is ready. Use `--no-open` to print the URL for
 manual opening, or `--port PORT` to choose a different loopback port. The server
-cannot listen on LAN interfaces. The TUI remains the default, and Time Tracker
-rejects launching the TUI and web interface simultaneously.
+cannot listen on LAN interfaces. In WSL with Windows interop enabled, Time
+Tracker opens the loopback URL in the Windows default browser; if that handoff
+is unavailable, it prints the URL and leaves the server running. The TUI remains
+the default, and Time Tracker rejects launching the TUI and web interface
+simultaneously.
 
 Select recent work with `1` through `5`, optionally enter its quick-switch note,
 and press `Enter` to confirm Start or Switch. A selected current pair remains a
@@ -130,10 +133,9 @@ leaving its note unchanged. Use the browser-safe `T`, `R`, `M`, and `S` keys to
 change views while focus is outside an editable field. While editing outside a
 dialog, press `Escape` and then `T`, `R`, `M`, or `S` within 1.5 seconds to change
 views. On Track, `G` starts or switches, `U` updates the active entry, and `X`
-stops it. The same actions work from editable fields with
-`Ctrl`/`Command`+`Enter`, `Ctrl`/`Command`+`Shift`+`Enter`, and
-`Ctrl`/`Command`+`Alt`/`Option`+`Enter`, respectively. `?` toggles the visible
-shortcut guide. Review filters refresh automatically as they change.
+stops it. From an editable field, press `Escape` first and then use the ordinary
+single-key shortcut. `?` toggles the visible shortcut guide. Review filters
+refresh automatically as they change.
 
 Closing the TUI does not stop the background process or an active timer. Stop
 only the background process with:

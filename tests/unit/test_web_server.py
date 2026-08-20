@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from starlette.testclient import TestClient
 
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
+from time_tracker.web import server as web_server
 from time_tracker.web.api import WebAgent
 from time_tracker.web.server import (
     MAX_JSON_BODY_BYTES,
@@ -17,6 +18,11 @@ from time_tracker.web.server import (
 PORT = 48123
 ORIGIN = f"http://127.0.0.1:{PORT}"
 TOKEN = "test-launch-token"
+
+
+class ReadyServer:
+    started = True
+    should_exit = False
 
 
 class FakeAgent:
@@ -179,3 +185,28 @@ def test_unexpected_host_is_rejected(client: TestClient) -> None:
 def test_non_loopback_binding_is_rejected() -> None:
     with pytest.raises(ValueError, match="only to 127.0.0.1"):
         WebServerSettings(port=PORT, host="0.0.0.0")
+
+
+def test_no_open_prints_the_ready_url_without_calling_a_browser(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def reject_browser(_url: str) -> bool:
+        raise AssertionError("--no-open must skip the browser adapter")
+
+    monkeypatch.setattr(web_server, "open_default_browser", reject_browser)
+
+    web_server._announce_ready(cast(Any, ReadyServer()), ORIGIN, False)
+
+    assert capsys.readouterr().out == f"Time Tracker web interface: {ORIGIN}\n"
+
+
+def test_browser_failure_prints_the_ready_url(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(web_server, "open_default_browser", lambda _url: False)
+
+    web_server._announce_ready(cast(Any, ReadyServer()), ORIGIN, True)
+
+    assert capsys.readouterr().out == f"Time Tracker web interface: {ORIGIN}\n"

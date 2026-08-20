@@ -230,33 +230,21 @@ export function TrackView({ data, connected, announce, refresh }: Props) {
         target instanceof HTMLTextAreaElement ||
         target instanceof HTMLSelectElement ||
         (target instanceof HTMLElement && target.isContentEditable);
-      const primaryModifier = event.ctrlKey || event.metaKey;
-      let actionKey: "g" | "u" | "x" | null = null;
-      if (event.key === "Enter" && primaryModifier) {
-        if (event.altKey && !event.shiftKey) actionKey = "x";
-        else if (event.shiftKey && !event.altKey) actionKey = "u";
-        else if (!event.altKey && !event.shiftKey) actionKey = "g";
-      }
-
-      if (event.altKey || event.ctrlKey || event.metaKey) {
-        if (!actionKey) return;
-      } else if (editable) return;
+      if (event.altKey || event.ctrlKey || event.metaKey || editable) return;
 
       const state = shortcutState.current;
-      if (!actionKey) {
-        const index = Number(event.key) - 1;
-        const selection = state.recentItems[index];
-        if (index >= 0 && selection) {
-          event.preventDefault();
-          state.selectRecent(index);
-          window.requestAnimationFrame(() =>
-            recentButtons.current[index]?.focus(),
-          );
-          return;
-        }
+      const index = Number(event.key) - 1;
+      const selection = state.recentItems[index];
+      if (index >= 0 && selection) {
+        event.preventDefault();
+        state.selectRecent(index);
+        window.requestAnimationFrame(() =>
+          recentButtons.current[index]?.focus(),
+        );
+        return;
       }
 
-      const key = actionKey ?? event.key.toLowerCase();
+      const key = event.key.toLowerCase();
       if (key !== "g" && key !== "u" && key !== "x") return;
       event.preventDefault();
       if (state.disabled) {
@@ -439,7 +427,7 @@ export function TrackView({ data, connected, announce, refresh }: Props) {
               ? `${actionLabel(quickAction)} selected work`
               : "Apply selected work"
           }
-          aria-keyshortcuts="G Control+Enter Meta+Enter"
+          aria-keyshortcuts="G"
           disabled={disabled || !recent || quickAction === "already_tracking"}
           onClick={() =>
             recent &&
@@ -517,7 +505,7 @@ export function TrackView({ data, connected, announce, refresh }: Props) {
                 ? actionLabel(manualAction)
                 : "Start / switch"
             }
-            aria-keyshortcuts="G Control+Enter Meta+Enter"
+            aria-keyshortcuts="G"
             disabled={
               disabled ||
               !project ||
@@ -533,7 +521,7 @@ export function TrackView({ data, connected, announce, refresh }: Props) {
           </button>
           <button
             aria-label="Update active"
-            aria-keyshortcuts="U Control+Shift+Enter Meta+Shift+Enter"
+            aria-keyshortcuts="U"
             disabled={disabled || !data.active}
             onClick={() => void update()}
           >
@@ -543,7 +531,7 @@ export function TrackView({ data, connected, announce, refresh }: Props) {
           <button
             class="danger"
             aria-label="Stop"
-            aria-keyshortcuts="X Control+Alt+Enter Meta+Alt+Enter"
+            aria-keyshortcuts="X"
             disabled={disabled || !data.active}
             onClick={() => void stop()}
           >

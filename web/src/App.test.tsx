@@ -9,7 +9,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.tsx";
-import type { Bootstrap } from "./types.ts";
+import type { Bootstrap, ReviewData } from "./types.ts";
 
 const bootstrap: Bootstrap = {
   active: null,
@@ -49,9 +49,17 @@ function json(data: object): Response {
 describe("App", () => {
   const fetchMock = vi.fn<typeof fetch>();
   let bootstrapResponse: Bootstrap;
+  let reviewResponse: ReviewData;
 
   beforeEach(() => {
     bootstrapResponse = bootstrap;
+    reviewResponse = {
+      groups: [],
+      daily_summaries: [],
+      range_summaries: [],
+      projects: [],
+      activities: [],
+    };
     fetchMock.mockReset();
     fetchMock.mockImplementation(async (input) => {
       const path = String(input);
@@ -63,14 +71,9 @@ describe("App", () => {
       if (path === "/api/timer/edit")
         return json({ active: bootstrapResponse.active });
       if (path === "/api/timer/stop") return json({ completed: {} });
-      if (path === "/api/review/query")
-        return json({
-          groups: [],
-          daily_summaries: [],
-          range_summaries: [],
-          projects: [],
-          activities: [],
-        });
+      if (path === "/api/review/query") return json(reviewResponse);
+      if (path === "/api/review/correct" || path === "/api/review/create")
+        return json({ entry: {} });
       throw new Error(`Unexpected request: ${path}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -168,6 +171,8 @@ describe("App", () => {
     ).toBeTruthy();
     fireEvent.keyDown(window, { key: "?", shiftKey: true });
     expect(screen.getByText("select recent work")).toBeTruthy();
+    expect(screen.getByText("leave a field, then use a shortcut")).toBeTruthy();
+    expect(screen.queryByText(/while editing/)).toBeNull();
 
     const destination = screen.getByRole("textbox", {
       name: "Server-local destination path",
@@ -187,13 +192,13 @@ describe("App", () => {
 
     fireEvent.keyDown(project, { key: "Escape" });
     expect(document.activeElement).not.toBe(project);
-    expect(screen.getByText(/View shortcut ready/)).toBeTruthy();
+    expect(screen.getByText(/Shortcut ready/)).toBeTruthy();
     fireEvent.keyDown(window, { key: "r" });
 
     expect(
       screen.getByRole("heading", { name: "Completed time" }),
     ).toBeTruthy();
-    expect(screen.queryByText(/View shortcut ready/)).toBeNull();
+    expect(screen.queryByText(/Shortcut ready/)).toBeNull();
   });
 
   it("cancels the editable-field view chord on another key", async () => {
@@ -208,7 +213,7 @@ describe("App", () => {
     fireEvent.keyDown(project, { key: "r" });
 
     expect(screen.getByText("Recent work")).toBeTruthy();
-    expect(screen.queryByText(/View shortcut ready/)).toBeNull();
+    expect(screen.queryByText(/Shortcut ready/)).toBeNull();
   });
 
   it("expires the editable-field view chord after 1.5 seconds", async () => {
@@ -226,7 +231,7 @@ describe("App", () => {
     } finally {
       vi.useRealTimers();
     }
-    expect(screen.queryByText(/View shortcut ready/)).toBeNull();
+    expect(screen.queryByText(/Shortcut ready/)).toBeNull();
     project.focus();
     fireEvent.keyDown(project, { key: "r" });
 
@@ -275,7 +280,7 @@ describe("App", () => {
     );
   });
 
-  it("runs Track action shortcuts only outside editable fields", async () => {
+  it("runs Track action shortcuts after leaving editable fields", async () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByText("Recent work");
@@ -290,18 +295,14 @@ describe("App", () => {
         ([path]) => String(path) === "/api/timer/start",
       ),
     ).toBe(false);
-    fireEvent.keyDown(activity, { key: "Enter", ctrlKey: true, repeat: true });
-    fireEvent.keyDown(activity, {
-      key: "Enter",
-      ctrlKey: true,
-      isComposing: true,
-    });
+    fireEvent.keyDown(activity, { key: "Enter", ctrlKey: true });
     expect(
       fetchMock.mock.calls.some(
         ([path]) => String(path) === "/api/timer/start",
       ),
     ).toBe(false);
-    fireEvent.keyDown(activity, { key: "Enter", ctrlKey: true });
+    fireEvent.keyDown(activity, { key: "Escape" });
+    fireEvent.keyDown(window, { key: "g" });
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/timer/start",
@@ -352,7 +353,7 @@ describe("App", () => {
     );
   });
 
-  it("updates and stops from an editable Track field with modifiers", async () => {
+  it("updates and stops after leaving an editable Track field", async () => {
     bootstrapResponse = {
       ...bootstrap,
       active: {
@@ -369,11 +370,12 @@ describe("App", () => {
     const note = screen.getByRole("textbox", { name: /^Note optional$/ });
     note.focus();
 
-    fireEvent.keyDown(note, {
-      key: "Enter",
-      ctrlKey: true,
-      shiftKey: true,
-    });
+    fireEvent.keyDown(note, { key: "Enter", ctrlKey: true, shiftKey: true });
+    expect(
+      fetchMock.mock.calls.some(([path]) => String(path) === "/api/timer/edit"),
+    ).toBe(false);
+    fireEvent.keyDown(note, { key: "Escape" });
+    fireEvent.keyDown(window, { key: "u" });
     await screen.findByText("Active details updated without restarting time.");
     expect(
       fetchMock.mock.calls.filter(
@@ -388,11 +390,8 @@ describe("App", () => {
       ).toBe(false),
     );
     note.focus();
-    fireEvent.keyDown(note, {
-      key: "Enter",
-      ctrlKey: true,
-      altKey: true,
-    });
+    fireEvent.keyDown(note, { key: "Escape" });
+    fireEvent.keyDown(window, { key: "x" });
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/timer/stop",
@@ -449,6 +448,117 @@ describe("App", () => {
     });
     editorProject.focus();
     fireEvent.keyDown(editorProject, { key: "Escape" });
-    expect(screen.queryByText(/View shortcut ready/)).toBeNull();
+    expect(screen.queryByText(/Shortcut ready/)).toBeNull();
+  });
+
+  it("saves a missed entry with the creation endpoint", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByText("Recent work");
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    await user.click(screen.getByRole("button", { name: "Add missed entry" }));
+
+    const editor = screen.getByRole("dialog", { name: "Add missed time" });
+    await user.type(
+      within(editor).getByRole("combobox", { name: "Project" }),
+      "Client",
+    );
+    await user.type(
+      within(editor).getByRole("combobox", { name: "Activity" }),
+      "Build",
+    );
+    await user.click(within(editor).getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/review/create",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    const createRequest = fetchMock.mock.calls.find(
+      ([path]) => String(path) === "/api/review/create",
+    )?.[1];
+    expect(JSON.parse(String(createRequest?.body))).toMatchObject({
+      project: "Client",
+      activity: "Build",
+    });
+    expect(JSON.parse(String(createRequest?.body))).not.toHaveProperty(
+      "entry_id",
+    );
+  });
+
+  it("keeps the correction identity when a review refresh clears selection", async () => {
+    const user = userEvent.setup();
+    const segment = {
+      entry_id: 42,
+      project: "Client",
+      activity: "Build",
+      note: "Original",
+      started_at: "2026-08-12T08:00:00+00:00",
+      stopped_at: "2026-08-12T09:00:00+00:00",
+      day: "2026-08-12",
+      duration_seconds: 3600,
+    };
+    bootstrapResponse = { ...bootstrap, completed: [segment] };
+    reviewResponse = {
+      groups: [
+        { day: segment.day, duration_seconds: 3600, segments: [segment] },
+      ],
+      daily_summaries: [],
+      range_summaries: [],
+      projects: ["Client"],
+      activities: ["Build"],
+    };
+    render(<App />);
+    await screen.findByText("Recent work");
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    await user.click(
+      await screen.findByRole("button", { name: /Client \/ Build/ }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Load selected entry" }),
+    );
+
+    const editor = screen.getByRole("dialog", { name: "Correct entry" });
+    reviewResponse = {
+      groups: [],
+      daily_summaries: [],
+      range_summaries: [],
+      projects: [],
+      activities: [],
+    };
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Date range" }),
+      "today",
+    );
+    await waitFor(() =>
+      expect(
+        (
+          screen.getByRole("button", {
+            name: "Load selected entry",
+          }) as HTMLButtonElement
+        ).disabled,
+      ).toBe(true),
+    );
+    await user.clear(within(editor).getByRole("textbox", { name: /Note/ }));
+    await user.type(
+      within(editor).getByRole("textbox", { name: /Note/ }),
+      "Corrected",
+    );
+    await user.click(within(editor).getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/review/correct",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    const correctRequest = fetchMock.mock.calls.find(
+      ([path]) => String(path) === "/api/review/correct",
+    )?.[1];
+    expect(JSON.parse(String(correctRequest?.body))).toMatchObject({
+      entry_id: 42,
+      note: "Corrected",
+    });
   });
 });

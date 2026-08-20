@@ -18,6 +18,12 @@ interface and the web GUI is an explicit alternative.
   `--web`. An unavailable selected port fails without opening a browser or
   silently choosing another port. Browser-open failure reports the URL and leaves
   the server running. `Ctrl+C` stops the web server but not the agent or timer.
+- On WSL with Windows interop enabled, open the ready loopback URL in the
+  Windows user's default browser through `cmd.exe` and the registered URL
+  association. Resolve `cmd.exe` even when Windows paths are absent from the WSL
+  `PATH`, apply a timeout to the handoff, and fall back to the normal platform
+  browser launcher. If neither launcher succeeds, print the exact URL and leave
+  the web server running. `--no-open` skips every browser handoff.
 - Keep the ordinary `time-tracker` command as the TUI. Reject simultaneous TUI
   and web foreground clients with a concise conflict instead of racing the
   single-client protocol. Closing either foreground leaves the agent, active
@@ -72,14 +78,20 @@ interface and the web GUI is an explicit alternative.
   chord. Escape retains its native behavior inside dialog workflows.
   On Track, `G` starts or switches the selected quick work, or the manual entry
   when no quick work is selected; `U` updates the active entry; and `X` stops it.
-  These single-key action shortcuts apply only outside editable controls. In an
-  editable Track control, `Ctrl`/`Command`+`Enter` starts or switches,
-  `Ctrl`/`Command`+`Shift`+`Enter` updates the active entry, and
-  `Ctrl`/`Command`+`Alt`/`Option`+`Enter` stops it. All action shortcuts expose
-  disabled-state feedback without invoking a mutation and ignore key repeat and
-  input-method composition. Enter or Space activates focused controls. Do not
-  reuse the TUI function-key map or intercept browser- or operating-system-
-  reserved shortcuts.
+  These single-key action shortcuts apply only outside editable controls. From
+  an editable Track control, `Escape` removes focus so the ordinary single-key
+  shortcuts can be used; there are no `Ctrl`/`Command` action equivalents. All
+  action shortcuts expose disabled-state feedback without invoking a mutation
+  and ignore key repeat and input-method composition. Enter or Space activates
+  focused controls. Do not reuse the TUI function-key map or intercept browser-
+  or operating-system-reserved shortcuts.
+- Keep clear vertical separation between the quick-switch note, action status,
+  and Apply selected action, and between each Manage creation input and its
+  Create action.
+- A Review entry editor captures whether it is correcting a specific entry or
+  adding missed time when it opens. Save must retain that operation and, for a
+  correction, the entry identity even if an automatic Review refresh changes or
+  clears the current row selection.
 - Favor a compact information-dense presentation on desktop through smaller type,
   spacing, and margins while retaining readable reflow and 44-pixel touch targets
   in narrow layouts.
@@ -111,6 +123,11 @@ interface and the web GUI is an explicit alternative.
 - Bind only to IPv4 loopback; LAN and remote binding are not configurable. Accept
   only `Host: 127.0.0.1:<selected-port>` and mutation Origin
   `http://127.0.0.1:<selected-port>`. Do not emit permissive CORS headers.
+- WSL browser handoff changes only which same-machine browser receives the
+  loopback URL. It must not change the server binding, accepted Host or Origin,
+  launch token, foreground-client boundary, or access-log rules. Invoke
+  `cmd.exe` without a Linux shell or interpolated command string, and pass only
+  the validated loopback origin as a command argument.
 - Generate a fresh 256-bit URL-safe token at each server launch, embed it in the
   uncached same-origin HTML as `<meta name="time-tracker-token">`, and require its
   exact value in `X-Time-Tracker-Token` for every state-changing request. State
@@ -139,7 +156,11 @@ interface and the web GUI is an explicit alternative.
 
 1. The default command still launches the TUI. The exact web flags, stable port,
    readiness, browser-open and failure behavior match this requirement and leave
-   the agent and active timer running when the web server closes.
+   the agent and active timer running when the web server closes. Deterministic
+   unit tests cover WSL detection, `cmd.exe` resolution without Windows paths on
+   `PATH`, Windows default-browser handoff, timeout and failure fallback, and
+   `--no-open`; interactive WSL validation confirms the Windows browser reaches
+   the loopback-only server.
 2. Source-browser end-to-end tests start, switch or restart, reconnect to the
    original active entry, edit its details without resetting time, stop it,
    retrieve or act on a reminder, and exercise Review, Manage, and Settings with
@@ -153,25 +174,30 @@ interface and the web GUI is an explicit alternative.
    quick note, and confirms from the selected item or note with Enter;
    authoritative action previews update for deck and manual input. Visible `G`,
    `U`, and `X` shortcuts perform Start/Switch, Update, and Stop respectively only
-   when their corresponding Track action is available. Their documented modifier
-   equivalents work from editable Track controls. Direct view shortcuts remain
+   when their corresponding Track action is available. `Escape` leaves an
+   editable Track control so those same shortcuts become available, without
+   defining `Ctrl`/`Command` action equivalents. Direct view shortcuts remain
    inactive while editing, while the timed `Escape` view chord changes views from
    those controls without intercepting dialog Escape behavior.
 4. Review implements all three representations, shared filters, local-day splits,
    correction, missed time, deletion, and matching exports, including offset-aware
    input, overlap rejection, header-only empty export, and overwrite confirmation.
    Filter changes apply automatically, and entry forms retain values while
-   presenting project/activity suggestions consistently with Track.
+   presenting project/activity suggestions consistently with Track. Save invokes
+   the captured correction or creation operation even if an automatic query has
+   refreshed the visible Review selection.
 5. Manage implements hierarchical create, exact archive confirmation, and restore
    semantics, including active-timer preservation and archived-parent rejection.
 6. Settings round-trips every supported durable value, live-reloads the reminder
    schedule under existing rules, reports idle availability, preserves unrelated
    TOML tables, and keeps browser appearance independent of the TUI palette.
 7. At 320, 720, and 1280 CSS pixels, compact layouts have no horizontal page
-   overflow, clipped essential content, or lost state. Keyboard-only and touch workflows,
-   visible focus, labels, error associations, status announcements, 200% zoom,
-   reduced motion, and light/dark contrast meet WCAG AA thresholds of 4.5:1 for
-   normal text and 3:1 for large text and essential interface boundaries.
+   overflow, clipped essential content, or lost state. The quick-switch action
+   sequence and Manage creation controls retain clear vertical separation.
+   Keyboard-only and touch workflows, visible focus, labels, error associations,
+   status announcements, 200% zoom, reduced motion, and light/dark contrast meet
+   WCAG AA thresholds of 4.5:1 for normal text and 3:1 for large text and
+   essential interface boundaries.
 8. Security tests reject non-loopback configuration, unexpected Host, cross-origin
    mutations, missing or incorrect launch tokens, non-JSON or oversized mutation
    bodies, framing, and sensitive URL/log data. Third-party runtime requests are
