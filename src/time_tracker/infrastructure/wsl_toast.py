@@ -98,7 +98,7 @@ def resolve_interpreter(
         return located
     if exists(_INTERPRETER_UNIX_PATH):
         return _INTERPRETER_UNIX_PATH
-    translated = (translate or _translate_windows_path)(_INTERPRETER_WINDOWS_PATH)
+    translated = (translate or translate_windows_path)(_INTERPRETER_WINDOWS_PATH)
     if translated is not None and exists(translated):
         return translated
     return None
@@ -250,7 +250,7 @@ async def _run_interpreter(
     )
 
 
-def _translate_windows_path(path: str) -> str | None:
+def translate_windows_path(path: str) -> str | None:
     """Translate a Windows path for a distribution with a custom mount root."""
     wslpath = shutil.which("wslpath")
     if wslpath is None:

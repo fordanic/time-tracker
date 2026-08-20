@@ -18,6 +18,12 @@ interface and the web GUI is an explicit alternative.
   `--web`. An unavailable selected port fails without opening a browser or
   silently choosing another port. Browser-open failure reports the URL and leaves
   the server running. `Ctrl+C` stops the web server but not the agent or timer.
+- On WSL with Windows interop enabled, open the ready loopback URL in the
+  Windows user's default browser through `cmd.exe` and the registered URL
+  association. Resolve `cmd.exe` even when Windows paths are absent from the WSL
+  `PATH`, apply a timeout to the handoff, and fall back to the normal platform
+  browser launcher. If neither launcher succeeds, print the exact URL and leave
+  the web server running. `--no-open` skips every browser handoff.
 - Keep the ordinary `time-tracker` command as the TUI. Reject simultaneous TUI
   and web foreground clients with a concise conflict instead of racing the
   single-client protocol. Closing either foreground leaves the agent, active
@@ -117,6 +123,11 @@ interface and the web GUI is an explicit alternative.
 - Bind only to IPv4 loopback; LAN and remote binding are not configurable. Accept
   only `Host: 127.0.0.1:<selected-port>` and mutation Origin
   `http://127.0.0.1:<selected-port>`. Do not emit permissive CORS headers.
+- WSL browser handoff changes only which same-machine browser receives the
+  loopback URL. It must not change the server binding, accepted Host or Origin,
+  launch token, foreground-client boundary, or access-log rules. Invoke
+  `cmd.exe` without a Linux shell or interpolated command string, and pass only
+  the validated loopback origin as a command argument.
 - Generate a fresh 256-bit URL-safe token at each server launch, embed it in the
   uncached same-origin HTML as `<meta name="time-tracker-token">`, and require its
   exact value in `X-Time-Tracker-Token` for every state-changing request. State
@@ -145,7 +156,11 @@ interface and the web GUI is an explicit alternative.
 
 1. The default command still launches the TUI. The exact web flags, stable port,
    readiness, browser-open and failure behavior match this requirement and leave
-   the agent and active timer running when the web server closes.
+   the agent and active timer running when the web server closes. Deterministic
+   unit tests cover WSL detection, `cmd.exe` resolution without Windows paths on
+   `PATH`, Windows default-browser handoff, timeout and failure fallback, and
+   `--no-open`; interactive WSL validation confirms the Windows browser reaches
+   the loopback-only server.
 2. Source-browser end-to-end tests start, switch or restart, reconnect to the
    original active entry, edit its details without resetting time, stop it,
    retrieve or act on a reminder, and exercise Review, Manage, and Settings with

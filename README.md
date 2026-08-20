@@ -113,8 +113,11 @@ uv run time-tracker --web
 
 The page opens after the server is ready. Use `--no-open` to print the URL for
 manual opening, or `--port PORT` to choose a different loopback port. The server
-cannot listen on LAN interfaces. The TUI remains the default, and Time Tracker
-rejects launching the TUI and web interface simultaneously.
+cannot listen on LAN interfaces. In WSL with Windows interop enabled, Time
+Tracker opens the loopback URL in the Windows default browser; if that handoff
+is unavailable, it prints the URL and leaves the server running. The TUI remains
+the default, and Time Tracker rejects launching the TUI and web interface
+simultaneously.
 
 Select recent work with `1` through `5`, optionally enter its quick-switch note,
 and press `Enter` to confirm Start or Switch. A selected current pair remains a

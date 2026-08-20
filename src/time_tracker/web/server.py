@@ -6,7 +6,6 @@ import json
 import secrets
 import threading
 import time
-import webbrowser
 from dataclasses import dataclass
 from importlib.resources import files
 from typing import Final, cast
@@ -19,6 +18,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from time_tracker.infrastructure.browser import open_default_browser
 from time_tracker.infrastructure.ipc import AgentClient
 from time_tracker.web.api import InputError, WebAgent, WebApi, input_error_response
 
@@ -274,6 +274,6 @@ def _announce_ready(server: uvicorn.Server, url: str, open_browser: bool) -> Non
         time.sleep(0.01)
     if not server.started:
         return
-    if open_browser and webbrowser.open(url):
+    if open_browser and open_default_browser(url):
         return
     print(f"Time Tracker web interface: {url}")

@@ -41,6 +41,7 @@ protocol guarantee.
 | TUI | Textual |
 | Local web server | Starlette served by Uvicorn on `127.0.0.1` |
 | Browser UI | TypeScript and Preact, built with Vite |
+| Host browser launch | Python `webbrowser`; Windows `cmd.exe` URL association from WSL |
 | Background work | `asyncio` |
 | Local IPC | `multiprocessing.connection` |
 | Persistence | Standard-library `sqlite3` and numbered SQL migrations |
@@ -125,6 +126,13 @@ tests/
   print the exact URL after readiness. Browser-open failure reports the URL and
   leaves the server running. `Ctrl+C` stops only the foreground web server and
   leaves the background agent and active timer running.
+- On a WSL host with Windows interop, a narrow host-browser adapter invokes the
+  Windows command processor without a Linux shell or interpolated command string
+  and uses the registered URL association to open the loopback origin in the
+  Windows default browser. The adapter resolves the Windows system executable
+  without relying on inherited `PATH`, applies a timeout, and falls back to
+  Python's platform browser launcher before reporting the URL. It does not
+  broaden the `127.0.0.1` binding or change same-origin validation.
 - Serve one same-origin Preact application and explicit JSON endpoints. Use
   modest polling for active state and reminders; derive the one-second elapsed
   display from the authoritative aware start timestamp between polls.
