@@ -19,6 +19,8 @@ const emptyFilter: ReviewFilter = {
   activity: null,
 };
 
+type EntryEditor = { mode: "correct"; entryId: number } | { mode: "create" };
+
 export function ReviewView({ data, connected, announce, refresh }: Props) {
   const [filter, setFilter] = useState<ReviewFilter>(emptyFilter);
   const [review, setReview] = useState<ReviewData | null>(null);
@@ -26,9 +28,7 @@ export function ReviewView({ data, connected, announce, refresh }: Props) {
     "completed",
   );
   const [selected, setSelected] = useState<Segment | null>(null);
-  const [editorMode, setEditorMode] = useState<"correct" | "create" | null>(
-    null,
-  );
+  const [editor, setEditor] = useState<EntryEditor | null>(null);
   const [entry, setEntry] = useState({
     project: "",
     activity: "",
@@ -39,12 +39,13 @@ export function ReviewView({ data, connected, announce, refresh }: Props) {
   const [deletePending, setDeletePending] = useState(false);
   const [destination, setDestination] = useState("");
   const [overwritePending, setOverwritePending] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [queryBusy, setQueryBusy] = useState(false);
+  const [mutationBusy, setMutationBusy] = useState(false);
   const querySequence = useRef(0);
 
   const query = async (nextFilter = filter, announceSuccess = false) => {
     const sequence = ++querySequence.current;
-    setBusy(true);
+    setQueryBusy(true);
     try {
       const result = await post<ReviewData>("/api/review/query", nextFilter);
       if (sequence !== querySequence.current) return;
@@ -61,7 +62,7 @@ export function ReviewView({ data, connected, announce, refresh }: Props) {
       if (sequence === querySequence.current)
         announce(error instanceof Error ? error.message : "Review failed");
     } finally {
-      if (sequence === querySequence.current) setBusy(false);
+      if (sequence === querySequence.current) setQueryBusy(false);
     }
   };
 
@@ -122,7 +123,7 @@ export function ReviewView({ data, connected, announce, refresh }: Props) {
       stopped_at: localInputValue(source.stopped_at ?? selected.stopped_at),
       note: source.note ?? "",
     });
-    setEditorMode("correct");
+    setEditor({ mode: "correct", entryId: selected.entry_id });
     setDeletePending(false);
   };
 
@@ -136,17 +137,22 @@ export function ReviewView({ data, connected, announce, refresh }: Props) {
       stopped_at: localInputValue(now.toISOString()),
       note: "",
     });
-    setEditorMode("create");
+    setEditor({ mode: "create" });
   };
 
   const saveEntry = async () => {
-    if (!editorMode) return;
-    setBusy(true);
+    if (!editor) return;
+    const currentEditor = editor;
+    setMutationBusy(true);
     try {
       await post(
-        editorMode === "correct" ? "/api/review/correct" : "/api/review/create",
+        currentEditor.mode === "correct"
+          ? "/api/review/correct"
+          : "/api/review/create",
         {
-          ...(editorMode === "correct" ? { entry_id: selected?.entry_id } : {}),
+          ...(currentEditor.mode === "correct"
+            ? { entry_id: currentEditor.entryId }
+            : {}),
           project: entry.project,
           activity: entry.activity,
           started_at: offsetInstant(entry.started_at),
@@ -154,10 +160,10 @@ export function ReviewView({ data, connected, announce, refresh }: Props) {
           note: entry.note || null,
         },
       );
-      setEditorMode(null);
+      setEditor(null);
       setSelected(null);
       await refresh(
-        editorMode === "correct"
+        currentEditor.mode === "correct"
           ? "Entry correction saved."
           : "Missed time added.",
       );
@@ -165,7 +171,7 @@ export function ReviewView({ data, connected, announce, refresh }: Props) {
     } catch (error) {
       announce(error instanceof Error ? error.message : "Entry save failed");
     } finally {
-      setBusy(false);
+      setMutationBusy(false);
     }
   };
 
@@ -178,7 +184,7 @@ export function ReviewView({ data, connected, announce, refresh }: Props) {
       );
       return;
     }
-    setBusy(true);
+    setMutationBusy(true);
     try {
       await post("/api/review/delete", { entry_id: selected.entry_id });
       setDeletePending(false);
@@ -188,12 +194,12 @@ export function ReviewView({ data, connected, announce, refresh }: Props) {
     } catch (error) {
       announce(error instanceof Error ? error.message : "Delete failed");
     } finally {
-      setBusy(false);
+      setMutationBusy(false);
     }
   };
 
   const exportReview = async () => {
-    setBusy(true);
+    setMutationBusy(true);
     try {
       const result = await post<{ count: number; destination: string }>(
         "/api/review/export",
@@ -218,7 +224,7 @@ export function ReviewView({ data, connected, announce, refresh }: Props) {
         announce("Destination exists. Activate export again to replace it.");
       } else announce(error instanceof Error ? error.message : "Export failed");
     } finally {
-      setBusy(false);
+      setMutationBusy(false);
     }
   };
 
@@ -338,7 +344,7 @@ export function ReviewView({ data, connected, announce, refresh }: Props) {
         </div>
       </section>
 
-      <section class="panel review-results">
+      <section class="panel review-results" aria-busy={queryBusy}>
         {!review ? (
           <p>Loading review…</p>
         ) : mode === "completed" ? (
@@ -402,7 +408,7 @@ export function ReviewView({ data, connected, announce, refresh }: Props) {
             <button onClick={startCreate}>Add missed entry</button>
             <button
               class="danger"
-              disabled={!selected || busy}
+              disabled={!selected || mutationBusy}
               onClick={() => void deleteEntry()}
             >
               {deletePending ? "Confirm permanent deletion" : "Delete selected"}
@@ -411,7 +417,7 @@ export function ReviewView({ data, connected, announce, refresh }: Props) {
         )}
       </section>
 
-      {editorMode && (
+      {editor && (
         <section
           class="panel editor"
           role="dialog"
@@ -419,7 +425,7 @@ export function ReviewView({ data, connected, announce, refresh }: Props) {
           aria-labelledby="editor-title"
         >
           <h2 id="editor-title">
-            {editorMode === "correct" ? "Correct entry" : "Add missed time"}
+            {editor.mode === "correct" ? "Correct entry" : "Add missed time"}
           </h2>
           <div class="entry-form-grid">
             <ProjectActivityFields
@@ -464,12 +470,12 @@ export function ReviewView({ data, connected, announce, refresh }: Props) {
           <div class="button-row">
             <button
               class="primary"
-              disabled={!connected || busy}
+              disabled={!connected || mutationBusy}
               onClick={() => void saveEntry()}
             >
               Save
             </button>
-            <button onClick={() => setEditorMode(null)}>Cancel</button>
+            <button onClick={() => setEditor(null)}>Cancel</button>
           </div>
         </section>
       )}
@@ -490,7 +496,7 @@ export function ReviewView({ data, connected, announce, refresh }: Props) {
         </label>
         <button
           class={overwritePending ? "danger" : "primary"}
-          disabled={!connected || busy || !destination}
+          disabled={!connected || mutationBusy || !destination}
           onClick={() => void exportReview()}
         >
           {overwritePending ? "Confirm replace existing file" : "Export CSV"}

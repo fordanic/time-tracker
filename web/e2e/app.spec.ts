@@ -35,7 +35,24 @@ test("responsive browser workflow stays durable across all four views", async ({
   });
   await expect(quickNote).toBeFocused();
   await quickNote.fill("Browser E2E");
-  await quickNote.press("Control+Enter");
+  const quickPreview = page.locator(".deck-panel .action-preview");
+  const quickApply = page.locator(".deck-panel > button.full");
+  const [quickNoteBox, quickPreviewBox, quickApplyBox] = await Promise.all([
+    quickNote.boundingBox(),
+    quickPreview.boundingBox(),
+    quickApply.boundingBox(),
+  ]);
+  expect(quickNoteBox).not.toBeNull();
+  expect(quickPreviewBox).not.toBeNull();
+  expect(quickApplyBox).not.toBeNull();
+  expect(
+    quickPreviewBox!.y - (quickNoteBox!.y + quickNoteBox!.height),
+  ).toBeGreaterThanOrEqual(8);
+  expect(
+    quickApplyBox!.y - (quickPreviewBox!.y + quickPreviewBox!.height),
+  ).toBeGreaterThanOrEqual(8);
+  await quickNote.press("Escape");
+  await page.keyboard.press("g");
   await expect(
     page.getByRole("heading", { name: "Launch work / Documentation" }),
   ).toBeVisible();
@@ -44,7 +61,7 @@ test("responsive browser workflow stays durable across all four views", async ({
   const project = page.getByRole("combobox", { name: "Project" });
   await project.focus();
   await project.press("Escape");
-  await expect(page.getByText(/View shortcut ready/)).toBeVisible();
+  await expect(page.getByText(/Shortcut ready/)).toBeVisible();
   await page.keyboard.press("r");
   await expect(
     page.getByRole("heading", { name: "Completed time" }),
@@ -56,6 +73,41 @@ test("responsive browser workflow stays durable across all four views", async ({
     .getByRole("combobox", { name: "Date range" })
     .selectOption("today");
   await expect(page.getByText("Responsive shell")).toBeVisible();
+  await page
+    .getByRole("button")
+    .filter({ hasText: "Responsive shell" })
+    .click();
+  await page.getByRole("button", { name: "Load selected entry" }).click();
+  const correctionEditor = page.getByRole("dialog", { name: "Correct entry" });
+  await correctionEditor
+    .getByRole("textbox", { name: /Note/ })
+    .fill("Corrected in browser");
+  await correctionEditor.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("Entry correction saved.")).toBeVisible();
+
+  await page.getByRole("button", { name: "Add missed entry" }).click();
+  const creationEditor = page.getByRole("dialog", { name: "Add missed time" });
+  await creationEditor
+    .getByRole("combobox", { name: "Project" })
+    .fill("Browser missed time");
+  await creationEditor
+    .getByRole("combobox", { name: "Activity" })
+    .fill("Review");
+  const [missedStart, missedStop] = await page.evaluate(() => {
+    const localInput = (value: Date) => {
+      const offset = value.getTimezoneOffset() * 60_000;
+      return new Date(value.getTime() - offset).toISOString().slice(0, 16);
+    };
+    return [
+      localInput(new Date(Date.now() - 5 * 60 * 60 * 1000)),
+      localInput(new Date(Date.now() - 4 * 60 * 60 * 1000)),
+    ];
+  });
+  await creationEditor.getByLabel("Started").fill(missedStart);
+  await creationEditor.getByLabel("Stopped").fill(missedStop);
+  await creationEditor.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("Missed time added.")).toBeVisible();
+
   await page.getByRole("button", { name: "Range totals" }).click();
   await expect(page.getByRole("cell", { name: "Web GUI" })).toBeVisible();
 
@@ -66,6 +118,23 @@ test("responsive browser workflow stays durable across all four views", async ({
   await page
     .getByRole("textbox", { name: "New project" })
     .fill("Browser project");
+  const newProject = page.getByRole("textbox", { name: "New project" });
+  const newActivity = page.getByRole("textbox", { name: "New activity" });
+  const createProject = page.getByRole("button", { name: "Create project" });
+  const createActivity = page.getByRole("button", { name: "Create activity" });
+  const [newProjectBox, createProjectBox, newActivityBox, createActivityBox] =
+    await Promise.all([
+      newProject.boundingBox(),
+      createProject.boundingBox(),
+      newActivity.boundingBox(),
+      createActivity.boundingBox(),
+    ]);
+  expect(
+    createProjectBox!.y - (newProjectBox!.y + newProjectBox!.height),
+  ).toBeGreaterThanOrEqual(8);
+  expect(
+    createActivityBox!.y - (newActivityBox!.y + newActivityBox!.height),
+  ).toBeGreaterThanOrEqual(8);
   await page.getByRole("button", { name: "Create project" }).click();
   await expect(
     page.getByText("Created project Browser project."),
@@ -82,13 +151,15 @@ test("responsive browser workflow stays durable across all four views", async ({
   await page.getByRole("button", { name: "Track" }).click();
   const note = page.getByRole("textbox", { name: /^Note optional$/ });
   await note.focus();
-  await note.press("Control+Shift+Enter");
+  await note.press("Escape");
+  await page.keyboard.press("u");
   await expect(
     page.getByText("Active details updated without restarting time."),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Stop" })).toBeEnabled();
   await note.focus();
-  await note.press("Control+Alt+Enter");
+  await note.press("Escape");
+  await page.keyboard.press("x");
   await expect(
     page.getByRole("heading", { name: "No active timer" }),
   ).toBeVisible();

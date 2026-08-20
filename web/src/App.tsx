@@ -242,15 +242,6 @@ export function App() {
             <kbd>X</kbd> Stop
           </span>
           <span>
-            <kbd>Ctrl/⌘ + Enter</kbd> Start / switch while editing
-          </span>
-          <span>
-            <kbd>Ctrl/⌘ + Shift + Enter</kbd> Update while editing
-          </span>
-          <span>
-            <kbd>Ctrl/⌘ + Alt/⌥ + Enter</kbd> Stop while editing
-          </span>
-          <span>
             <kbd>T</kbd> Track
           </span>
           <span>
@@ -263,15 +254,20 @@ export function App() {
             <kbd>S</kbd> Settings
           </span>
           <span>
-            <kbd>Esc, T/R/M/S</kbd> change view while editing
+            <kbd>Esc</kbd> leave a field, then use a shortcut
           </span>
         </div>
       </details>
 
       {viewShortcutArmed && (
         <div class="view-shortcut-ready" role="status" aria-live="polite">
-          View shortcut ready: press <kbd>T</kbd>, <kbd>R</kbd>, <kbd>M</kbd>,
-          or <kbd>S</kbd>.
+          Shortcut ready: press{" "}
+          {view === "track" && (
+            <>
+              <kbd>G</kbd>, <kbd>U</kbd>, <kbd>X</kbd>,{" "}
+            </>
+          )}
+          <kbd>T</kbd>, <kbd>R</kbd>, <kbd>M</kbd>, or <kbd>S</kbd>.
         </div>
       )}
 

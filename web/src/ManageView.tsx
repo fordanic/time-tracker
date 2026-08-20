@@ -120,7 +120,7 @@ export function ManageView({ data, connected, announce, refresh }: Props) {
         </div>
       </section>
 
-      <section class="panel">
+      <section class="panel prepare-panel">
         <span class="eyebrow">PREPARE WORK</span>
         <h2>Create without tracking</h2>
         <label>

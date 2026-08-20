@@ -359,6 +359,14 @@ button.full kbd {
   gap: 0.65rem;
   align-content: start;
 }
+.deck-panel {
+  display: grid;
+  gap: 0.65rem;
+  align-content: start;
+}
+.deck-panel .recent-deck {
+  margin-block: 0.05rem;
+}
 .action-preview {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -512,6 +520,9 @@ td {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.7rem;
+}
+.prepare-panel > label + button {
+  margin-top: 0.65rem;
 }
 .hierarchy {
   display: grid;
