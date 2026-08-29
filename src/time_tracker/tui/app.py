@@ -9,6 +9,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Protocol, cast
 
+from rich.text import Text
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -57,6 +58,19 @@ from time_tracker.application.tracking import (
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
 
 _WEEKDAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+_CLOCK_GLYPHS = {
+    "0": ("┏━┓", "┃ ┃", "┗━┛"),
+    "1": (" ╻ ", " ┃ ", " ╹ "),
+    "2": ("━━┓", "┏━┛", "┗━━"),
+    "3": ("━━┓", " ━┫", "━━┛"),
+    "4": ("╻ ╻", "┗━┫", "  ╹"),
+    "5": ("┏━━", "┗━┓", "━━┛"),
+    "6": ("┏━━", "┣━┓", "┗━┛"),
+    "7": ("━━┓", "  ┃", "  ╹"),
+    "8": ("┏━┓", "┣━┫", "┗━┛"),
+    "9": ("┏━┓", "┗━┫", "━━┛"),
+    ":": (" ", "•", "•"),
+}
 
 
 class TrackerGateway(Protocol):
@@ -466,12 +480,52 @@ class TimeTrackerApp(App[None]):
         border: round $accent;
     }
 
-    #active-timer {
-        height: 3;
+    #active-timer-layout {
+        height: 4;
         padding: 0 1;
-        text-align: center;
         background: $panel;
-        content-align: center middle;
+    }
+
+    #active-timer {
+        width: 1fr;
+        height: 4;
+        content-align: left middle;
+    }
+
+    #active-clock-panel {
+        display: none;
+        width: 31;
+        height: 4;
+    }
+
+    #active-elapsed {
+        width: 100%;
+        height: 3;
+        color: $accent;
+        text-align: right;
+        text-style: bold;
+    }
+
+    #active-started {
+        width: 100%;
+        height: 1;
+        color: $text-muted;
+        text-align: right;
+    }
+
+    Screen.-narrow #active-timer-layout.timer-running {
+        layout: vertical;
+        height: 8;
+    }
+
+    Screen.-narrow #active-timer-layout.timer-running #active-timer {
+        width: 100%;
+        height: 4;
+    }
+
+    Screen.-narrow #active-timer-layout.timer-running #active-clock-panel {
+        width: 100%;
+        height: 4;
     }
 
     #view-tabs {
@@ -824,7 +878,11 @@ class TimeTrackerApp(App[None]):
         """Compose focused workflows around one persistent active-timer strip."""
         yield Header()
         with Vertical(id="tracker"):
-            yield Static("No timer running", id="active-timer")
+            with Horizontal(id="active-timer-layout"):
+                yield Static("No timer running", id="active-timer")
+                with Vertical(id="active-clock-panel"):
+                    yield Static("", id="active-elapsed")
+                    yield Static("", id="active-started")
             with Horizontal(id="reminder"):
                 yield Static("", id="reminder-message")
                 yield Button(
@@ -2808,9 +2866,21 @@ class TimeTrackerApp(App[None]):
 
     def _render_active(self) -> None:
         active_widgets = self.query("#active-timer")
+        active_layouts = self.query("#active-timer-layout")
+        clock_panels = self.query("#active-clock-panel")
+        elapsed_widgets = self.query("#active-elapsed")
+        started_widgets = self.query("#active-started")
         stop_buttons = self.query("#stop-button")
         edit_buttons = self.query("#edit-active-button")
-        if not active_widgets or not stop_buttons or not edit_buttons:
+        if (
+            not active_widgets
+            or not active_layouts
+            or not clock_panels
+            or not elapsed_widgets
+            or not started_widgets
+            or not stop_buttons
+            or not edit_buttons
+        ):
             return
         current_day = datetime.now().astimezone().date()
         if self._today_total_day != current_day:
@@ -2823,10 +2893,20 @@ class TimeTrackerApp(App[None]):
             }:
                 self._apply_review_filter()
         active_widget = active_widgets.first(Static)
+        active_layout = active_layouts.first(Horizontal)
+        clock_panel = clock_panels.first(Vertical)
+        elapsed_widget = elapsed_widgets.first(Static)
+        started_widget = started_widgets.first(Static)
         stop_button = stop_buttons.first(Button)
         edit_button = edit_buttons.first(Button)
         if self.active_timer is None:
-            active_widget.update("No timer running")
+            ready = Text("READY\n", style="bold dim")
+            ready.append("No timer running", style="bold")
+            active_widget.update(ready)
+            active_layout.remove_class("timer-running")
+            clock_panel.display = False
+            elapsed_widget.update("")
+            started_widget.update("")
             stop_button.disabled = True
             edit_button.disabled = True
             self._render_quick_switch_action()
@@ -2836,11 +2916,15 @@ class TimeTrackerApp(App[None]):
         now = datetime.now(UTC)
         elapsed = max(now - timer.started_at, timedelta())
         local_start = timer.started_at.astimezone().strftime("%Y-%m-%d %H:%M:%S")
-        note = f"\n{timer.note}" if timer.note else ""
-        active_widget.update(
-            f"{timer.project} / {timer.activity}\n"
-            f"Started {local_start} · {_format_duration(elapsed)}{note}"
-        )
+        details = Text("TRACKING NOW\n", style="bold dim")
+        details.append(f"{timer.project} / {timer.activity}", style="bold")
+        details.append("\n")
+        details.append(timer.note or "No note", style="dim")
+        active_widget.update(details)
+        active_layout.add_class("timer-running")
+        clock_panel.display = True
+        elapsed_widget.update(_format_large_clock(_format_duration(elapsed)))
+        started_widget.update(f"Started {local_start}")
         stop_button.disabled = False
         self._render_quick_switch_action()
 
@@ -2946,6 +3030,14 @@ def _format_duration(duration: timedelta) -> str:
     hours, remainder = divmod(total_seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def _format_large_clock(value: str) -> str:
+    """Render a clock value with terminal-native three-row glyphs."""
+    return "\n".join(
+        " ".join(_CLOCK_GLYPHS[character][row] for character in value)
+        for row in range(3)
+    )
 
 
 def _format_review_duration(duration: timedelta) -> str:

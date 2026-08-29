@@ -157,14 +157,22 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
             await pilot.pause()
 
             active_text = str(first_app.query_one("#active-timer", Static).render())
+            elapsed_widget = first_app.query_one("#active-elapsed", Static)
+            started_widget = first_app.query_one("#active-started", Static)
             active = client.get_active()
             assert active is not None
             local_start = active.started_at.astimezone()
             assert "Website / Implementation" in active_text
             assert "Walking skeleton" in active_text
             assert "Walking skeleton details" in active_text
-            assert local_start.strftime("Started %Y-%m-%d %H:%M:%S ·") in active_text
-            assert local_start.isoformat(timespec="seconds") not in active_text
+            started_text = str(started_widget.render())
+            assert local_start.strftime("Started %Y-%m-%d %H:%M:%S") in started_text
+            assert local_start.isoformat(timespec="seconds") not in started_text
+            assert len(str(elapsed_widget.render()).splitlines()) == 3
+            assert first_app.query_one("#active-timer", Static).region.x < (
+                elapsed_widget.region.x
+            )
+            assert started_widget.region.y > elapsed_widget.region.y
 
         assert not first_app.query("#active-timer")
         first_app._render_active()
@@ -194,6 +202,10 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
 
             assert "No timer running" in str(
                 recovered_app.query_one("#active-timer", Static).render()
+            )
+            assert not recovered_app.query_one("#active-clock-panel").display
+            assert (
+                str(recovered_app.query_one("#active-elapsed", Static).render()) == ""
             )
             history = recovered_app.query_one("#history", DataTable)
             assert history.row_count == 2
@@ -1810,7 +1822,7 @@ async def test_inactive_buttons_stay_legible_in_every_palette(tmp_path: Path) ->
     _wait_until_ready(client)
 
     try:
-        client.start("Website", "Planning", "Current work")
+        client.start("Website", "Planning")
         app = TimeTrackerApp(client)
         async with app.run_test() as pilot:
             start_button = app.query_one("#start-button", Button)
@@ -1822,6 +1834,7 @@ async def test_inactive_buttons_stay_legible_in_every_palette(tmp_path: Path) ->
             )
             stop_button = app.query_one("#stop-button", Button)
             assert start_button.region.height == stop_button.region.height
+            assert "No note" in str(app.query_one("#active-timer", Static).render())
 
             for palette in sorted(app.available_themes):
                 app.theme = palette
