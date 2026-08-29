@@ -38,7 +38,7 @@ from time_tracker.infrastructure.configuration import (
 from time_tracker.infrastructure.ipc import AgentClient, AgentUnavailableError
 from time_tracker.infrastructure.paths import AgentPaths
 from time_tracker.infrastructure.sqlite_repository import SQLiteTimerRepository
-from time_tracker.tui.app import ShortcutHelpScreen, TimeTrackerApp
+from time_tracker.tui.app import ReviewDataTable, ShortcutHelpScreen, TimeTrackerApp
 
 
 class SilentNotifier:
@@ -1006,9 +1006,12 @@ async def test_review_groups_local_days_and_loads_an_overnight_entry_segment(
         async with app.run_test() as pilot:
             await pilot.press("f2")
             await pilot.pause()
-            history = app.query_one("#history", DataTable)
+            history = app.query_one("#history", ReviewDataTable)
 
-            assert history.row_count == 5
+            assert history.row_count == 6
+            assert history.is_date_divider(0) is False
+            assert history.is_date_divider(2) is True
+            assert all(set(str(cell)) == {"─"} for cell in history.get_row_at(2))
             first_segment = history.get_row_at(0)
             assert (
                 first_segment[0]
@@ -1024,17 +1027,31 @@ async def test_review_groups_local_days_and_loads_an_overnight_entry_segment(
             ]
             assert history.get_row_at(1)[1] == "Day total"
 
-            second_segment = history.get_row_at(2)
+            second_segment = history.get_row_at(3)
             assert second_segment[0] == local_midnight.date().isoformat()
             assert second_segment[3:6] == ["00:00", "00:30", "0h 30m"]
-            assert history.get_row_at(3)[0] == ""
-            assert history.get_row_at(4)[1] == "Day total"
-            assert history.get_row_at(4)[5] == "1h 15m"
+            assert history.get_row_at(4)[0] == ""
+            assert history.get_row_at(5)[1] == "Day total"
+            assert history.get_row_at(5)[5] == "1h 15m"
             assert "Today's completed time: 01:15:00" in str(
                 app.query_one("#today-total", Static).render()
             )
 
-            history.move_cursor(row=2)
+            summary_mode = app.query_one("#summary-mode", Switch)
+            summary_mode.value = True
+            await pilot.pause()
+            assert history.row_count == 4
+            assert history.is_date_divider(0) is False
+            assert history.is_date_divider(1) is True
+            assert all(set(str(cell)) == {"─"} for cell in history.get_row_at(1))
+            assert history.get_row_at(2)[0] == local_midnight.date().isoformat()
+
+            summary_mode.value = False
+            await pilot.pause()
+            assert history.row_count == 6
+            assert history.is_date_divider(2) is True
+
+            history.move_cursor(row=3)
             app.query_one("#load-correction-button", Button).press()
             await _wait_for_ui(
                 pilot,
@@ -1048,7 +1065,7 @@ async def test_review_groups_local_days_and_loads_an_overnight_entry_segment(
                 app.query_one("#correction-stop", Input).value
             ).astimezone(UTC) == overnight_stop.astimezone(UTC)
 
-            history.move_cursor(row=4)
+            history.move_cursor(row=5)
             app.query_one("#load-correction-button", Button).press()
             await _wait_for_ui(
                 pilot,
@@ -1109,20 +1126,20 @@ async def test_review_deletes_selected_entry_and_rounds_duration_up(
             history = app.query_one("#history", DataTable)
             delete_button = app.query_one("#delete-completed-button", Button)
 
-            assert history.row_count == 4
+            assert history.row_count == 5
             assert history.get_row_at(0)[5] == "0h 30m"
-            assert history.get_row_at(2)[5] == "0h 31m"
+            assert history.get_row_at(3)[5] == "0h 31m"
             assert "Today's completed time: 00:30:01" in str(
                 app.query_one("#today-total", Static).render()
             )
 
-            history.move_cursor(row=2)
+            history.move_cursor(row=3)
             delete_button.press()
             await pilot.pause()
             assert client.list_completed() == [completed]
             assert "Confirm delete" in str(delete_button.label)
 
-            history.move_cursor(row=3)
+            history.move_cursor(row=4)
             delete_button.press()
             await pilot.pause()
             assert client.list_completed() == [completed]
@@ -1130,7 +1147,7 @@ async def test_review_deletes_selected_entry_and_rounds_duration_up(
                 app.query_one("#message", Static).render()
             )
 
-            history.move_cursor(row=2)
+            history.move_cursor(row=3)
             delete_button.press()
             await pilot.pause()
             assert client.list_completed() == [completed]

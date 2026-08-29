@@ -379,6 +379,27 @@ class ShortcutHelpScreen(ModalScreen[None]):
         self.dismiss(None)
 
 
+class ReviewDataTable(DataTable[str]):
+    """Review table with explicit presentation-only date divider rows."""
+
+    def __init__(self, *, id: str) -> None:
+        super().__init__(id=id, cursor_type="row", zebra_stripes=True)
+        self._date_divider_rows: set[int] = set()
+
+    def clear_date_dividers(self) -> None:
+        """Forget dividers before the table is populated again."""
+        self._date_divider_rows.clear()
+
+    def add_date_divider(self, widths: tuple[int, ...], *, key: str) -> None:
+        """Add one visible line between local-date groups."""
+        self._date_divider_rows.add(self.row_count)
+        self.add_row(*("─" * width for width in widths), key=key)
+
+    def is_date_divider(self, row_index: int) -> bool:
+        """Return whether a row is a presentation-only date divider."""
+        return row_index in self._date_divider_rows
+
+
 class TimeTrackerApp(App[None]):
     """Keyboard-first focused workflows backed by the local agent."""
 
@@ -923,11 +944,7 @@ class TimeTrackerApp(App[None]):
                         yield Switch(id="range-summary-mode")
                     yield Static("Completed entries", id="history-title")
                     yield Static("No completed time matches.", id="history-empty")
-                    yield DataTable(
-                        id="history",
-                        cursor_type="row",
-                        zebra_stripes=True,
-                    )
+                    yield ReviewDataTable(id="history")
                     with Horizontal(id="history-options"):
                         yield Button(
                             "Load selected entry",
@@ -2519,7 +2536,8 @@ class TimeTrackerApp(App[None]):
         self._render_today_total(entries)
         if entries_changed:
             self._set_review_filter_options()
-        table = self.query_one("#history", DataTable)
+        table = self.query_one("#history", ReviewDataTable)
+        table.clear_date_dividers()
         table.clear(columns=True)
         self._history_row_entry_ids = []
         summary_mode = self.query_one("#summary-mode", Switch).value
@@ -2567,7 +2585,13 @@ class TimeTrackerApp(App[None]):
         if summary_mode:
             title.update("Daily summaries")
             table.add_columns("Date", "Project", "Activity", "Duration")
+            previous_day: date | None = None
             for daily_summary in summaries:
+                if previous_day is not None and daily_summary.day != previous_day:
+                    table.add_date_divider(
+                        (10, 7, 8, 8),
+                        key=f"date-divider-{daily_summary.day.isoformat()}",
+                    )
                 table.add_row(
                     daily_summary.day.isoformat(),
                     daily_summary.project,
@@ -2578,6 +2602,7 @@ class TimeTrackerApp(App[None]):
                         f"{daily_summary.project}\0{daily_summary.activity}"
                     ),
                 )
+                previous_day = daily_summary.day
             return
 
         title.update("Completed entries by day")
@@ -2591,6 +2616,12 @@ class TimeTrackerApp(App[None]):
             "Note",
         )
         for group_index, group in enumerate(groups):
+            if group_index > 0:
+                table.add_date_divider(
+                    (10, 7, 8, 5, 4, 8, 4),
+                    key=f"date-divider-{group.day.isoformat()}",
+                )
+                self._history_row_entry_ids.append(None)
             for segment_index, segment in enumerate(group.segments):
                 table.add_row(
                     group.day.isoformat() if segment_index == 0 else "",
