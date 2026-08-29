@@ -82,6 +82,9 @@ contain compiled browser assets and no Node runtime.
 The agent runs reminder scheduling on its asyncio loop and moves blocking IPC and
 SQLite calls to worker threads. Requests are still handled serially, so the agent
 remains the single database writer while notification deadlines are not stalled.
+Each foreground-interface IPC client also serializes calls from its own worker
+threads so periodic refreshes cannot compete with user actions for the agent's
+single connection queue.
 
 ## Code boundaries
 
