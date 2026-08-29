@@ -14,9 +14,10 @@ times in the user's local time.
   offset or time-zone label.
 - Render the completed-entry deletion confirmation's local start as
   `YYYY-MM-DD HH:MM`, without a UTC offset or time-zone label.
-- Keep correction and missed-time inputs offset-aware, because those editable
-  values must continue to identify unambiguous instants. Keep exported timestamp
-  formats unchanged.
+- Render correction and missed-time start/stop fields as timezone-free local
+  `YYYY-MM-DD HH:MM:SS` wall-clock values. Resolve changed values through the
+  system local time zone and reject ambiguous or nonexistent local times. Keep
+  exported timestamp formats unchanged.
 
 ## Invariants and error handling
 
@@ -30,12 +31,12 @@ times in the user's local time.
    suffix.
 2. A deletion confirmation identifies the selected entry using its local start
    through minutes without a UTC-offset suffix.
-3. Correction and missed-time fields still show and require explicit UTC offsets,
-   and CSV exports remain offset-aware.
+3. Correction and missed-time fields omit UTC offsets, changed values resolve to
+   unambiguous local instants, and CSV exports remain offset-aware.
 4. Textual workflow tests cover the timezone-free read-only displays.
 
 ## Documentation impact
 
-- Neither the top-level requirements nor architecture changes. This feature only
-  refines TUI presentation while preserving required offset-aware editing,
-  persistence, and export behavior.
+- Top-level requirements now permit interfaces to resolve timezone-free local
+  wall-clock input while rejecting ambiguous or nonexistent times. Architecture
+  records the TUI-owned local-time resolution boundary; persistence is unchanged.

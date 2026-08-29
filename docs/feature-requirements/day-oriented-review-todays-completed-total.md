@@ -24,7 +24,7 @@ how much completed work has been recorded today without leaving Track.
   retains the source entry's identity, project, activity, and note and shows only
   the portion of its derived duration that belongs to that date.
 - Loading any segment for correction loads the full source entry once, including
-  its complete offset-aware local start and stop timestamps. A day-total row is
+  its complete timezone-free local start and stop wall-clock timestamps. A day-total row is
   not a completed entry and cannot be loaded for correction.
 - Keep the existing Daily summaries representation and both CSV formats
   unchanged. CSV entry export continues to contain each full entry once with
@@ -60,7 +60,7 @@ how much completed work has been recorded today without leaving Track.
    both affected groups, and the group totals equal the sum of their segments,
    including across a local UTC-offset change.
 3. Loading either segment of a cross-midnight entry opens the same entry ID and
-   full offset-aware timestamps; a total row cannot be loaded.
+   full timezone-free local wall-clock timestamps; a total row cannot be loaded.
 4. Entry and daily-summary CSV output retains its existing schema, full timestamp
    precision, ordering, overwrite confirmation, and midnight-splitting behavior.
 5. Track shows the current local date's completed duration, does not count the

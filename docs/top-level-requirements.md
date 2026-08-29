@@ -100,12 +100,14 @@ web interface served only to the same computer. The TUI remains the default.
 - Reassignment during correction uses a non-archived project/activity target,
   while an unchanged historical assignment may remain on its archived target.
 - Persist correction atomically before reporting success and preserve the entry's
-  identity. Require offset-aware time input so local edits resolve to unambiguous
-  UTC instants.
+  identity. Interfaces may accept local wall-clock input without displaying a
+  UTC offset, but must resolve it through the user's local time zone and reject
+  ambiguous or nonexistent local times so every edit maps to an unambiguous UTC
+  instant.
 - Allow manual creation of one completed entry for missed time. It uses a
-  non-archived project/activity target, requires an offset-aware start and stop,
-  and follows the same strict positive-duration, half-open no-overlap, atomic
-  persistence, and derived-duration rules as correction.
+  non-archived project/activity target, applies the same unambiguous local-time
+  resolution as correction, and follows the same strict positive-duration,
+  half-open no-overlap, atomic persistence, and derived-duration rules.
 - Creating missed time does not change the active timer. It may create a new
   project/activity pair using the same naming and reuse rules as timer start.
 - Provide local daily totals per project and activity.

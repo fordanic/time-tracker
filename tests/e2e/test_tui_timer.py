@@ -1075,12 +1075,24 @@ async def test_review_groups_local_days_and_loads_an_overnight_entry_segment(
                 lambda: app._editing_entry_id == overnight.entry_id,
                 "overnight entry segment did not load its source entry",
             )
-            assert datetime.fromisoformat(
-                app.query_one("#correction-start", Input).value
-            ).astimezone(UTC) == overnight_start.astimezone(UTC)
-            assert datetime.fromisoformat(
-                app.query_one("#correction-stop", Input).value
-            ).astimezone(UTC) == overnight_stop.astimezone(UTC)
+            assert (
+                datetime.fromisoformat(
+                    app.query_one("#correction-start", Input).value
+                ).tzinfo
+                is None
+            )
+            assert app.query_one("#correction-start", Input).value == (
+                overnight_start.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+            )
+            assert (
+                datetime.fromisoformat(
+                    app.query_one("#correction-stop", Input).value
+                ).tzinfo
+                is None
+            )
+            assert app.query_one("#correction-stop", Input).value == (
+                overnight_stop.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+            )
 
             history.move_cursor(row=5)
             app.query_one("#load-correction-button", Button).press()
@@ -1348,11 +1360,15 @@ async def test_user_corrects_a_selected_completed_entry_in_review(
             app.query_one("#correction-activity", Input).value = "Review"
             app.query_one("#correction-note", Input).value = "Revised"
             app.query_one("#correction-start", Input).value = (
-                started_at + timedelta(minutes=5)
-            ).isoformat()
+                (started_at + timedelta(minutes=5))
+                .astimezone()
+                .strftime("%Y-%m-%d %H:%M:%S")
+            )
             app.query_one("#correction-stop", Input).value = (
-                started_at + timedelta(minutes=55)
-            ).isoformat()
+                (started_at + timedelta(minutes=55))
+                .astimezone()
+                .strftime("%Y-%m-%d %H:%M:%S")
+            )
 
             app.query_one("#save-correction-button", Button).press()
             await _wait_for_ui(
@@ -1377,17 +1393,17 @@ async def test_user_corrects_a_selected_completed_entry_in_review(
                 app.query_one("#message", Static).render()
             )
 
-            app.query_one("#correction-start", Input).value = "2026-07-20T08:00:00"
+            app.query_one("#correction-start", Input).value = "not-a-time"
             app.query_one("#save-correction-button", Button).press()
             await _wait_for_ui(
                 pilot,
                 lambda: (
-                    "start must include a UTC offset"
+                    "start must be a local timestamp"
                     in str(app.query_one("#message", Static).render())
                 ),
                 "invalid correction was not reported",
             )
-            assert "start must include a UTC offset" in str(
+            assert "start must be a local timestamp" in str(
                 app.query_one("#message", Static).render()
             )
             assert client.list_completed() == [corrected]
@@ -1440,7 +1456,7 @@ async def test_correction_keeps_untouched_switch_boundaries(
             )
 
             assert app.query_one("#correction-start", Input).value == (
-                switched_at.astimezone().isoformat(timespec="seconds")
+                switched_at.astimezone().strftime("%Y-%m-%d %H:%M:%S")
             )
             app.query_one("#correction-note", Input).value = "Revised"
             app.query_one("#save-correction-button", Button).press()
@@ -1505,7 +1521,7 @@ async def test_user_adds_missed_time_without_changing_active_timer(
                 datetime.fromisoformat(
                     app.query_one("#correction-start", Input).value
                 ).tzinfo
-                is not None
+                is None
             )
             assert (
                 str(app.query_one("#save-correction-button", Button).label)
@@ -1516,11 +1532,15 @@ async def test_user_adds_missed_time_without_changing_active_timer(
             app.query_one("#correction-activity", Input).value = "Review"
             app.query_one("#correction-note", Input).value = "Missed work"
             app.query_one("#correction-start", Input).value = (
-                started_at + timedelta(hours=1)
-            ).isoformat()
+                (started_at + timedelta(hours=1))
+                .astimezone()
+                .strftime("%Y-%m-%d %H:%M:%S")
+            )
             app.query_one("#correction-stop", Input).value = (
-                started_at + timedelta(hours=2)
-            ).isoformat()
+                (started_at + timedelta(hours=2))
+                .astimezone()
+                .strftime("%Y-%m-%d %H:%M:%S")
+            )
             app.query_one("#save-correction-button", Button).press()
             await _wait_for_ui(
                 pilot,
