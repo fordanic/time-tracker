@@ -28,6 +28,7 @@ dev = [
   "pytest",
   "pytest-asyncio",
   "ruff",
+  "tzdata; sys_platform == 'win32'",
 ]
 
 [tool.hatch.build.targets.wheel]
