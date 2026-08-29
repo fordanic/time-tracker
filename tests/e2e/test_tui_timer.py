@@ -157,9 +157,14 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
             await pilot.pause()
 
             active_text = str(first_app.query_one("#active-timer", Static).render())
+            active = client.get_active()
+            assert active is not None
+            local_start = active.started_at.astimezone()
             assert "Website / Implementation" in active_text
             assert "Walking skeleton" in active_text
             assert "Walking skeleton details" in active_text
+            assert local_start.strftime("Started %Y-%m-%d %H:%M:%S ·") in active_text
+            assert local_start.isoformat(timespec="seconds") not in active_text
 
         assert not first_app.query("#active-timer")
         first_app._render_active()
@@ -1138,6 +1143,10 @@ async def test_review_deletes_selected_entry_and_rounds_duration_up(
             await pilot.pause()
             assert client.list_completed() == [completed]
             assert "Confirm delete" in str(delete_button.label)
+            delete_message = str(app.query_one("#message", Static).render())
+            local_start = completed.started_at.astimezone()
+            assert local_start.strftime("%Y-%m-%d %H:%M") in delete_message
+            assert local_start.isoformat(timespec="minutes") not in delete_message
 
             history.move_cursor(row=4)
             delete_button.press()

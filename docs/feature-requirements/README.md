@@ -61,6 +61,7 @@ For each selected feature:
 - [Review selection and action layout](review-selection-action-layout.md)
 - [Review entry deletion and duration display](review-entry-deletion-duration-display.md)
 - [Track capture layout and note reset](track-capture-layout-note-reset.md)
+- [TUI local time display](tui-local-time-display.md)
 - [Theme-safe visual spacing](theme-safe-visual-spacing.md)
 - [Persistent theme and export preferences](persistent-theme-export-preferences.md)
 - [Versioned release candidates and releases](versioned-release-candidates-releases.md)

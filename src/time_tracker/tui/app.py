@@ -2132,7 +2132,7 @@ class TimeTrackerApp(App[None]):
             self.query_one(
                 "#delete-completed-button", Button
             ).label = "Confirm delete selected"
-            local_start = entry.started_at.astimezone().isoformat(timespec="minutes")
+            local_start = entry.started_at.astimezone().strftime("%Y-%m-%d %H:%M")
             self._show_message(
                 "Press Delete selected entry again to permanently delete "
                 f"{entry.project} / {entry.activity} from {local_start}."
@@ -2835,7 +2835,7 @@ class TimeTrackerApp(App[None]):
         timer = self.active_timer
         now = datetime.now(UTC)
         elapsed = max(now - timer.started_at, timedelta())
-        local_start = timer.started_at.astimezone().isoformat(timespec="seconds")
+        local_start = timer.started_at.astimezone().strftime("%Y-%m-%d %H:%M:%S")
         note = f"\n{timer.note}" if timer.note else ""
         active_widget.update(
             f"{timer.project} / {timer.activity}\n"
