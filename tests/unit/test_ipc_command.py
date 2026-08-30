@@ -1,3 +1,6 @@
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from time_tracker.infrastructure.ipc import (
@@ -7,6 +10,40 @@ from time_tracker.infrastructure.ipc import (
     _agent_command,
 )
 from time_tracker.infrastructure.paths import AgentPaths
+
+
+def test_client_serializes_requests_from_concurrent_workers(tmp_path: Path) -> None:
+    class RecordingClient(AgentClient):
+        def __init__(self, paths: AgentPaths) -> None:
+            super().__init__(paths)
+            self.guard = threading.Lock()
+            self.active_requests = 0
+            self.maximum_active_requests = 0
+
+        def _request_serialized(
+            self,
+            method: str,
+            params: dict[str, object],
+            *,
+            version: int,
+        ) -> object:
+            with self.guard:
+                self.active_requests += 1
+                self.maximum_active_requests = max(
+                    self.maximum_active_requests,
+                    self.active_requests,
+                )
+            time.sleep(0.01)
+            with self.guard:
+                self.active_requests -= 1
+            return None
+
+    client = RecordingClient(AgentPaths.in_directory(tmp_path))
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        list(executor.map(lambda _: client.ping(), range(8)))
+
+    assert client.maximum_active_requests == 1
 
 
 def test_frozen_agent_command_reuses_the_packaged_executable(tmp_path: Path) -> None:

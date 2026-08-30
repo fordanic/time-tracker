@@ -14,9 +14,11 @@ and active-entry editing remain later slices.
 - In Review's completed-entry mode, let the user load the selected completed row
   into correction fields for project, activity, note, start, and stop, then save
   the corrected entry through the background process.
-- Populate start and stop as local, offset-aware ISO 8601 timestamps. Accept only
-  offset-aware ISO 8601 input so each edited value maps to one unambiguous UTC
-  instant, including during daylight-saving transitions.
+- Populate start and stop as local `YYYY-MM-DD HH:MM:SS` wall-clock timestamps
+  without UTC-offset suffixes. Resolve changed input through the user's local
+  time zone and reject ambiguous or nonexistent local times so each edited value
+  maps to one unambiguous UTC instant, including during daylight-saving
+  transitions.
 - Populate start and stop with whole-second precision and retain the stored
   instant for a boundary left at its displayed value. Stored transitions carry
   sub-second precision and a switch records one instant as both the earlier
@@ -49,7 +51,8 @@ and active-entry editing remain later slices.
 - The entry identifier and original creation timestamp do not change. Duration
   remains derived from corrected timestamps; no revision history or undo record is
   added in this slice.
-- Reject an unknown entry, invalid or offset-free timestamp, non-positive interval,
+- Reject an unknown entry, invalid, ambiguous, or nonexistent local timestamp,
+  non-positive interval,
   archived reassignment, or overlap with a concise error in the persistent TUI
   message area. A rejection leaves the correction fields available for repair.
 
@@ -57,9 +60,8 @@ and active-entry editing remain later slices.
 
 1. A user can select one completed entry in Review, load its canonical values,
    change all five editable fields, save, and immediately see the corrected row.
-2. Offset-aware input is converted to UTC before persistence and re-rendered in
-   the user's local offset; offset-free or malformed input is rejected without
-   changing history.
+2. Timezone-free local input is resolved to UTC before persistence; malformed,
+   ambiguous, or nonexistent local input is rejected without changing history.
 3. Saving with stop equal to or before start is rejected. Saving an interval that
    intersects another completed or active entry is rejected, while an interval
    that only touches a neighboring boundary succeeds. Correcting only the note,

@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 import math
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, tzinfo
 from pathlib import Path
 from typing import Protocol, cast
 
+from rich.text import Text
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -57,6 +58,19 @@ from time_tracker.application.tracking import (
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
 
 _WEEKDAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+_CLOCK_GLYPHS = {
+    "0": ("┏━┓", "┃ ┃", "┗━┛"),
+    "1": (" ╻ ", " ┃ ", " ╹ "),
+    "2": ("━━┓", "┏━┛", "┗━━"),
+    "3": ("━━┓", " ━┫", "━━┛"),
+    "4": ("╻ ╻", "┗━┫", "  ╹"),
+    "5": ("┏━━", "┗━┓", "━━┛"),
+    "6": ("┏━━", "┣━┓", "┗━┛"),
+    "7": ("━━┓", "  ┃", "  ╹"),
+    "8": ("┏━┓", "┣━┫", "┗━┛"),
+    "9": ("┏━┓", "┗━┫", "━━┛"),
+    ":": (" ", "•", "•"),
+}
 
 
 class TrackerGateway(Protocol):
@@ -379,6 +393,27 @@ class ShortcutHelpScreen(ModalScreen[None]):
         self.dismiss(None)
 
 
+class ReviewDataTable(DataTable[str]):
+    """Review table with explicit presentation-only date divider rows."""
+
+    def __init__(self, *, id: str) -> None:
+        super().__init__(id=id, cursor_type="row", zebra_stripes=True)
+        self._date_divider_rows: set[int] = set()
+
+    def clear_date_dividers(self) -> None:
+        """Forget dividers before the table is populated again."""
+        self._date_divider_rows.clear()
+
+    def add_date_divider(self, widths: tuple[int, ...], *, key: str) -> None:
+        """Add one visible line between local-date groups."""
+        self._date_divider_rows.add(self.row_count)
+        self.add_row(*("─" * width for width in widths), key=key)
+
+    def is_date_divider(self, row_index: int) -> bool:
+        """Return whether a row is a presentation-only date divider."""
+        return row_index in self._date_divider_rows
+
+
 class TimeTrackerApp(App[None]):
     """Keyboard-first focused workflows backed by the local agent."""
 
@@ -445,12 +480,52 @@ class TimeTrackerApp(App[None]):
         border: round $accent;
     }
 
-    #active-timer {
-        height: 3;
+    #active-timer-layout {
+        height: 4;
         padding: 0 1;
-        text-align: center;
         background: $panel;
-        content-align: center middle;
+    }
+
+    #active-timer {
+        width: 1fr;
+        height: 4;
+        content-align: left middle;
+    }
+
+    #active-clock-panel {
+        display: none;
+        width: 31;
+        height: 4;
+    }
+
+    #active-elapsed {
+        width: 100%;
+        height: 3;
+        color: $accent;
+        text-align: right;
+        text-style: bold;
+    }
+
+    #active-started {
+        width: 100%;
+        height: 1;
+        color: $text-muted;
+        text-align: right;
+    }
+
+    Screen.-narrow #active-timer-layout.timer-running {
+        layout: vertical;
+        height: 8;
+    }
+
+    Screen.-narrow #active-timer-layout.timer-running #active-timer {
+        width: 100%;
+        height: 4;
+    }
+
+    Screen.-narrow #active-timer-layout.timer-running #active-clock-panel {
+        width: 100%;
+        height: 4;
     }
 
     #view-tabs {
@@ -803,7 +878,11 @@ class TimeTrackerApp(App[None]):
         """Compose focused workflows around one persistent active-timer strip."""
         yield Header()
         with Vertical(id="tracker"):
-            yield Static("No timer running", id="active-timer")
+            with Horizontal(id="active-timer-layout"):
+                yield Static("No timer running", id="active-timer")
+                with Vertical(id="active-clock-panel"):
+                    yield Static("", id="active-elapsed")
+                    yield Static("", id="active-started")
             with Horizontal(id="reminder"):
                 yield Static("", id="reminder-message")
                 yield Button(
@@ -923,11 +1002,7 @@ class TimeTrackerApp(App[None]):
                         yield Switch(id="range-summary-mode")
                     yield Static("Completed entries", id="history-title")
                     yield Static("No completed time matches.", id="history-empty")
-                    yield DataTable(
-                        id="history",
-                        cursor_type="row",
-                        zebra_stripes=True,
-                    )
+                    yield ReviewDataTable(id="history")
                     with Horizontal(id="history-options"):
                         yield Button(
                             "Load selected entry",
@@ -961,12 +1036,12 @@ class TimeTrackerApp(App[None]):
                     )
                     with Horizontal(id="correction-times"):
                         yield Input(
-                            placeholder="Start (ISO 8601 with UTC offset)",
+                            placeholder="Start (YYYY-MM-DD HH:MM:SS)",
                             id="correction-start",
                             classes="correction-input",
                         )
                         yield Input(
-                            placeholder="Stop (ISO 8601 with UTC offset)",
+                            placeholder="Stop (YYYY-MM-DD HH:MM:SS)",
                             id="correction-stop",
                             classes="correction-input",
                         )
@@ -2115,7 +2190,7 @@ class TimeTrackerApp(App[None]):
             self.query_one(
                 "#delete-completed-button", Button
             ).label = "Confirm delete selected"
-            local_start = entry.started_at.astimezone().isoformat(timespec="minutes")
+            local_start = entry.started_at.astimezone().strftime("%Y-%m-%d %H:%M")
             self._show_message(
                 "Press Delete selected entry again to permanently delete "
                 f"{entry.project} / {entry.activity} from {local_start}."
@@ -2174,18 +2249,18 @@ class TimeTrackerApp(App[None]):
         stopped_at = datetime.now().astimezone().replace(second=0, microsecond=0)
         started_at = stopped_at - timedelta(hours=1)
         self._editing_entry_id = None
-        self._editing_started_at = None
-        self._editing_stopped_at = None
+        self._editing_started_at = started_at
+        self._editing_stopped_at = stopped_at
         self._creating_manual_entry = True
         self.query_one("#correction-title", Static).update("Add missed entry")
         self.query_one("#correction-project", Input).value = ""
         self.query_one("#correction-activity", Input).value = ""
         self.query_one("#correction-note", Input).value = ""
-        self.query_one("#correction-start", Input).value = started_at.isoformat(
-            timespec="seconds"
+        self.query_one("#correction-start", Input).value = _format_editor_datetime(
+            started_at
         )
-        self.query_one("#correction-stop", Input).value = stopped_at.isoformat(
-            timespec="seconds"
+        self.query_one("#correction-stop", Input).value = _format_editor_datetime(
+            stopped_at
         )
         save_button = self.query_one("#save-correction-button", Button)
         save_button.label = "Create missed entry"
@@ -2201,12 +2276,12 @@ class TimeTrackerApp(App[None]):
         self.query_one("#correction-project", Input).value = entry.project
         self.query_one("#correction-activity", Input).value = entry.activity
         self.query_one("#correction-note", Input).value = entry.note or ""
-        self.query_one(
-            "#correction-start", Input
-        ).value = entry.started_at.astimezone().isoformat(timespec="seconds")
-        self.query_one(
-            "#correction-stop", Input
-        ).value = entry.stopped_at.astimezone().isoformat(timespec="seconds")
+        self.query_one("#correction-start", Input).value = _format_editor_datetime(
+            entry.started_at
+        )
+        self.query_one("#correction-stop", Input).value = _format_editor_datetime(
+            entry.stopped_at
+        )
         save_button = self.query_one("#save-correction-button", Button)
         save_button.label = "Save correction"
         save_button.disabled = False
@@ -2222,18 +2297,14 @@ class TimeTrackerApp(App[None]):
             )
             return
         try:
-            started_at = _restore_stored_precision(
-                _parse_offset_datetime(
-                    self.query_one("#correction-start", Input).value,
-                    "start",
-                ),
+            started_at = _parse_editor_datetime(
+                self.query_one("#correction-start", Input).value,
+                "start",
                 self._editing_started_at,
             )
-            stopped_at = _restore_stored_precision(
-                _parse_offset_datetime(
-                    self.query_one("#correction-stop", Input).value,
-                    "stop",
-                ),
+            stopped_at = _parse_editor_datetime(
+                self.query_one("#correction-stop", Input).value,
+                "stop",
                 self._editing_stopped_at,
             )
             project = self.query_one("#correction-project", Input).value
@@ -2519,7 +2590,8 @@ class TimeTrackerApp(App[None]):
         self._render_today_total(entries)
         if entries_changed:
             self._set_review_filter_options()
-        table = self.query_one("#history", DataTable)
+        table = self.query_one("#history", ReviewDataTable)
+        table.clear_date_dividers()
         table.clear(columns=True)
         self._history_row_entry_ids = []
         summary_mode = self.query_one("#summary-mode", Switch).value
@@ -2567,7 +2639,13 @@ class TimeTrackerApp(App[None]):
         if summary_mode:
             title.update("Daily summaries")
             table.add_columns("Date", "Project", "Activity", "Duration")
+            previous_day: date | None = None
             for daily_summary in summaries:
+                if previous_day is not None and daily_summary.day != previous_day:
+                    table.add_date_divider(
+                        (10, 7, 8, 8),
+                        key=f"date-divider-{daily_summary.day.isoformat()}",
+                    )
                 table.add_row(
                     daily_summary.day.isoformat(),
                     daily_summary.project,
@@ -2578,6 +2656,7 @@ class TimeTrackerApp(App[None]):
                         f"{daily_summary.project}\0{daily_summary.activity}"
                     ),
                 )
+                previous_day = daily_summary.day
             return
 
         title.update("Completed entries by day")
@@ -2591,6 +2670,12 @@ class TimeTrackerApp(App[None]):
             "Note",
         )
         for group_index, group in enumerate(groups):
+            if group_index > 0:
+                table.add_date_divider(
+                    (10, 7, 8, 5, 4, 8, 4),
+                    key=f"date-divider-{group.day.isoformat()}",
+                )
+                self._history_row_entry_ids.append(None)
             for segment_index, segment in enumerate(group.segments):
                 table.add_row(
                     group.day.isoformat() if segment_index == 0 else "",
@@ -2777,9 +2862,21 @@ class TimeTrackerApp(App[None]):
 
     def _render_active(self) -> None:
         active_widgets = self.query("#active-timer")
+        active_layouts = self.query("#active-timer-layout")
+        clock_panels = self.query("#active-clock-panel")
+        elapsed_widgets = self.query("#active-elapsed")
+        started_widgets = self.query("#active-started")
         stop_buttons = self.query("#stop-button")
         edit_buttons = self.query("#edit-active-button")
-        if not active_widgets or not stop_buttons or not edit_buttons:
+        if (
+            not active_widgets
+            or not active_layouts
+            or not clock_panels
+            or not elapsed_widgets
+            or not started_widgets
+            or not stop_buttons
+            or not edit_buttons
+        ):
             return
         current_day = datetime.now().astimezone().date()
         if self._today_total_day != current_day:
@@ -2792,10 +2889,20 @@ class TimeTrackerApp(App[None]):
             }:
                 self._apply_review_filter()
         active_widget = active_widgets.first(Static)
+        active_layout = active_layouts.first(Horizontal)
+        clock_panel = clock_panels.first(Vertical)
+        elapsed_widget = elapsed_widgets.first(Static)
+        started_widget = started_widgets.first(Static)
         stop_button = stop_buttons.first(Button)
         edit_button = edit_buttons.first(Button)
         if self.active_timer is None:
-            active_widget.update("No timer running")
+            ready = Text("READY\n", style="bold dim")
+            ready.append("No timer running", style="bold")
+            active_widget.update(ready)
+            active_layout.remove_class("timer-running")
+            clock_panel.display = False
+            elapsed_widget.update("")
+            started_widget.update("")
             stop_button.disabled = True
             edit_button.disabled = True
             self._render_quick_switch_action()
@@ -2804,12 +2911,16 @@ class TimeTrackerApp(App[None]):
         timer = self.active_timer
         now = datetime.now(UTC)
         elapsed = max(now - timer.started_at, timedelta())
-        local_start = timer.started_at.astimezone().isoformat(timespec="seconds")
-        note = f"\n{timer.note}" if timer.note else ""
-        active_widget.update(
-            f"{timer.project} / {timer.activity}\n"
-            f"Started {local_start} · {_format_duration(elapsed)}{note}"
-        )
+        local_start = timer.started_at.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        details = Text("TRACKING NOW\n", style="bold dim")
+        details.append(f"{timer.project} / {timer.activity}", style="bold")
+        details.append("\n")
+        details.append(timer.note or "No note", style="dim")
+        active_widget.update(details)
+        active_layout.add_class("timer-running")
+        clock_panel.display = True
+        elapsed_widget.update(_format_large_clock(_format_duration(elapsed)))
+        started_widget.update(f"Started {local_start}")
         stop_button.disabled = False
         self._render_quick_switch_action()
 
@@ -2917,6 +3028,14 @@ def _format_duration(duration: timedelta) -> str:
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 
+def _format_large_clock(value: str) -> str:
+    """Render a clock value with terminal-native three-row glyphs."""
+    return "\n".join(
+        " ".join(_CLOCK_GLYPHS[character][row] for character in value)
+        for row in range(3)
+    )
+
+
 def _format_review_duration(duration: timedelta) -> str:
     total_seconds = max(0.0, duration.total_seconds())
     total_minutes = math.ceil(total_seconds / 60)
@@ -2924,14 +3043,64 @@ def _format_review_duration(duration: timedelta) -> str:
     return f"{hours}h {minutes:02d}m"
 
 
-def _parse_offset_datetime(value: str, label: str) -> datetime:
+def _format_editor_datetime(value: datetime) -> str:
+    """Format one instant as a timezone-free local editor value."""
+    return value.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _parse_editor_datetime(
+    value: str,
+    label: str,
+    stored: datetime | None,
+) -> datetime:
+    """Resolve an editor value while preserving an unchanged stored instant."""
+    normalized = value.strip()
+    if stored is not None and normalized == _format_editor_datetime(stored):
+        return stored
+    return _restore_stored_precision(
+        _parse_local_datetime(normalized, label),
+        stored,
+    )
+
+
+def _parse_local_datetime(
+    value: str,
+    label: str,
+    local_timezone: tzinfo | None = None,
+) -> datetime:
+    """Resolve a timezone-free wall time to one unambiguous local instant."""
     try:
         parsed = datetime.fromisoformat(value.strip())
     except ValueError as error:
-        raise ValueError(f"{label} must be an ISO 8601 timestamp") from error
-    if parsed.tzinfo is None:
-        raise ValueError(f"{label} must include a UTC offset")
-    return parsed
+        raise ValueError(
+            f"{label} must be a local timestamp like YYYY-MM-DD HH:MM:SS"
+        ) from error
+    if parsed.tzinfo is not None:
+        raise ValueError(f"{label} must not include a UTC offset")
+
+    candidates: dict[datetime, datetime] = {}
+    for fold in (0, 1):
+        local_value = parsed.replace(fold=fold)
+        try:
+            if local_timezone is None:
+                instant = datetime.fromtimestamp(local_value.timestamp(), UTC)
+                round_trip = instant.astimezone()
+            else:
+                candidate = local_value.replace(tzinfo=local_timezone)
+                instant = candidate.astimezone(UTC)
+                round_trip = instant.astimezone(local_timezone)
+        except (OSError, OverflowError, ValueError) as error:
+            raise ValueError(
+                f"{label} is outside the supported local time range"
+            ) from error
+        if round_trip.replace(tzinfo=None) == parsed:
+            candidates[instant] = round_trip
+
+    if not candidates:
+        raise ValueError(f"{label} is a nonexistent local time")
+    if len(candidates) > 1:
+        raise ValueError(f"{label} is an ambiguous local time")
+    return next(iter(candidates.values()))
 
 
 def _restore_stored_precision(edited: datetime, stored: datetime | None) -> datetime:

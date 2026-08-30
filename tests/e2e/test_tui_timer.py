@@ -38,7 +38,7 @@ from time_tracker.infrastructure.configuration import (
 from time_tracker.infrastructure.ipc import AgentClient, AgentUnavailableError
 from time_tracker.infrastructure.paths import AgentPaths
 from time_tracker.infrastructure.sqlite_repository import SQLiteTimerRepository
-from time_tracker.tui.app import ShortcutHelpScreen, TimeTrackerApp
+from time_tracker.tui.app import ReviewDataTable, ShortcutHelpScreen, TimeTrackerApp
 
 
 class SilentNotifier:
@@ -157,9 +157,22 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
             await pilot.pause()
 
             active_text = str(first_app.query_one("#active-timer", Static).render())
+            elapsed_widget = first_app.query_one("#active-elapsed", Static)
+            started_widget = first_app.query_one("#active-started", Static)
+            active = client.get_active()
+            assert active is not None
+            local_start = active.started_at.astimezone()
             assert "Website / Implementation" in active_text
             assert "Walking skeleton" in active_text
             assert "Walking skeleton details" in active_text
+            started_text = str(started_widget.render())
+            assert local_start.strftime("Started %Y-%m-%d %H:%M:%S") in started_text
+            assert local_start.isoformat(timespec="seconds") not in started_text
+            assert len(str(elapsed_widget.render()).splitlines()) == 3
+            assert first_app.query_one("#active-timer", Static).region.x < (
+                elapsed_widget.region.x
+            )
+            assert started_widget.region.y > elapsed_widget.region.y
 
         assert not first_app.query("#active-timer")
         first_app._render_active()
@@ -189,6 +202,10 @@ async def test_user_starts_recovers_and_stops_a_persisted_timer(
 
             assert "No timer running" in str(
                 recovered_app.query_one("#active-timer", Static).render()
+            )
+            assert not recovered_app.query_one("#active-clock-panel").display
+            assert (
+                str(recovered_app.query_one("#active-elapsed", Static).render()) == ""
             )
             history = recovered_app.query_one("#history", DataTable)
             assert history.row_count == 2
@@ -1006,9 +1023,12 @@ async def test_review_groups_local_days_and_loads_an_overnight_entry_segment(
         async with app.run_test() as pilot:
             await pilot.press("f2")
             await pilot.pause()
-            history = app.query_one("#history", DataTable)
+            history = app.query_one("#history", ReviewDataTable)
 
-            assert history.row_count == 5
+            assert history.row_count == 6
+            assert history.is_date_divider(0) is False
+            assert history.is_date_divider(2) is True
+            assert all(set(str(cell)) == {"─"} for cell in history.get_row_at(2))
             first_segment = history.get_row_at(0)
             assert (
                 first_segment[0]
@@ -1024,31 +1044,57 @@ async def test_review_groups_local_days_and_loads_an_overnight_entry_segment(
             ]
             assert history.get_row_at(1)[1] == "Day total"
 
-            second_segment = history.get_row_at(2)
+            second_segment = history.get_row_at(3)
             assert second_segment[0] == local_midnight.date().isoformat()
             assert second_segment[3:6] == ["00:00", "00:30", "0h 30m"]
-            assert history.get_row_at(3)[0] == ""
-            assert history.get_row_at(4)[1] == "Day total"
-            assert history.get_row_at(4)[5] == "1h 15m"
+            assert history.get_row_at(4)[0] == ""
+            assert history.get_row_at(5)[1] == "Day total"
+            assert history.get_row_at(5)[5] == "1h 15m"
             assert "Today's completed time: 01:15:00" in str(
                 app.query_one("#today-total", Static).render()
             )
 
-            history.move_cursor(row=2)
+            summary_mode = app.query_one("#summary-mode", Switch)
+            summary_mode.value = True
+            await pilot.pause()
+            assert history.row_count == 4
+            assert history.is_date_divider(0) is False
+            assert history.is_date_divider(1) is True
+            assert all(set(str(cell)) == {"─"} for cell in history.get_row_at(1))
+            assert history.get_row_at(2)[0] == local_midnight.date().isoformat()
+
+            summary_mode.value = False
+            await pilot.pause()
+            assert history.row_count == 6
+            assert history.is_date_divider(2) is True
+
+            history.move_cursor(row=3)
             app.query_one("#load-correction-button", Button).press()
             await _wait_for_ui(
                 pilot,
                 lambda: app._editing_entry_id == overnight.entry_id,
                 "overnight entry segment did not load its source entry",
             )
-            assert datetime.fromisoformat(
-                app.query_one("#correction-start", Input).value
-            ).astimezone(UTC) == overnight_start.astimezone(UTC)
-            assert datetime.fromisoformat(
-                app.query_one("#correction-stop", Input).value
-            ).astimezone(UTC) == overnight_stop.astimezone(UTC)
+            assert (
+                datetime.fromisoformat(
+                    app.query_one("#correction-start", Input).value
+                ).tzinfo
+                is None
+            )
+            assert app.query_one("#correction-start", Input).value == (
+                overnight_start.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+            )
+            assert (
+                datetime.fromisoformat(
+                    app.query_one("#correction-stop", Input).value
+                ).tzinfo
+                is None
+            )
+            assert app.query_one("#correction-stop", Input).value == (
+                overnight_stop.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+            )
 
-            history.move_cursor(row=4)
+            history.move_cursor(row=5)
             app.query_one("#load-correction-button", Button).press()
             await _wait_for_ui(
                 pilot,
@@ -1109,20 +1155,24 @@ async def test_review_deletes_selected_entry_and_rounds_duration_up(
             history = app.query_one("#history", DataTable)
             delete_button = app.query_one("#delete-completed-button", Button)
 
-            assert history.row_count == 4
+            assert history.row_count == 5
             assert history.get_row_at(0)[5] == "0h 30m"
-            assert history.get_row_at(2)[5] == "0h 31m"
+            assert history.get_row_at(3)[5] == "0h 31m"
             assert "Today's completed time: 00:30:01" in str(
                 app.query_one("#today-total", Static).render()
             )
 
-            history.move_cursor(row=2)
+            history.move_cursor(row=3)
             delete_button.press()
             await pilot.pause()
             assert client.list_completed() == [completed]
             assert "Confirm delete" in str(delete_button.label)
+            delete_message = str(app.query_one("#message", Static).render())
+            local_start = completed.started_at.astimezone()
+            assert local_start.strftime("%Y-%m-%d %H:%M") in delete_message
+            assert local_start.isoformat(timespec="minutes") not in delete_message
 
-            history.move_cursor(row=3)
+            history.move_cursor(row=4)
             delete_button.press()
             await pilot.pause()
             assert client.list_completed() == [completed]
@@ -1130,7 +1180,7 @@ async def test_review_deletes_selected_entry_and_rounds_duration_up(
                 app.query_one("#message", Static).render()
             )
 
-            history.move_cursor(row=2)
+            history.move_cursor(row=3)
             delete_button.press()
             await pilot.pause()
             assert client.list_completed() == [completed]
@@ -1310,11 +1360,15 @@ async def test_user_corrects_a_selected_completed_entry_in_review(
             app.query_one("#correction-activity", Input).value = "Review"
             app.query_one("#correction-note", Input).value = "Revised"
             app.query_one("#correction-start", Input).value = (
-                started_at + timedelta(minutes=5)
-            ).isoformat()
+                (started_at + timedelta(minutes=5))
+                .astimezone()
+                .strftime("%Y-%m-%d %H:%M:%S")
+            )
             app.query_one("#correction-stop", Input).value = (
-                started_at + timedelta(minutes=55)
-            ).isoformat()
+                (started_at + timedelta(minutes=55))
+                .astimezone()
+                .strftime("%Y-%m-%d %H:%M:%S")
+            )
 
             app.query_one("#save-correction-button", Button).press()
             await _wait_for_ui(
@@ -1339,17 +1393,17 @@ async def test_user_corrects_a_selected_completed_entry_in_review(
                 app.query_one("#message", Static).render()
             )
 
-            app.query_one("#correction-start", Input).value = "2026-07-20T08:00:00"
+            app.query_one("#correction-start", Input).value = "not-a-time"
             app.query_one("#save-correction-button", Button).press()
             await _wait_for_ui(
                 pilot,
                 lambda: (
-                    "start must include a UTC offset"
+                    "start must be a local timestamp"
                     in str(app.query_one("#message", Static).render())
                 ),
                 "invalid correction was not reported",
             )
-            assert "start must include a UTC offset" in str(
+            assert "start must be a local timestamp" in str(
                 app.query_one("#message", Static).render()
             )
             assert client.list_completed() == [corrected]
@@ -1402,7 +1456,7 @@ async def test_correction_keeps_untouched_switch_boundaries(
             )
 
             assert app.query_one("#correction-start", Input).value == (
-                switched_at.astimezone().isoformat(timespec="seconds")
+                switched_at.astimezone().strftime("%Y-%m-%d %H:%M:%S")
             )
             app.query_one("#correction-note", Input).value = "Revised"
             app.query_one("#save-correction-button", Button).press()
@@ -1467,7 +1521,7 @@ async def test_user_adds_missed_time_without_changing_active_timer(
                 datetime.fromisoformat(
                     app.query_one("#correction-start", Input).value
                 ).tzinfo
-                is not None
+                is None
             )
             assert (
                 str(app.query_one("#save-correction-button", Button).label)
@@ -1478,11 +1532,15 @@ async def test_user_adds_missed_time_without_changing_active_timer(
             app.query_one("#correction-activity", Input).value = "Review"
             app.query_one("#correction-note", Input).value = "Missed work"
             app.query_one("#correction-start", Input).value = (
-                started_at + timedelta(hours=1)
-            ).isoformat()
+                (started_at + timedelta(hours=1))
+                .astimezone()
+                .strftime("%Y-%m-%d %H:%M:%S")
+            )
             app.query_one("#correction-stop", Input).value = (
-                started_at + timedelta(hours=2)
-            ).isoformat()
+                (started_at + timedelta(hours=2))
+                .astimezone()
+                .strftime("%Y-%m-%d %H:%M:%S")
+            )
             app.query_one("#save-correction-button", Button).press()
             await _wait_for_ui(
                 pilot,
@@ -1784,7 +1842,7 @@ async def test_inactive_buttons_stay_legible_in_every_palette(tmp_path: Path) ->
     _wait_until_ready(client)
 
     try:
-        client.start("Website", "Planning", "Current work")
+        client.start("Website", "Planning")
         app = TimeTrackerApp(client)
         async with app.run_test() as pilot:
             start_button = app.query_one("#start-button", Button)
@@ -1796,6 +1854,7 @@ async def test_inactive_buttons_stay_legible_in_every_palette(tmp_path: Path) ->
             )
             stop_button = app.query_one("#stop-button", Button)
             assert start_button.region.height == stop_button.region.height
+            assert "No note" in str(app.query_one("#active-timer", Static).render())
 
             for palette in sorted(app.available_themes):
                 app.theme = palette

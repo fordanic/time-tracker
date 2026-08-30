@@ -12,6 +12,10 @@ how much completed work has been recorded today without leaving Track.
 - In Review's completed-entry mode, group completed time by local calendar date,
   show the date only on the first entry row in each group, render local start and
   stop values as compact `HH:MM` times, and add a total row after each day.
+- Draw a theme-safe horizontal divider row between local dates in both
+  completed-entry and daily-summary modes. Divider rows are presentation only:
+  they do not represent reporting data, are excluded from export, and cannot be
+  loaded, corrected, or deleted as completed entries.
 - Derive both grouped rows and day totals from one application-layer reporting
   projection. The TUI must not independently calculate date boundaries or
   durations.
@@ -20,7 +24,7 @@ how much completed work has been recorded today without leaving Track.
   retains the source entry's identity, project, activity, and note and shows only
   the portion of its derived duration that belongs to that date.
 - Loading any segment for correction loads the full source entry once, including
-  its complete offset-aware local start and stop timestamps. A day-total row is
+  its complete timezone-free local start and stop wall-clock timestamps. A day-total row is
   not a completed entry and cannot be loaded for correction.
 - Keep the existing Daily summaries representation and both CSV formats
   unchanged. CSV entry export continues to contain each full entry once with
@@ -50,12 +54,13 @@ how much completed work has been recorded today without leaving Track.
 ## Acceptance criteria
 
 1. Completed time is shown in chronological local-date groups with the date once,
-   `HH:MM` row times, and one derived total after each day.
+   `HH:MM` row times, one derived total after each day, and a visible boundary
+   between adjacent dates in completed-entry and daily-summary modes.
 2. An entry crossing local midnight appears as correctly clipped segments in
    both affected groups, and the group totals equal the sum of their segments,
    including across a local UTC-offset change.
 3. Loading either segment of a cross-midnight entry opens the same entry ID and
-   full offset-aware timestamps; a total row cannot be loaded.
+   full timezone-free local wall-clock timestamps; a total row cannot be loaded.
 4. Entry and daily-summary CSV output retains its existing schema, full timestamp
    precision, ordering, overwrite confirmation, and midnight-splitting behavior.
 5. Track shows the current local date's completed duration, does not count the

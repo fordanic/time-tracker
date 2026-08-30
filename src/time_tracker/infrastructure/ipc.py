@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from datetime import datetime
@@ -47,6 +48,7 @@ class AgentClient:
 
     def __init__(self, paths: AgentPaths) -> None:
         self.paths = paths
+        self._request_lock = threading.Lock()
 
     def ping(self) -> None:
         """Verify that an authenticated compatible agent is listening."""
@@ -429,6 +431,17 @@ class AgentClient:
         params: dict[str, object],
         *,
         version: int = PROTOCOL_VERSION,
+    ) -> object:
+        """Serialize calls made by concurrent foreground-interface workers."""
+        with self._request_lock:
+            return self._request_serialized(method, params, version=version)
+
+    def _request_serialized(
+        self,
+        method: str,
+        params: dict[str, object],
+        *,
+        version: int,
     ) -> object:
         request_id = str(uuid.uuid4())
         request = {

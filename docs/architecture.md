@@ -82,6 +82,9 @@ contain compiled browser assets and no Node runtime.
 The agent runs reminder scheduling on its asyncio loop and moves blocking IPC and
 SQLite calls to worker threads. Requests are still handled serially, so the agent
 remains the single database writer while notification deadlines are not stalled.
+Each foreground-interface IPC client also serializes calls from its own worker
+threads so periodic refreshes cannot compete with user actions for the agent's
+single connection queue.
 
 ## Code boundaries
 
@@ -213,6 +216,11 @@ TimeEntry(id, activity_id, started_at_utc, stopped_at_utc?, note?, created_at)
 - Enforce at most one entry with no stop time using a partial unique index.
 - Store UTC instants as integer microseconds since the Unix epoch. Convert them to
   local, offset-aware ISO 8601 values at presentation and export boundaries.
+- The TUI renders editable entry boundaries as timezone-free local wall-clock
+  values. It resolves a changed value through the host's local-time rules before
+  sending an offset-aware instant to the agent, rejects ambiguous or nonexistent
+  wall times, and preserves the stored instant when its displayed value is left
+  unchanged. The agent and application layers continue to receive aware instants.
 - Derive duration from timestamps; do not store an independently mutable duration.
 - Use a monotonic clock for in-process scheduling and persisted UTC instants for
   recovery.
