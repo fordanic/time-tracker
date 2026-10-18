@@ -137,8 +137,18 @@ web interface served only to the same computer. The TUI remains the default.
 - A reminder due outside its window waits for the next opening without producing
   catch-up notifications. Snoozing defers the pending reminder without changing
   timer state or its configured recurring interval.
-- Ignoring an active reminder leaves the timer running; confirming it restarts the
-  interval.
+- Ignoring an active reminder leaves the timer running by default. When the user
+  explicitly enables the two-unanswered-checkpoint safeguard, two consecutive
+  successfully delivered active checkpoints that receive no response within
+  their grace periods stop the still-matching timer and notify the user; inactive
+  reminders never stop a timer.
+- Active checkpoints provide Continue, Snooze, Stop, and Switch activity actions
+  through a connected foreground interface and supported native notifications.
+  Actions are conditional on the pending checkpoint and cannot mutate a newer
+  timer.
+- Allow optional local-time Lunch and End-of-day checkpoints on configured
+  weekdays. These safeguards are independent of the shared reminder delivery
+  window and never produce catch-up notifications.
 - Reminders require no internet connection. A connected foreground interface may
   also show them.
 
@@ -221,8 +231,10 @@ Automated tests and platform validation must demonstrate that:
    correct derived duration.
 2. Switching activities produces adjacent, non-overlapping entries.
 3. An active timer survives both a normal restart and a simulated crash.
-4. Reminders work according to configuration after either interface closes, and
-   ignoring an active reminder does not stop the timer.
+4. Reminders work according to configuration after either interface closes.
+   Ignoring an active reminder does not stop the timer by default; the explicit
+   two-unanswered-checkpoint safeguard stops only the still-matching timer after
+   its configured policy is satisfied.
 5. Archived items remain readable in history but cannot start new timers.
 6. Two active entries cannot be created.
 7. CSV export preserves timestamps, Unicode, and notes containing commas, quotes,
@@ -243,8 +255,10 @@ The following are not part of the current product direction:
 
 - LAN or remote access to the web interface, a native mobile application, or a
   hosted web service.
-- Concurrent timers, users, or foreground agent-protocol clients. Multiple tabs
-  served by one web process remain one agent-protocol client.
+- Concurrent timers, users, or foreground interfaces. Multiple tabs served by
+  one web process remain one foreground interface. Short-lived authenticated
+  native-notification action commands may be serialized with foreground polling,
+  but do not form another persistent interface or protocol session.
 - Accounts, synchronization, collaboration, telemetry, and remote services.
 - Billing, invoicing, rates, costs, profitability, expenses, and approvals.
 - Plugins, third-party integrations, imports, and public automation APIs.
@@ -264,5 +278,4 @@ feature changes a top-level requirement.
 - Minimum supported OS versions and CPU architectures.
 - Behavior during computer sleep, system-clock changes, and time-zone changes.
 - Whether the background process starts at login.
-- Reminder windows, snooze persistence, and live configuration reload.
 - Whether favorites or defaults are needed after dogfooding derived recent work.

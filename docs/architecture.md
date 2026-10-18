@@ -76,8 +76,9 @@ contain compiled browser assets and no Node runtime.
   conflict rather than allowing simultaneous TUI and web clients. Browser tabs
   are HTTP consumers of one web process and are not independent protocol clients.
 - Bump the protocol version when a genuinely new capability is added, such as
-  completed-entry deletion (version 6); a minor addition to an existing settings
-  area does not require a bump.
+  completed-entry deletion (version 6) and conditional checkpoint actions
+  (version 7); a minor addition to an existing settings area does not require a
+  bump.
 
 The agent runs reminder scheduling on its asyncio loop and moves blocking IPC and
 SQLite calls to worker threads. Requests are still handled serially, so the agent
@@ -250,7 +251,9 @@ delivery fails or the TUI disconnects.
   `inactive_enabled`/`active_enabled` booleans and positive
   `inactive_interval_minutes`/`active_interval_minutes` numbers, an optional
   weekly local-time delivery window, a positive snooze duration, and independent
-  opt-in idle-reminder state with a positive threshold in minutes. Configuration
+  opt-in idle-reminder state with a positive threshold in minutes. It also stores
+  shared safeguard weekdays, independently enabled Lunch and End-of-day local
+  times, and the opt-in two-unanswered-checkpoint policy. Configuration
   is loaded when the background process starts. A successful agent-owned
   foreground save reloads it immediately, clears a prompt created by the replaced
   schedule, and resets the current timer state's monotonic deadline from the save
@@ -267,12 +270,21 @@ delivery fails or the TUI disconnects.
   not introduce presentation or escaping rules into the agent or TUI.
 - Use `platformdirs` for per-user configuration, data, state, runtime, and log
   locations.
-- Use simple native notifications. Native notification action buttons are
-  deferred; the agent retains the latest due reminder in memory for a connected
-  foreground interface to poll over IPC. Confirming an active reminder clears
-  that prompt and restarts the active monotonic interval without mutating the
-  persisted timer.
-  Ignoring it leaves both the timer and repeating schedule unchanged.
+- The agent owns one in-memory active checkpoint with an unguessable identifier,
+  the matching active-entry identity, a monotonic five-minute response deadline,
+  and a consecutive-unanswered count. Connected foreground interfaces poll that
+  state over authenticated IPC and offer Continue, Snooze, Stop, and Switch
+  activity. Every action is conditional on the checkpoint and active-entry
+  identities. Continue and Snooze reset unanswered state; Stop uses the ordinary
+  persisted timer transition; Switch records an in-memory foreground request and
+  then uses the existing recent-work transition after the user chooses a target.
+- With the opt-in safeguard enabled, expiry of two consecutive successfully
+  delivered active checkpoints invokes the ordinary stop use case inside the
+  agent's serialized application-operation boundary. The coordinator publishes
+  stopped state and a follow-up native notification only after persistence
+  succeeds. Checkpoint identifiers, deadlines, counters, delivery results, and
+  foreground switch requests are deliberately not durable and reset on agent or
+  settings restart.
 - `desktop-notifier` uses desktop services on Linux and WinRT on Windows. macOS
   uses its built-in `osascript` notification command: on the current macOS 26
   validation host, `UNUserNotificationCenter` rejected an otherwise valid
@@ -283,8 +295,13 @@ delivery fails or the TUI disconnects.
 - A WSL host reports Linux, so `desktop-notifier` selects its D-Bus backend, but a
   WSL distribution provides no notification daemon and delivery always fails.
   Detect WSL from the kernel release and registered Windows interop, then deliver
-  a Windows toast through the Windows PowerShell 5.1 WinRT notification API. The
-  agent registers one stable current-user application identity with a display
+  a Windows toast through the Windows PowerShell 5.1 WinRT notification API.
+  Active toasts use protocol-activation buttons carrying only a fixed action and
+  opaque checkpoint identifier. The adapter idempotently registers one
+  current-user URL protocol command that re-enters the originating WSL
+  distribution and invokes Time Tracker's hidden action mode; that mode connects
+  to the existing authenticated agent IPC and never opens SQLite. The agent
+  registers one stable current-user application identity with a display
   name so toasts are attributed to Time Tracker and manageable in the Windows
   notification settings; Windows consumes the first toast from an unseen identity,
   so first-time registration is followed by one warm-up notification. Reminder
@@ -293,10 +310,19 @@ delivery fails or the TUI disconnects.
   loop cannot stall, and an unavailable interpreter falls back to desktop-service
   delivery for a user running their own daemon inside WSL. WSLg provides no X11
   screen-saver extension, so idle detection reports itself unavailable there.
+- A native activation command is a transient authenticated protocol caller, not
+  a second foreground interface. The listener serializes its one request with TUI
+  or web polling requests and closes the connection after the response; it cannot
+  hold the foreground-instance lock or maintain a parallel agent session.
 - Reminder deadlines use a monotonic schedule. A persisted start, switch, or stop
   resets the relevant deadline, as does explicit confirmation of an active
   reminder; closing a foreground interface does not affect it. The default
   schedule is five minutes without a timer and 30 minutes with one.
+- Lunch and End-of-day safeguards use an agent-owned aware local wall-clock
+  schedule around the monotonic reminder coordinator. They are deduplicated by
+  label and local date, skipped rather than caught up, and intentionally bypass
+  the periodic reminder delivery window. They share the single active-checkpoint
+  channel and action policy.
 - Optional idle-triggered active reminders use an agent-owned poller and a narrow,
   injected operating-system adapter that reports only elapsed local input-idle
   duration. The adapter never exposes input content. Detector state is advisory

@@ -68,6 +68,7 @@ For each selected feature:
 - [Versioned release candidates and releases](versioned-release-candidates-releases.md)
 - [Prepare projects and activities](prepare-projects-and-activities.md)
 - [WSL notification delivery to the Windows desktop](wsl-windows-desktop-notifications.md)
+- [Actionable checkpoints and scheduled safeguards](actionable-checkpoints-and-safeguards.md)
 - [Simulated test data](simulated-test-data.md)
 
 ## Feature specification template
