@@ -23,7 +23,12 @@ from time_tracker.application.exporting import (
     ExportService,
 )
 from time_tracker.application.idle import IdleDetectionStatus, IdleDetector
-from time_tracker.application.reminders import Reminder, ReminderIntervals, ReminderKind
+from time_tracker.application.reminders import (
+    CheckpointAction,
+    Reminder,
+    ReminderIntervals,
+    ReminderKind,
+)
 from time_tracker.application.reporting import ReviewFilter
 from time_tracker.application.tracking import TrackingService
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
@@ -146,6 +151,15 @@ async def _serve_connections(
     idle_poll_seconds: float,
 ) -> None:
     """Keep reminder scheduling responsive while IPC and SQLite block in threads."""
+    operation_lock = asyncio.Lock()
+
+    async def stop_matching_active(expected_entry_id: int) -> CompletedTimer | None:
+        async with operation_lock:
+            active = await asyncio.to_thread(service.get_active)
+            if active is None or active.entry_id != expected_entry_id:
+                return None
+            return await asyncio.to_thread(service.stop)
+
     coordinator = ReminderCoordinator(
         service,
         notifier,
@@ -159,6 +173,12 @@ async def _serve_connections(
             None if idle_detector is not None else create_idle_detector
         ),
         idle_poll_seconds=idle_poll_seconds,
+        safeguard_weekdays=reminder_settings.safeguard_weekdays,
+        scheduled_checkpoints=reminder_settings.scheduled_checkpoints,
+        auto_stop_after_unanswered_enabled=(
+            reminder_settings.auto_stop_after_unanswered_enabled
+        ),
+        stop_active=stop_matching_active,
     )
     reminder_task = asyncio.create_task(coordinator.run())
     running = True
@@ -179,8 +199,10 @@ async def _serve_connections(
                     reminder_snoozed,
                     active_edited,
                     reloaded_settings,
-                ) = await asyncio.to_thread(
-                    _handle_request,
+                    checkpoint_action,
+                    consume_switch_request,
+                ) = await _handle_request_locked(
+                    operation_lock,
                     request_bytes,
                     service,
                     export_service,
@@ -195,6 +217,9 @@ async def _serve_connections(
                         reloaded_settings.snooze_seconds,
                         reloaded_settings.idle_enabled,
                         reloaded_settings.idle_threshold_minutes,
+                        reloaded_settings.safeguard_weekdays,
+                        reloaded_settings.scheduled_checkpoints,
+                        reloaded_settings.auto_stop_after_unanswered_enabled,
                     )
                 if active_confirmed:
                     coordinator.confirm_active()
@@ -215,6 +240,31 @@ async def _serve_connections(
                                 "message": str(error),
                             },
                         }
+                if checkpoint_action is not None:
+                    action, checkpoint_id = checkpoint_action
+                    accepted = False
+                    if action is CheckpointAction.CONTINUE:
+                        accepted = coordinator.confirm_active(checkpoint_id)
+                    elif action is CheckpointAction.SNOOZE:
+                        accepted = coordinator.snooze(checkpoint_id)
+                    elif action is CheckpointAction.SWITCH:
+                        accepted = coordinator.request_switch(checkpoint_id)
+                    elif (
+                        action is CheckpointAction.STOP
+                        and coordinator.checkpoint_matches(checkpoint_id)
+                    ):
+                        pending = coordinator.pending_reminder()
+                        expected_entry_id = (
+                            pending.active_entry_id if pending is not None else None
+                        )
+                        if expected_entry_id is not None:
+                            stopped = await stop_matching_active(expected_entry_id)
+                            accepted = stopped is not None
+                            if accepted:
+                                coordinator.timer_changed()
+                    response["result"] = accepted
+                if consume_switch_request:
+                    response["result"] = coordinator.consume_switch_request()
                 await asyncio.to_thread(
                     connection.send_bytes,
                     json.dumps(response).encode("utf-8"),
@@ -228,6 +278,38 @@ async def _serve_connections(
     finally:
         coordinator.stop()
         await reminder_task
+
+
+async def _handle_request_locked(
+    operation_lock: asyncio.Lock,
+    payload: bytes,
+    service: TrackingService,
+    export_service: ExportService,
+    configuration_service: ConfigurationService,
+    pending_reminder: Reminder | None,
+    idle_detection_status: IdleDetectionStatus,
+) -> tuple[
+    dict[str, object],
+    bool,
+    bool,
+    bool,
+    bool,
+    bool,
+    bool,
+    ReminderSettings | None,
+    tuple[CheckpointAction, str] | None,
+    bool,
+]:
+    async with operation_lock:
+        return await asyncio.to_thread(
+            _handle_request,
+            payload,
+            service,
+            export_service,
+            configuration_service,
+            pending_reminder,
+            idle_detection_status,
+        )
 
 
 def _handle_request(
@@ -246,9 +328,13 @@ def _handle_request(
     bool,
     bool,
     ReminderSettings | None,
+    tuple[CheckpointAction, str] | None,
+    bool,
 ]:
     request_id: object = None
     reloaded_settings: ReminderSettings | None = None
+    checkpoint_action: tuple[CheckpointAction, str] | None = None
+    consume_switch_request = False
     try:
         decoded: object = json.loads(payload.decode("utf-8"))
         if not isinstance(decoded, dict):
@@ -278,6 +364,19 @@ def _handle_request(
             )
         elif method == "snooze_reminder":
             result = pending_reminder is not None
+        elif method == "checkpoint_action":
+            try:
+                action = CheckpointAction(_required_str(params, "action"))
+            except ValueError as error:
+                raise ValueError("unknown checkpoint action") from error
+            checkpoint_id = _required_str(params, "checkpoint_id")
+            if not checkpoint_id:
+                raise ValueError("checkpoint_id must not be empty")
+            checkpoint_action = (action, checkpoint_id)
+            result = False
+        elif method == "consume_switch_request":
+            consume_switch_request = True
+            result = False
         elif method == "get_configuration":
             result = _settings_dict(configuration_service.get())
         elif method == "get_theme":
@@ -305,6 +404,24 @@ def _handle_request(
                     idle_enabled=_required_bool(params, "idle_enabled"),
                     idle_threshold_minutes=_required_number(
                         params, "idle_threshold_minutes"
+                    ),
+                    safeguard_weekdays=_required_int_tuple(
+                        params, "safeguard_weekdays"
+                    ),
+                    lunch_checkpoint_enabled=_required_bool(
+                        params, "lunch_checkpoint_enabled"
+                    ),
+                    lunch_checkpoint_time=_required_str(
+                        params, "lunch_checkpoint_time"
+                    ),
+                    end_of_day_checkpoint_enabled=_required_bool(
+                        params, "end_of_day_checkpoint_enabled"
+                    ),
+                    end_of_day_checkpoint_time=_required_str(
+                        params, "end_of_day_checkpoint_time"
+                    ),
+                    auto_stop_after_unanswered_enabled=_required_bool(
+                        params, "auto_stop_after_unanswered_enabled"
                     ),
                 )
             )
@@ -456,6 +573,8 @@ def _handle_request(
                 False,
                 False,
                 None,
+                None,
+                False,
             )
         else:
             raise ValueError(f"unknown method: {method}")
@@ -471,6 +590,8 @@ def _handle_request(
             method == "snooze_reminder" and result is True,
             method == "edit_active",
             reloaded_settings,
+            checkpoint_action,
+            consume_switch_request,
         )
     except ExportDestinationExistsError as error:
         return (
@@ -485,6 +606,8 @@ def _handle_request(
             False,
             False,
             None,
+            None,
+            False,
         )
     except (OSError, RuntimeError, sqlite3.Error, TypeError, ValueError) as error:
         return (
@@ -499,6 +622,8 @@ def _handle_request(
             False,
             False,
             None,
+            None,
+            False,
         )
 
 
@@ -521,6 +646,9 @@ def _reminder_dict(reminder: Reminder | None) -> object:
         "activity": reminder.activity,
         "reason": reminder.reason.value,
         "idle_threshold_minutes": reminder.idle_threshold_minutes,
+        "checkpoint_id": reminder.checkpoint_id,
+        "active_entry_id": reminder.active_entry_id,
+        "switch_requested": reminder.switch_requested,
     }
 
 

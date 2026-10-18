@@ -28,6 +28,12 @@ _REMINDER_KEYS = {
     "snooze_minutes",
     "idle_enabled",
     "idle_threshold_minutes",
+    "safeguard_weekdays",
+    "lunch_checkpoint_enabled",
+    "lunch_checkpoint_time",
+    "end_of_day_checkpoint_enabled",
+    "end_of_day_checkpoint_time",
+    "auto_stop_after_unanswered_enabled",
 }
 _UI_KEYS = {"theme"}
 _EXPORT_KEYS = {"delimiter"}
@@ -116,6 +122,20 @@ def load_config(path: Path) -> ApplicationConfig:
     idle_threshold_minutes = _positive_number(
         reminders, "idle_threshold_minutes", 15.0, path
     )
+    safeguard_weekdays = _weekdays(reminders, path, name="safeguard_weekdays")
+    lunch_checkpoint_enabled = _boolean(
+        reminders, "lunch_checkpoint_enabled", False, path
+    )
+    lunch_checkpoint_time = _string(reminders, "lunch_checkpoint_time", "12:00", path)
+    end_of_day_checkpoint_enabled = _boolean(
+        reminders, "end_of_day_checkpoint_enabled", False, path
+    )
+    end_of_day_checkpoint_time = _string(
+        reminders, "end_of_day_checkpoint_time", "17:00", path
+    )
+    auto_stop_after_unanswered_enabled = _boolean(
+        reminders, "auto_stop_after_unanswered_enabled", False, path
+    )
     try:
         settings = ReminderSettings(
             inactive_enabled=inactive_enabled,
@@ -129,6 +149,12 @@ def load_config(path: Path) -> ApplicationConfig:
             snooze_minutes=snooze_minutes,
             idle_enabled=idle_enabled,
             idle_threshold_minutes=idle_threshold_minutes,
+            safeguard_weekdays=safeguard_weekdays,
+            lunch_checkpoint_enabled=lunch_checkpoint_enabled,
+            lunch_checkpoint_time=lunch_checkpoint_time,
+            end_of_day_checkpoint_enabled=end_of_day_checkpoint_enabled,
+            end_of_day_checkpoint_time=end_of_day_checkpoint_time,
+            auto_stop_after_unanswered_enabled=(auto_stop_after_unanswered_enabled),
         )
         ui_settings = UiSettings(
             theme=_string(ui, "theme", "textual-dark", path, section="ui")
@@ -200,6 +226,17 @@ def _toml(config: ApplicationConfig) -> str:
         f"idle_enabled = {str(settings.idle_enabled).lower()}\n"
         "idle_threshold_minutes = "
         f"{_format_number(settings.idle_threshold_minutes)}\n"
+        "safeguard_weekdays = ["
+        + ", ".join(str(day) for day in settings.safeguard_weekdays)
+        + "]\n"
+        "lunch_checkpoint_enabled = "
+        f"{str(settings.lunch_checkpoint_enabled).lower()}\n"
+        f'lunch_checkpoint_time = "{settings.lunch_checkpoint_time}"\n'
+        "end_of_day_checkpoint_enabled = "
+        f"{str(settings.end_of_day_checkpoint_enabled).lower()}\n"
+        f'end_of_day_checkpoint_time = "{settings.end_of_day_checkpoint_time}"\n'
+        "auto_stop_after_unanswered_enabled = "
+        f"{str(settings.auto_stop_after_unanswered_enabled).lower()}\n"
         "\n[ui]\n"
         f"theme = {json.dumps(config.ui_settings.theme, ensure_ascii=False)}\n"
         "\n[export]\n"
@@ -257,13 +294,18 @@ def _string(
     return value
 
 
-def _weekdays(values: dict[str, object], path: Path) -> tuple[int, ...]:
-    value = values.get("window_weekdays", [0, 1, 2, 3, 4])
+def _weekdays(
+    values: dict[str, object],
+    path: Path,
+    *,
+    name: str = "window_weekdays",
+) -> tuple[int, ...]:
+    value = values.get(name, [0, 1, 2, 3, 4])
     if not isinstance(value, list) or any(
         isinstance(day, bool) or not isinstance(day, int) for day in value
     ):
         raise ConfigurationError(
             f"invalid configuration at {path}: "
-            "reminders.window_weekdays must be an integer array"
+            f"reminders.{name} must be an integer array"
         )
     return tuple(value)

@@ -8,6 +8,7 @@ from time_tracker.infrastructure.ipc import (
     AgentClient,
     AgentRequestError,
     _agent_command,
+    _notification_action_command,
 )
 from time_tracker.infrastructure.paths import AgentPaths
 
@@ -63,6 +64,14 @@ def test_source_agent_command_launches_the_agent_module(tmp_path: Path) -> None:
 
     assert command[1:3] == ["-m", "time_tracker.agent"]
     assert command[command.index("--config") + 1] == str(paths.config)
+
+
+def test_notification_action_command_reuses_the_current_runtime() -> None:
+    assert _notification_action_command(frozen=False)[1:] == [
+        "-m",
+        "time_tracker.cli",
+    ]
+    assert len(_notification_action_command(frozen=True)) == 1
 
 
 def test_shutdown_retries_the_previous_protocol_for_an_upgraded_agent(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import logging
 import os
 import shutil
@@ -16,8 +17,11 @@ logger = logging.getLogger(__name__)
 
 APPLICATION_ID = "TimeTracker.Reminders"
 APPLICATION_DISPLAY_NAME = "Time Tracker"
+PROTOCOL_SCHEME = "time-tracker"
 TITLE_VARIABLE = "TIME_TRACKER_TOAST_TITLE"
 MESSAGE_VARIABLE = "TIME_TRACKER_TOAST_MESSAGE"
+CHECKPOINT_VARIABLE = "TIME_TRACKER_CHECKPOINT_ID"
+PROTOCOL_COMMAND_VARIABLE = "TIME_TRACKER_PROTOCOL_COMMAND"
 
 _KERNEL_RELEASE = Path("/proc/sys/kernel/osrelease")
 _INTEROP_MARKERS = (
@@ -28,8 +32,10 @@ _INTERPRETER_NAME = "powershell.exe"
 _INTERPRETER_UNIX_PATH = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
 _INTERPRETER_WINDOWS_PATH = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
 _IDENTITY_KEY = rf"HKCU:\Software\Classes\AppUserModelId\{APPLICATION_ID}"
+_PROTOCOL_KEY = rf"HKCU:\Software\Classes\{PROTOCOL_SCHEME}"
 _TIMEOUT_SECONDS = 10.0
 _WARM_UP_MESSAGE = "Desktop reminders are enabled."
+_ACTION_COMMAND_SOURCE_VARIABLE = "TIME_TRACKER_ACTION_COMMAND"
 
 # Reminder text is read from the process environment so that user-controlled
 # content never becomes part of executable script source or a command line.
@@ -39,14 +45,28 @@ _TOAST_SCRIPT = (
     " Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null\n"
     "[Windows.Data.Xml.Dom.XmlDocument,"
     " Windows.Data.Xml.Dom, ContentType = WindowsRuntime] | Out-Null\n"
-    "$template ="
-    " [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent("
-    "[Windows.UI.Notifications.ToastTemplateType]::ToastText02)\n"
+    "$template = [Windows.Data.Xml.Dom.XmlDocument]::new()\n"
+    "$template.LoadXml(\"<toast><visual><binding template='ToastGeneric'>"
+    '<text/><text/></binding></visual></toast>")\n'
     "$texts = $template.GetElementsByTagName('text')\n"
     f"$texts.Item(0).AppendChild($template.CreateTextNode($env:{TITLE_VARIABLE}))"
     " | Out-Null\n"
     f"$texts.Item(1).AppendChild($template.CreateTextNode($env:{MESSAGE_VARIABLE}))"
     " | Out-Null\n"
+    f"if ($env:{CHECKPOINT_VARIABLE} -and $env:{PROTOCOL_COMMAND_VARIABLE}) {{\n"
+    "  $actions = $template.CreateElement('actions')\n"
+    "  foreach ($item in @(@('Continue','continue'), @('Snooze','snooze'), "
+    "@('Stop','stop'), @('Switch activity','switch'))) {\n"
+    "    $action = $template.CreateElement('action')\n"
+    "    $action.SetAttribute('content', $item[0])\n"
+    "    $uri = 'time-tracker://checkpoint/' + $item[1] + '/' + "
+    f"$env:{CHECKPOINT_VARIABLE}\n"
+    "    $action.SetAttribute('arguments', $uri)\n"
+    "    $action.SetAttribute('activationType', 'protocol')\n"
+    "    $actions.AppendChild($action) | Out-Null\n"
+    "  }\n"
+    "  $template.DocumentElement.AppendChild($actions) | Out-Null\n"
+    "}\n"
     "$toast = [Windows.UI.Notifications.ToastNotification]::new($template)\n"
     "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("
     f"'{APPLICATION_ID}').Show($toast)\n"
@@ -61,12 +81,61 @@ _IDENTITY_SCRIPT = (
     "else { New-Item -Path $key -Force | Out-Null; Write-Output 'created' }\n"
     "Set-ItemProperty -Path $key -Name DisplayName"
     f" -Value '{APPLICATION_DISPLAY_NAME}'\n"
+    f"if ($env:{PROTOCOL_COMMAND_VARIABLE}) {{\n"
+    f"  $protocol = '{_PROTOCOL_KEY}'\n"
+    "  New-Item -Path $protocol -Force | Out-Null\n"
+    "  Set-Item -Path $protocol -Value 'URL:Time Tracker checkpoint action'\n"
+    "  New-ItemProperty -Path $protocol -Name 'URL Protocol' -Value '' -Force"
+    " | Out-Null\n"
+    "  $command = Join-Path $protocol 'shell\\open\\command'\n"
+    "  New-Item -Path $command -Force | Out-Null\n"
+    f"  Set-Item -Path $command -Value $env:{PROTOCOL_COMMAND_VARIABLE}\n"
+    "}\n"
 )
 
 ToastRunner = Callable[
     [Sequence[str], Mapping[str, str], float],
     Awaitable[tuple[int, str, str]],
 ]
+
+
+def protocol_handler_command(
+    action_command: Sequence[str],
+    *,
+    distro_name: str | None,
+) -> str | None:
+    """Build the fixed Windows protocol command for the originating WSL app."""
+    if not action_command or not distro_name:
+        return None
+    command = [
+        r"C:\Windows\System32\wsl.exe",
+        "--distribution",
+        distro_name,
+        "--exec",
+        *action_command,
+        "--notification-action",
+    ]
+    return f'{subprocess.list2cmdline(command)} "%1"'
+
+
+def _action_command_from_environment(
+    environment: Mapping[str, str] | None = None,
+) -> tuple[str, ...]:
+    values = os.environ if environment is None else environment
+    raw = values.get(_ACTION_COMMAND_SOURCE_VARIABLE)
+    if raw is None:
+        return ()
+    try:
+        decoded: object = json.loads(raw)
+    except json.JSONDecodeError:
+        return ()
+    if (
+        not isinstance(decoded, list)
+        or not decoded
+        or not all(isinstance(item, str) and item for item in decoded)
+    ):
+        return ()
+    return tuple(decoded)
 
 
 def is_wsl_host(
@@ -114,14 +183,23 @@ def toast_environment(
     title: str,
     message: str,
     *,
+    checkpoint_id: str | None = None,
+    protocol_command: str | None = None,
     base: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
     """Share reminder text with Windows as data through the environment."""
     environment = dict(os.environ if base is None else base)
     environment[TITLE_VARIABLE] = title
     environment[MESSAGE_VARIABLE] = message
+    environment[CHECKPOINT_VARIABLE] = checkpoint_id or ""
+    environment[PROTOCOL_COMMAND_VARIABLE] = protocol_command or ""
     shared = [name for name in environment.get("WSLENV", "").split(":") if name]
-    for name in (TITLE_VARIABLE, MESSAGE_VARIABLE):
+    for name in (
+        TITLE_VARIABLE,
+        MESSAGE_VARIABLE,
+        CHECKPOINT_VARIABLE,
+        PROTOCOL_COMMAND_VARIABLE,
+    ):
         if name not in shared:
             shared.append(name)
     environment["WSLENV"] = ":".join(shared)
@@ -137,19 +215,38 @@ class WindowsToastDispatcher:
         runner: ToastRunner | None = None,
         interpreter_factory: Callable[[], str | None] | None = None,
         timeout_seconds: float = _TIMEOUT_SECONDS,
+        action_command: Sequence[str] | None = None,
+        distro_name: str | None = None,
     ) -> None:
         self._runner = runner or _run_interpreter
         self._interpreter_factory = interpreter_factory or resolve_interpreter
         self._timeout_seconds = timeout_seconds
+        self._protocol_command = protocol_handler_command(
+            action_command or _action_command_from_environment(),
+            distro_name=distro_name or os.environ.get("WSL_DISTRO_NAME"),
+        )
         self._interpreter: str | None = None
         self._identity_prepared = False
+        self._protocol_registered = False
         self._lock = asyncio.Lock()
 
-    async def send(self, title: str, message: str) -> None:
+    async def send(
+        self,
+        title: str,
+        message: str,
+        *,
+        checkpoint_id: str | None = None,
+    ) -> None:
         """Show a toast, or raise when Windows delivery is unavailable."""
         interpreter = await self._resolved_interpreter()
         await self._prepare_identity(interpreter)
-        await self._dispatch(interpreter, _TOAST_SCRIPT, title, message)
+        await self._dispatch(
+            interpreter,
+            _TOAST_SCRIPT,
+            title,
+            message,
+            checkpoint_id=checkpoint_id,
+        )
 
     async def _resolved_interpreter(self) -> str:
         if self._interpreter is None:
@@ -166,10 +263,18 @@ class WindowsToastDispatcher:
             # delivery worth attempting under an identity Windows may know.
             self._identity_prepared = True
             try:
-                _, stdout, _ = await self._run(interpreter, _IDENTITY_SCRIPT, {})
+                returncode, stdout, stderr = await self._run(
+                    interpreter, _IDENTITY_SCRIPT, {}
+                )
+                if returncode != 0:
+                    raise RuntimeError(
+                        stderr.strip()
+                        or f"identity registration exited with status {returncode}"
+                    )
             except OSError, RuntimeError, TimeoutError:
                 logger.exception("registering the Windows notification identity failed")
                 return
+            self._protocol_registered = self._protocol_command is not None
             if stdout.strip() != "created":
                 return
             try:
@@ -188,11 +293,18 @@ class WindowsToastDispatcher:
         script: str,
         title: str,
         message: str,
+        *,
+        checkpoint_id: str | None = None,
     ) -> None:
         returncode, _, stderr = await self._run(
             interpreter,
             script,
-            {TITLE_VARIABLE: title, MESSAGE_VARIABLE: message},
+            {
+                TITLE_VARIABLE: title,
+                MESSAGE_VARIABLE: message,
+                CHECKPOINT_VARIABLE: checkpoint_id or "",
+            },
+            share_protocol_command=self._protocol_registered,
         )
         # Windows PowerShell writes an informational progress record to the error
         # stream on first module use, so only the exit status decides delivery.
@@ -205,10 +317,16 @@ class WindowsToastDispatcher:
         interpreter: str,
         script: str,
         text: Mapping[str, str],
+        *,
+        share_protocol_command: bool = True,
     ) -> tuple[int, str, str]:
         environment = toast_environment(
             text.get(TITLE_VARIABLE, ""),
             text.get(MESSAGE_VARIABLE, ""),
+            checkpoint_id=text.get(CHECKPOINT_VARIABLE) or None,
+            protocol_command=(
+                self._protocol_command if share_protocol_command else None
+            ),
         )
         try:
             return await self._runner(

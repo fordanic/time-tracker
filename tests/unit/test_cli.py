@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from time_tracker import __version__
+from time_tracker.application.reminders import CheckpointAction
 from time_tracker.cli import main
 from time_tracker.infrastructure.configuration import ConfigurationError
 from time_tracker.infrastructure.paths import AgentPaths
@@ -110,3 +111,49 @@ def test_packaged_smoke_flag_runs_the_lifecycle(
 
     assert main(["--packaged-smoke", str(tmp_path)]) == 0
     assert received == tmp_path
+
+
+def test_notification_action_forwards_opaque_checkpoint_to_running_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    received: tuple[CheckpointAction, str] | None = None
+
+    class FakeClient:
+        def __init__(self, _paths: AgentPaths) -> None:
+            pass
+
+        def perform_checkpoint_action(
+            self, action: CheckpointAction, checkpoint_id: str
+        ) -> bool:
+            nonlocal received
+            received = (action, checkpoint_id)
+            return True
+
+    monkeypatch.setattr("time_tracker.cli.AgentClient", FakeClient)
+
+    assert (
+        main(
+            [
+                "--notification-action",
+                "time-tracker://checkpoint/switch/opaque-token_123",
+            ]
+        )
+        == 0
+    )
+    assert received == (CheckpointAction.SWITCH, "opaque-token_123")
+
+
+@pytest.mark.parametrize(
+    "uri",
+    [
+        "https://checkpoint/continue/token",
+        "time-tracker://checkpoint/delete/token",
+        "time-tracker://checkpoint/continue/token?extra=true",
+        "time-tracker://checkpoint/continue/not%20opaque",
+    ],
+)
+def test_notification_action_rejects_malformed_or_unknown_uri(uri: str) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--notification-action", uri])
+
+    assert exit_info.value.code == 2

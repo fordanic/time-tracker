@@ -16,7 +16,7 @@ from starlette.routing import Route
 from time_tracker.application.configuration import ExportSettings, ReminderSettings
 from time_tracker.application.exporting import ExportDestinationExistsError
 from time_tracker.application.idle import IdleDetectionStatus
-from time_tracker.application.reminders import Reminder
+from time_tracker.application.reminders import CheckpointAction, Reminder
 from time_tracker.application.reporting import (
     DatePreset,
     ReviewFilter,
@@ -51,6 +51,12 @@ class WebAgent(Protocol):
     def confirm_active_reminder(self) -> bool: ...
 
     def snooze_reminder(self) -> bool: ...
+
+    def perform_checkpoint_action(
+        self, action: CheckpointAction, checkpoint_id: str
+    ) -> bool: ...
+
+    def consume_switch_request(self) -> bool: ...
 
     def list_projects(self) -> list[str]: ...
 
@@ -183,6 +189,7 @@ class WebApi:
             Route("/api/timer/edit", self.edit_active, methods=["POST"]),
             Route("/api/reminder/confirm", self.confirm_reminder, methods=["POST"]),
             Route("/api/reminder/snooze", self.snooze_reminder, methods=["POST"]),
+            Route("/api/reminder/action", self.checkpoint_action, methods=["POST"]),
             Route("/api/review/query", self.review, methods=["POST"]),
             Route("/api/review/correct", self.correct, methods=["POST"]),
             Route("/api/review/create", self.create_manual, methods=["POST"]),
@@ -225,6 +232,9 @@ class WebApi:
 
     async def bootstrap(self, _request: Request) -> Response:
         async def operation() -> dict[str, object]:
+            switch_requested = cast(
+                bool, await self.agent.call("consume_switch_request")
+            )
             projects = cast(list[str], await self.agent.call("list_projects"))
             activities: dict[str, list[str]] = {}
             for project in projects:
@@ -266,15 +276,20 @@ class WebApi:
                     await self.agent.call("get_idle_detection_status")
                 ),
                 "configuration_path": str(self.client.configuration_path),
+                "switch_requested": switch_requested,
             }
 
         return await self._respond(operation)
 
     async def state(self, _request: Request) -> Response:
         async def operation() -> dict[str, object]:
+            switch_requested = cast(
+                bool, await self.agent.call("consume_switch_request")
+            )
             return {
                 "active": _timer_json(await self.agent.call("get_active")),
                 "reminder": _dataclass_json(await self.agent.call("get_reminder")),
+                "switch_requested": switch_requested,
             }
 
         return await self._respond(operation)
@@ -336,6 +351,28 @@ class WebApi:
 
     async def snooze_reminder(self, _request: Request) -> Response:
         return await self._agent_result("snoozed", "snooze_reminder")
+
+    async def checkpoint_action(self, request: Request) -> Response:
+        body = await _body(request)
+        try:
+            action = CheckpointAction(_text(body, "action"))
+        except ValueError as error:
+            return _error("invalid_field", str(error), "action")
+
+        async def operation() -> dict[str, object]:
+            accepted = cast(
+                bool,
+                await self.agent.call(
+                    "perform_checkpoint_action",
+                    action,
+                    _text(body, "checkpoint_id"),
+                ),
+            )
+            if accepted and action is CheckpointAction.SWITCH:
+                await self.agent.call("consume_switch_request")
+            return {"accepted": accepted}
+
+        return await self._respond(operation)
 
     async def review(self, request: Request) -> Response:
         body = await _body(request)
@@ -503,6 +540,16 @@ class WebApi:
                 snooze_minutes=_number(body, "snooze_minutes"),
                 idle_enabled=_boolean(body, "idle_enabled"),
                 idle_threshold_minutes=_number(body, "idle_threshold_minutes"),
+                safeguard_weekdays=tuple(_integer_list(body, "safeguard_weekdays")),
+                lunch_checkpoint_enabled=_boolean(body, "lunch_checkpoint_enabled"),
+                lunch_checkpoint_time=_text(body, "lunch_checkpoint_time"),
+                end_of_day_checkpoint_enabled=_boolean(
+                    body, "end_of_day_checkpoint_enabled"
+                ),
+                end_of_day_checkpoint_time=_text(body, "end_of_day_checkpoint_time"),
+                auto_stop_after_unanswered_enabled=_boolean(
+                    body, "auto_stop_after_unanswered_enabled"
+                ),
             )
             saved = await self.agent.call("save_configuration", settings)
             saved_delimiter = await self.agent.call("save_export_delimiter", delimiter)

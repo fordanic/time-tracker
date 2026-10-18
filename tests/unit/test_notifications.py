@@ -111,10 +111,18 @@ class FakeToastDispatcher:
         self.error = error
         self.title = ""
         self.message = ""
+        self.checkpoint_id: str | None = None
 
-    async def send(self, title: str, message: str) -> None:
+    async def send(
+        self,
+        title: str,
+        message: str,
+        *,
+        checkpoint_id: str | None = None,
+    ) -> None:
         self.title = title
         self.message = message
+        self.checkpoint_id = checkpoint_id
         if self.error is not None:
             raise self.error
 
@@ -154,6 +162,30 @@ async def test_wsl_host_delivers_the_shared_reminder_text_as_a_toast(
     assert toast.title == "Still tracking Website / Planning?"
     assert "idle for at least 15 minutes" in toast.message
     assert notifier.title == ""
+
+
+@pytest.mark.asyncio
+async def test_wsl_active_checkpoint_passes_opaque_action_identifier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    toast = FakeToastDispatcher()
+    service = wsl_service(
+        monkeypatch,
+        toast,
+        FakeDesktopNotifier(dispatch=True),
+    )
+
+    await service.send(
+        Reminder(
+            ReminderKind.ACTIVE,
+            project="Website",
+            activity="Planning",
+            checkpoint_id="opaque-token",
+            active_entry_id=42,
+        )
+    )
+
+    assert toast.checkpoint_id == "opaque-token"
 
 
 @pytest.mark.asyncio

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import secrets
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -23,6 +24,17 @@ class ReminderReason(Enum):
 
     SCHEDULED = "scheduled"
     IDLE = "idle"
+    LUNCH = "lunch"
+    END_OF_DAY = "end_of_day"
+
+
+class CheckpointAction(Enum):
+    """Actions accepted for one pending active checkpoint."""
+
+    CONTINUE = "continue"
+    SNOOZE = "snooze"
+    STOP = "stop"
+    SWITCH = "switch"
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +46,9 @@ class Reminder:
     activity: str | None = None
     reason: ReminderReason = ReminderReason.SCHEDULED
     idle_threshold_minutes: float | None = None
+    checkpoint_id: str | None = None
+    active_entry_id: int | None = None
+    switch_requested: bool = False
 
     def __post_init__(self) -> None:
         if self.reason is ReminderReason.IDLE:
@@ -50,6 +65,42 @@ class Reminder:
                 )
         elif self.idle_threshold_minutes is not None:
             raise ValueError("scheduled reminders cannot include an idle threshold")
+        if (self.checkpoint_id is None) != (self.active_entry_id is None):
+            raise ValueError(
+                "checkpoint identifier and active entry identity must appear together"
+            )
+        if self.checkpoint_id is not None:
+            if self.kind is not ReminderKind.ACTIVE or not self.checkpoint_id:
+                raise ValueError("checkpoint identifiers require an active reminder")
+            if (
+                isinstance(self.active_entry_id, bool)
+                or not isinstance(self.active_entry_id, int)
+                or self.active_entry_id <= 0
+            ):
+                raise ValueError("checkpoint active entry identity must be positive")
+        if self.switch_requested and self.checkpoint_id is None:
+            raise ValueError("a switch request requires an active checkpoint")
+
+
+@dataclass(frozen=True, slots=True)
+class AutoStoppedNotification:
+    """Follow-up notification emitted after a checkpoint stops a timer."""
+
+    project: str
+    activity: str
+    stopped_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduledCheckpoint:
+    """One enabled named checkpoint at a local wall-clock time."""
+
+    reason: ReminderReason
+    at: wall_time
+
+    def __post_init__(self) -> None:
+        if self.reason not in {ReminderReason.LUNCH, ReminderReason.END_OF_DAY}:
+            raise ValueError("scheduled safeguards require a named checkpoint reason")
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,6 +271,76 @@ class ReminderSchedule:
         if kind is ReminderKind.ACTIVE:
             return self._intervals.active
         return self._intervals.inactive
+
+
+class ScheduledCheckpointSchedule:
+    """Local wall-clock safeguards represented by one monotonic deadline."""
+
+    def __init__(
+        self,
+        weekdays: tuple[int, ...],
+        checkpoints: tuple[ScheduledCheckpoint, ...],
+        monotonic: Callable[[], float] = time.monotonic,
+        *,
+        wall_clock: Callable[[], datetime] | None = None,
+    ) -> None:
+        if not weekdays or len(set(weekdays)) != len(weekdays):
+            raise ValueError("checkpoint weekdays must be non-empty and unique")
+        if any(day < 0 or day > 6 for day in weekdays):
+            raise ValueError("checkpoint weekdays must be between 0 and 6")
+        if len({checkpoint.reason for checkpoint in checkpoints}) != len(checkpoints):
+            raise ValueError("checkpoint reasons must be unique")
+        self._weekdays = weekdays
+        self._checkpoints = checkpoints
+        self._monotonic = monotonic
+        self._wall_clock = wall_clock or (lambda: datetime.now().astimezone())
+        self._due_at: float | None = None
+        self._due_reason: ReminderReason | None = None
+        self.reset()
+
+    def reset(self) -> None:
+        """Skip past occurrences and schedule the next local checkpoint."""
+        self._schedule_next(_aware_local(self._wall_clock()))
+
+    def seconds_until_due(self) -> float | None:
+        """Return the wait until the next configured safeguard."""
+        if self._due_at is None:
+            return None
+        return max(0.0, self._due_at - self._monotonic())
+
+    def take_due(self, *, active: bool) -> ReminderReason | None:
+        """Consume one occurrence, returning it only when a timer is active."""
+        if self._due_at is None or self._monotonic() < self._due_at:
+            return None
+        reason = self._due_reason
+        self._schedule_next(_aware_local(self._wall_clock()))
+        return reason if active else None
+
+    def _schedule_next(self, now: datetime) -> None:
+        candidates: list[tuple[datetime, ReminderReason]] = []
+        selected = set(self._weekdays)
+        for offset in range(8):
+            candidate_date = now.date() + timedelta(days=offset)
+            if candidate_date.weekday() not in selected:
+                continue
+            for checkpoint in self._checkpoints:
+                candidate = datetime.combine(candidate_date, checkpoint.at, now.tzinfo)
+                if candidate > now:
+                    candidates.append((candidate, checkpoint.reason))
+        if not candidates:
+            self._due_at = None
+            self._due_reason = None
+            return
+        candidate, reason = min(candidates, key=lambda value: value[0])
+        self._due_at = self._monotonic() + max(
+            0.0, candidate.timestamp() - now.timestamp()
+        )
+        self._due_reason = reason
+
+
+def new_checkpoint_id() -> str:
+    """Return an unguessable URL-safe identifier for one active checkpoint."""
+    return secrets.token_urlsafe(24)
 
 
 def _aware_local(value: datetime) -> datetime:

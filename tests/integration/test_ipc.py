@@ -11,6 +11,7 @@ import pytest
 from time_tracker.agent.server import serve
 from time_tracker.application.configuration import ReminderSettings
 from time_tracker.application.reminders import (
+    CheckpointAction,
     Reminder,
     ReminderIntervals,
     ReminderKind,
@@ -551,11 +552,15 @@ def test_idle_detection_triggers_active_reminder_without_mutating_timer(
 
         edited = client.edit_active("Idle", "Updated")
         pending_after_edit = client.get_reminder()
-        assert pending_after_edit is not None
-        assert pending_after_edit.reason is ReminderReason.IDLE
-        assert pending_after_edit.activity == "Updated"
+        assert pending_after_edit is None
         assert edited.entry_id == started.entry_id
         assert edited.started_at == started.started_at
+
+        detector.reset()
+        refreshed = _wait_for_pending_reminder(client, ReminderKind.ACTIVE)
+        assert refreshed.reason is ReminderReason.IDLE
+        assert refreshed.activity == "Updated"
+        assert refreshed.checkpoint_id is not None
 
         assert client.snooze_reminder() is True
         snoozed = _wait_for_pending_reminder(client, ReminderKind.ACTIVE)
@@ -645,38 +650,59 @@ def test_active_reminder_can_be_polled_confirmed_or_ignored(tmp_path: Path) -> N
         started = client.start("Connected", "Confirmation")
         reminder = _wait_for_pending_reminder(client, ReminderKind.ACTIVE)
 
-        assert reminder == Reminder(
-            ReminderKind.ACTIVE,
-            project="Connected",
-            activity="Confirmation",
-        )
+        assert reminder.kind is ReminderKind.ACTIVE
+        assert reminder.project == "Connected"
+        assert reminder.activity == "Confirmation"
+        assert reminder.checkpoint_id is not None
+        assert reminder.active_entry_id == started.entry_id
         edited = client.edit_active("Updated", "Details", "Still running")
         assert edited.entry_id == started.entry_id
         assert edited.started_at == started.started_at
         assert client.list_completed() == []
-        assert client.get_reminder() == Reminder(
-            ReminderKind.ACTIVE,
-            project="Updated",
-            activity="Details",
-        )
+        assert client.get_reminder() is None
         started = edited
         first_count = len(notifier.reminders)
         _wait_for_reminder_count(notifier, first_count + 1)
+        updated_reminder = _wait_for_pending_reminder(client, ReminderKind.ACTIVE)
+        assert updated_reminder.project == "Updated"
+        assert updated_reminder.activity == "Details"
         assert client.get_active() == started
 
         assert client.snooze_reminder() is True
         assert client.get_reminder() is None
         assert client.snooze_reminder() is False
         _wait_for_pending_reminder(client, ReminderKind.ACTIVE)
-        assert client.get_active() == started
-
         assert client.confirm_active_reminder() is True
         assert client.get_reminder() is None
         assert client.get_active() == started
         assert client.confirm_active_reminder() is False
 
-        _wait_for_pending_reminder(client, ReminderKind.ACTIVE)
-        assert client.get_active() == started
+        switch_reminder = _wait_for_pending_reminder(client, ReminderKind.ACTIVE)
+        assert switch_reminder.checkpoint_id is not None
+        assert client.perform_checkpoint_action(
+            CheckpointAction.SWITCH, switch_reminder.checkpoint_id
+        )
+        assert client.get_reminder() is not None
+        assert client.get_reminder().switch_requested is True  # type: ignore[union-attr]
+        assert client.consume_switch_request() is True
+        assert client.get_reminder() is None
+        assert client.consume_switch_request() is False
+        assert not client.perform_checkpoint_action(
+            CheckpointAction.STOP, switch_reminder.checkpoint_id
+        )
+
+        final_reminder = _wait_for_pending_reminder(client, ReminderKind.ACTIVE)
+        assert final_reminder.checkpoint_id is not None
+        assert client.perform_checkpoint_action(
+            CheckpointAction.STOP, final_reminder.checkpoint_id
+        )
+        assert client.get_active() is None
+        assert client.list_completed()[-1].entry_id == started.entry_id
+        assert client.get_reminder() is None
+        assert client.confirm_active_reminder() is False
+        assert not client.perform_checkpoint_action(
+            CheckpointAction.STOP, final_reminder.checkpoint_id
+        )
     finally:
         client.shutdown()
         thread.join(timeout=2)

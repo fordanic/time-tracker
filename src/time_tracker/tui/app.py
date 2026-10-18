@@ -37,7 +37,12 @@ from textual.widgets.option_list import Option
 from time_tracker.application.configuration import ReminderSettings
 from time_tracker.application.exporting import ExportDestinationExistsError
 from time_tracker.application.idle import IdleDetectionStatus
-from time_tracker.application.reminders import Reminder, ReminderKind, ReminderReason
+from time_tracker.application.reminders import (
+    CheckpointAction,
+    Reminder,
+    ReminderKind,
+    ReminderReason,
+)
 from time_tracker.application.reporting import (
     DatePreset,
     ReviewFilter,
@@ -123,6 +128,18 @@ class TrackerGateway(Protocol):
 
     def snooze_reminder(self) -> bool:
         """Defer the pending reminder without changing timer state."""
+        ...
+
+    def perform_checkpoint_action(
+        self,
+        action: CheckpointAction,
+        checkpoint_id: str,
+    ) -> bool:
+        """Apply one conditional checkpoint action."""
+        ...
+
+    def consume_switch_request(self) -> bool:
+        """Consume a native request to focus recent work."""
         ...
 
     def list_projects(self) -> list[str]:
@@ -560,13 +577,19 @@ class TimeTrackerApp(App[None]):
 
     #confirm-active-reminder-button {
         display: none;
-        width: 24;
+        width: 14;
         margin-left: 1;
     }
 
     #snooze-reminder-button {
         display: none;
-        width: 16;
+        width: 12;
+        margin-left: 1;
+    }
+
+    #stop-reminder-button, #switch-reminder-button {
+        display: none;
+        width: 14;
         margin-left: 1;
     }
 
@@ -886,11 +909,17 @@ class TimeTrackerApp(App[None]):
             with Horizontal(id="reminder"):
                 yield Static("", id="reminder-message")
                 yield Button(
-                    "Still active  F10",
+                    "Continue  F10",
                     id="confirm-active-reminder-button",
                     variant="primary",
                 )
                 yield Button("Snooze  F12", id="snooze-reminder-button")
+                yield Button(
+                    "Stop",
+                    id="stop-reminder-button",
+                    variant="error",
+                )
+                yield Button("Switch", id="switch-reminder-button")
             yield Tabs(
                 Tab("Track  F1", id="track-tab"),
                 Tab("Review  F2", id="review-tab"),
@@ -1157,6 +1186,26 @@ class TimeTrackerApp(App[None]):
                             placeholder="Idle threshold minutes",
                             id="idle-reminder-minutes",
                         )
+                    with Horizontal(classes="settings-row"):
+                        yield Static("Safeguard weekdays")
+                        yield Input(
+                            placeholder="Mon,Tue,Wed,Thu,Fri",
+                            id="safeguard-weekdays",
+                        )
+                    with Horizontal(classes="settings-row"):
+                        yield Static("Lunch checkpoint")
+                        yield Switch(id="lunch-checkpoint-enabled")
+                        yield Input(placeholder="12:00", id="lunch-checkpoint-time")
+                    with Horizontal(classes="settings-row"):
+                        yield Static("End-of-day checkpoint")
+                        yield Switch(id="end-of-day-checkpoint-enabled")
+                        yield Input(
+                            placeholder="17:00",
+                            id="end-of-day-checkpoint-time",
+                        )
+                    with Horizontal(classes="settings-row"):
+                        yield Static("Stop after two unanswered checkpoints")
+                        yield Switch(id="auto-stop-unanswered-enabled")
                     with Horizontal(classes="settings-row"):
                         yield Static("Export delimiter")
                         yield Select(
@@ -1467,6 +1516,16 @@ class TimeTrackerApp(App[None]):
         """Snooze a visible reminder."""
         await self._snooze_reminder()
 
+    @on(Button.Pressed, "#stop-reminder-button")
+    async def handle_stop_reminder_button(self) -> None:
+        """Stop the timer named by the visible checkpoint."""
+        await self._stop_checkpoint()
+
+    @on(Button.Pressed, "#switch-reminder-button")
+    async def handle_switch_reminder_button(self) -> None:
+        """Accept a checkpoint and focus recent work for switching."""
+        await self._request_checkpoint_switch()
+
     @on(Button.Pressed, "#save-settings-button")
     async def handle_save_settings_button(self) -> None:
         """Persist and immediately apply reminder settings."""
@@ -1745,6 +1804,24 @@ class TimeTrackerApp(App[None]):
                     self.query_one("#idle-reminder-minutes", Input).value,
                     "Idle reminder threshold",
                 ),
+                safeguard_weekdays=_parse_weekdays(
+                    self.query_one("#safeguard-weekdays", Input).value
+                ),
+                lunch_checkpoint_enabled=self.query_one(
+                    "#lunch-checkpoint-enabled", Switch
+                ).value,
+                lunch_checkpoint_time=self.query_one(
+                    "#lunch-checkpoint-time", Input
+                ).value.strip(),
+                end_of_day_checkpoint_enabled=self.query_one(
+                    "#end-of-day-checkpoint-enabled", Switch
+                ).value,
+                end_of_day_checkpoint_time=self.query_one(
+                    "#end-of-day-checkpoint-time", Input
+                ).value.strip(),
+                auto_stop_after_unanswered_enabled=self.query_one(
+                    "#auto-stop-unanswered-enabled", Switch
+                ).value,
             )
             delimiter_value = self.query_one("#export-delimiter", Select).value
             if not isinstance(delimiter_value, str):
@@ -2076,9 +2153,14 @@ class TimeTrackerApp(App[None]):
 
     async def _refresh_reminder(self) -> None:
         try:
+            switch_requested = await asyncio.to_thread(
+                self.client.consume_switch_request
+            )
             reminder = await asyncio.to_thread(self.client.get_reminder)
         except Exception:
             return
+        if switch_requested:
+            self._focus_checkpoint_switch()
         if reminder == self.pending_reminder:
             return
         self.pending_reminder = reminder
@@ -2095,8 +2177,16 @@ class TimeTrackerApp(App[None]):
         self._render_idle_status()
 
     async def _confirm_active_reminder(self) -> None:
+        reminder = self.pending_reminder
         try:
-            confirmed = await asyncio.to_thread(self.client.confirm_active_reminder)
+            if reminder is not None and reminder.checkpoint_id is not None:
+                confirmed = await asyncio.to_thread(
+                    self.client.perform_checkpoint_action,
+                    CheckpointAction.CONTINUE,
+                    reminder.checkpoint_id,
+                )
+            else:
+                confirmed = await asyncio.to_thread(self.client.confirm_active_reminder)
         except Exception as error:
             self._show_message(str(error), error=True)
             return
@@ -2109,8 +2199,16 @@ class TimeTrackerApp(App[None]):
         self._show_message("Timer confirmed; active reminder interval restarted.")
 
     async def _snooze_reminder(self) -> None:
+        reminder = self.pending_reminder
         try:
-            snoozed = await asyncio.to_thread(self.client.snooze_reminder)
+            if reminder is not None and reminder.checkpoint_id is not None:
+                snoozed = await asyncio.to_thread(
+                    self.client.perform_checkpoint_action,
+                    CheckpointAction.SNOOZE,
+                    reminder.checkpoint_id,
+                )
+            else:
+                snoozed = await asyncio.to_thread(self.client.snooze_reminder)
         except Exception as error:
             self._show_message(str(error), error=True)
             return
@@ -2121,6 +2219,69 @@ class TimeTrackerApp(App[None]):
         self.pending_reminder = None
         self._render_reminder()
         self._show_message("Reminder snoozed.")
+
+    async def _stop_checkpoint(self) -> None:
+        reminder = self.pending_reminder
+        if reminder is None or reminder.kind is not ReminderKind.ACTIVE:
+            return
+        try:
+            if reminder.checkpoint_id is None:
+                await self._stop_timer()
+                return
+            stopped = await asyncio.to_thread(
+                self.client.perform_checkpoint_action,
+                CheckpointAction.STOP,
+                reminder.checkpoint_id,
+            )
+        except Exception as error:
+            self._show_message(str(error), error=True)
+            return
+        if not stopped:
+            await self._refresh_reminder()
+            self._show_message("That checkpoint is no longer current.", error=True)
+            return
+        self.pending_reminder = None
+        self.active_timer = None
+        self._render_reminder()
+        self._render_active()
+        await self._refresh_history()
+        await self._refresh_recent_activities()
+        await self._refresh_start_action()
+        self._show_message("Timer stopped from checkpoint.")
+
+    async def _request_checkpoint_switch(self) -> None:
+        reminder = self.pending_reminder
+        if (
+            reminder is None
+            or reminder.kind is not ReminderKind.ACTIVE
+            or reminder.checkpoint_id is None
+        ):
+            self._focus_checkpoint_switch()
+            return
+        try:
+            accepted = await asyncio.to_thread(
+                self.client.perform_checkpoint_action,
+                CheckpointAction.SWITCH,
+                reminder.checkpoint_id,
+            )
+            if accepted:
+                await asyncio.to_thread(self.client.consume_switch_request)
+        except Exception as error:
+            self._show_message(str(error), error=True)
+            return
+        if not accepted:
+            await self._refresh_reminder()
+            self._show_message("That checkpoint is no longer current.", error=True)
+            return
+        self.pending_reminder = None
+        self._render_reminder()
+        self._focus_checkpoint_switch()
+
+    def _focus_checkpoint_switch(self) -> None:
+        self._select_view("track-tab")
+        deck = self.query_one("#recent-activities", QuickSwitchDeck)
+        deck.focus()
+        self._show_message("Choose recent work and press Enter to switch.")
 
     async def _refresh_history(self, *, preferred_entry_id: int | None = None) -> None:
         try:
@@ -2928,17 +3089,34 @@ class TimeTrackerApp(App[None]):
         panels = self.query("#reminder")
         buttons = self.query("#confirm-active-reminder-button")
         snooze_buttons = self.query("#snooze-reminder-button")
+        stop_buttons = self.query("#stop-reminder-button")
+        switch_buttons = self.query("#switch-reminder-button")
         message_widgets = self.query("#reminder-message")
-        if not panels or not buttons or not snooze_buttons or not message_widgets:
+        if (
+            not panels
+            or not buttons
+            or not snooze_buttons
+            or not stop_buttons
+            or not switch_buttons
+            or not message_widgets
+        ):
             return
         panel = panels.first(Horizontal)
         button = buttons.first(Button)
         snooze_button = snooze_buttons.first(Button)
+        stop_button = stop_buttons.first(Button)
+        switch_button = switch_buttons.first(Button)
         message_widget = message_widgets.first(Static)
         reminder = self.pending_reminder
         panel.display = reminder is not None
         button.display = reminder is not None and reminder.kind is ReminderKind.ACTIVE
         snooze_button.display = reminder is not None
+        stop_button.display = (
+            reminder is not None and reminder.kind is ReminderKind.ACTIVE
+        )
+        switch_button.display = (
+            reminder is not None and reminder.kind is ReminderKind.ACTIVE
+        )
         if reminder is None:
             message_widget.update("")
             self._render_shortcut_summary()
@@ -2954,10 +3132,13 @@ class TimeTrackerApp(App[None]):
                     f"least {threshold} minutes. Confirm to keep tracking, snooze, "
                     "or stop the timer; use Review to remove idle time."
                 )
+            elif reminder.reason is ReminderReason.LUNCH:
+                message = f"Lunch checkpoint for {timer_name}. Choose an action."
+            elif reminder.reason is ReminderReason.END_OF_DAY:
+                message = f"End-of-day checkpoint for {timer_name}. Choose an action."
             else:
                 message = (
-                    f"Still tracking {timer_name}? Confirm to restart the reminder "
-                    "interval, or stop the timer."
+                    f"Still tracking {timer_name}? Continue, snooze, stop, or switch."
                 )
         else:
             message = "No timer is running. Start one if you are working."
@@ -2999,6 +3180,24 @@ class TimeTrackerApp(App[None]):
         self.query_one("#idle-reminder-minutes", Input).value = _format_minutes(
             settings.idle_threshold_minutes
         )
+        self.query_one("#safeguard-weekdays", Input).value = ",".join(
+            _WEEKDAY_NAMES[day] for day in settings.safeguard_weekdays
+        )
+        self.query_one(
+            "#lunch-checkpoint-enabled", Switch
+        ).value = settings.lunch_checkpoint_enabled
+        self.query_one(
+            "#lunch-checkpoint-time", Input
+        ).value = settings.lunch_checkpoint_time
+        self.query_one(
+            "#end-of-day-checkpoint-enabled", Switch
+        ).value = settings.end_of_day_checkpoint_enabled
+        self.query_one(
+            "#end-of-day-checkpoint-time", Input
+        ).value = settings.end_of_day_checkpoint_time
+        self.query_one(
+            "#auto-stop-unanswered-enabled", Switch
+        ).value = settings.auto_stop_after_unanswered_enabled
         self.query_one("#export-delimiter", Select).value = export_delimiter
         self._render_idle_status()
 

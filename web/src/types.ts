@@ -14,6 +14,9 @@ export interface Reminder {
   activity: string | null;
   reason: string;
   idle_threshold_minutes: number | null;
+  checkpoint_id: string | null;
+  active_entry_id: number | null;
+  switch_requested: boolean;
 }
 
 export interface RecentActivity {
@@ -37,6 +40,12 @@ export interface ReminderSettings {
   snooze_minutes: number;
   idle_enabled: boolean;
   idle_threshold_minutes: number;
+  safeguard_weekdays: number[];
+  lunch_checkpoint_enabled: boolean;
+  lunch_checkpoint_time: string;
+  end_of_day_checkpoint_enabled: boolean;
+  end_of_day_checkpoint_time: string;
+  auto_stop_after_unanswered_enabled: boolean;
 }
 
 export interface Bootstrap {
@@ -53,6 +62,7 @@ export interface Bootstrap {
   export_delimiter: "," | "|";
   idle_detection: { available: boolean };
   configuration_path: string;
+  switch_requested: boolean;
 }
 
 export interface ReviewFilter {
