@@ -7,7 +7,12 @@ from dataclasses import dataclass, field, replace
 from datetime import time
 from typing import Protocol
 
-from time_tracker.application.reminders import ReminderIntervals, ReminderWindow
+from time_tracker.application.reminders import (
+    ReminderIntervals,
+    ReminderReason,
+    ReminderWindow,
+    ScheduledCheckpoint,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +30,12 @@ class ReminderSettings:
     snooze_minutes: float = 10.0
     idle_enabled: bool = False
     idle_threshold_minutes: float = 15.0
+    safeguard_weekdays: tuple[int, ...] = (0, 1, 2, 3, 4)
+    lunch_checkpoint_enabled: bool = False
+    lunch_checkpoint_time: str = "12:00"
+    end_of_day_checkpoint_enabled: bool = False
+    end_of_day_checkpoint_time: str = "17:00"
+    auto_stop_after_unanswered_enabled: bool = False
 
     def __post_init__(self) -> None:
         if any(
@@ -34,6 +45,9 @@ class ReminderSettings:
                 self.active_enabled,
                 self.window_enabled,
                 self.idle_enabled,
+                self.lunch_checkpoint_enabled,
+                self.end_of_day_checkpoint_enabled,
+                self.auto_stop_after_unanswered_enabled,
             )
         ):
             raise ValueError("reminder enabled values must be booleans")
@@ -66,6 +80,15 @@ class ReminderSettings:
             _parse_clock(self.window_start),
             _parse_clock(self.window_end),
         )
+        _validate_weekdays(self.safeguard_weekdays, "checkpoint")
+        _parse_clock(self.lunch_checkpoint_time)
+        _parse_clock(self.end_of_day_checkpoint_time)
+        if (
+            self.lunch_checkpoint_enabled
+            and self.end_of_day_checkpoint_enabled
+            and self.lunch_checkpoint_time == self.end_of_day_checkpoint_time
+        ):
+            raise ValueError("lunch and end-of-day checkpoint times must differ")
 
     @property
     def intervals(self) -> ReminderIntervals:
@@ -103,6 +126,26 @@ class ReminderSettings:
     def idle_threshold_seconds(self) -> float:
         """Return the configured content-free idle threshold in seconds."""
         return float(self.idle_threshold_minutes) * 60
+
+    @property
+    def scheduled_checkpoints(self) -> tuple[ScheduledCheckpoint, ...]:
+        """Return enabled local-time lunch and end-of-day safeguards."""
+        checkpoints: list[ScheduledCheckpoint] = []
+        if self.lunch_checkpoint_enabled:
+            checkpoints.append(
+                ScheduledCheckpoint(
+                    ReminderReason.LUNCH,
+                    _parse_clock(self.lunch_checkpoint_time),
+                )
+            )
+        if self.end_of_day_checkpoint_enabled:
+            checkpoints.append(
+                ScheduledCheckpoint(
+                    ReminderReason.END_OF_DAY,
+                    _parse_clock(self.end_of_day_checkpoint_time),
+                )
+            )
+        return tuple(checkpoints)
 
     @classmethod
     def from_intervals(cls, intervals: ReminderIntervals) -> ReminderSettings:
@@ -226,3 +269,14 @@ def _parse_clock(value: str) -> time:
     ):
         raise ValueError("reminder window times must use HH:MM")
     return parsed
+
+
+def _validate_weekdays(value: tuple[int, ...], label: str) -> None:
+    if (
+        not isinstance(value, tuple)
+        or not value
+        or len(set(value)) != len(value)
+        or any(isinstance(day, bool) or not isinstance(day, int) for day in value)
+        or any(day < 0 or day > 6 for day in value)
+    ):
+        raise ValueError(f"{label} weekdays must be unique integers from 0 through 6")

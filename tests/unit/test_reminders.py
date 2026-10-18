@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, time
+from datetime import UTC, datetime, time, timedelta
 
 import pytest
 
@@ -9,6 +9,8 @@ from time_tracker.application.reminders import (
     ReminderReason,
     ReminderSchedule,
     ReminderWindow,
+    ScheduledCheckpoint,
+    ScheduledCheckpointSchedule,
 )
 
 
@@ -184,3 +186,39 @@ def test_idle_request_waits_for_reminder_window_without_losing_reason() -> None:
     reminder = schedule.take_due()
     assert reminder is not None
     assert reminder.reason is ReminderReason.IDLE
+
+
+def test_safeguard_schedule_fires_at_configured_local_time_and_advances() -> None:
+    monotonic = ControlledMonotonicClock()
+    wall_now = [datetime(2026, 7, 20, 11, 59, tzinfo=UTC)]  # Monday
+    schedule = ScheduledCheckpointSchedule(
+        (0,),
+        (
+            ScheduledCheckpoint(ReminderReason.LUNCH, time(12)),
+            ScheduledCheckpoint(ReminderReason.END_OF_DAY, time(17)),
+        ),
+        monotonic,
+        wall_clock=lambda: wall_now[0],
+    )
+
+    assert schedule.seconds_until_due() == 60
+    monotonic.value = 60
+    wall_now[0] += timedelta(minutes=1)
+    assert schedule.take_due(active=True) is ReminderReason.LUNCH
+    assert schedule.seconds_until_due() == 5 * 60 * 60
+
+
+def test_safeguard_occurrence_is_consumed_when_no_timer_is_active() -> None:
+    monotonic = ControlledMonotonicClock()
+    wall_now = [datetime(2026, 7, 20, 11, 59, tzinfo=UTC)]  # Monday
+    schedule = ScheduledCheckpointSchedule(
+        (0,),
+        (ScheduledCheckpoint(ReminderReason.LUNCH, time(12)),),
+        monotonic,
+        wall_clock=lambda: wall_now[0],
+    )
+
+    monotonic.value = 60
+    wall_now[0] += timedelta(minutes=1)
+    assert schedule.take_due(active=False) is None
+    assert schedule.seconds_until_due() == 7 * 24 * 60 * 60

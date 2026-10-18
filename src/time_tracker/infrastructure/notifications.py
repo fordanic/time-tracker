@@ -9,7 +9,12 @@ from typing import Protocol
 
 from desktop_notifier import DesktopNotifier
 
-from time_tracker.application.reminders import Reminder, ReminderKind, ReminderReason
+from time_tracker.application.reminders import (
+    AutoStoppedNotification,
+    Reminder,
+    ReminderKind,
+    ReminderReason,
+)
 from time_tracker.infrastructure.wsl_toast import WindowsToastDispatcher, is_wsl_host
 
 logger = logging.getLogger(__name__)
@@ -18,7 +23,7 @@ logger = logging.getLogger(__name__)
 class NotificationService(Protocol):
     """Asynchronous boundary used by the background reminder scheduler."""
 
-    async def send(self, reminder: Reminder) -> None:
+    async def send(self, reminder: Reminder | AutoStoppedNotification) -> None:
         """Deliver one reminder, or raise when the platform rejects it."""
         ...
 
@@ -34,7 +39,7 @@ class NativeNotificationService:
         )
         self._toast = WindowsToastDispatcher() if is_wsl_host() else None
 
-    async def send(self, reminder: Reminder) -> None:
+    async def send(self, reminder: Reminder | AutoStoppedNotification) -> None:
         """Deliver an active or inactive timer reminder."""
         title, message = _reminder_text(reminder)
         if sys.platform == "darwin":
@@ -45,7 +50,14 @@ class NativeNotificationService:
             # desktop is the target. Keep the desktop service as a fallback for a
             # user who runs their own daemon inside WSL.
             try:
-                await self._toast.send(title, message)
+                checkpoint_id = (
+                    reminder.checkpoint_id if isinstance(reminder, Reminder) else None
+                )
+                await self._toast.send(
+                    title,
+                    message,
+                    checkpoint_id=checkpoint_id,
+                )
                 return
             except (OSError, RuntimeError) as error:
                 logger.warning("Windows toast delivery failed: %s", error)
@@ -81,8 +93,18 @@ class NativeNotificationService:
             raise RuntimeError("the desktop notification service rejected delivery")
 
 
-def _reminder_text(reminder: Reminder) -> tuple[str, str]:
+def _reminder_text(
+    reminder: Reminder | AutoStoppedNotification,
+) -> tuple[str, str]:
     """Build the platform-independent reminder title and message."""
+    if isinstance(reminder, AutoStoppedNotification):
+        target = f"{reminder.project} / {reminder.activity}"
+        stopped_at = reminder.stopped_at.astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+        return (
+            f"Stopped {target}",
+            f"Stopped automatically at {stopped_at} after two unanswered "
+            "checkpoints. Open Review if this needs correction.",
+        )
     if reminder.kind is not ReminderKind.ACTIVE:
         return ("No timer is running", "Start a timer when you begin working.")
     target = " / ".join(part for part in (reminder.project, reminder.activity) if part)
@@ -93,8 +115,12 @@ def _reminder_text(reminder: Reminder) -> tuple[str, str]:
             f"The computer was idle for at least {threshold} minutes. "
             "Open Time Tracker to confirm, snooze, or stop."
         )
+    elif reminder.reason is ReminderReason.LUNCH:
+        message = "Lunch checkpoint. Continue, snooze, stop, or switch activity."
+    elif reminder.reason is ReminderReason.END_OF_DAY:
+        message = "End-of-day checkpoint. Continue, snooze, stop, or switch activity."
     else:
-        message = "The timer is still running. Open Time Tracker to stop or switch."
+        message = "Continue, snooze, stop, or switch activity."
     return (title, message)
 
 

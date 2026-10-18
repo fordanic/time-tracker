@@ -33,10 +33,17 @@ const bootstrap: Bootstrap = {
     snooze_minutes: 10,
     idle_enabled: false,
     idle_threshold_minutes: 15,
+    safeguard_weekdays: [0, 1, 2, 3, 4],
+    lunch_checkpoint_enabled: false,
+    lunch_checkpoint_time: "12:00",
+    end_of_day_checkpoint_enabled: false,
+    end_of_day_checkpoint_time: "17:00",
+    auto_stop_after_unanswered_enabled: false,
   },
   export_delimiter: ",",
   idle_detection: { available: true },
   configuration_path: "/tmp/config.toml",
+  switch_requested: false,
 };
 
 function json(data: object): Response {
@@ -64,13 +71,15 @@ describe("App", () => {
     fetchMock.mockImplementation(async (input) => {
       const path = String(input);
       if (path === "/api/bootstrap") return json(bootstrapResponse);
-      if (path === "/api/state") return json({ active: null, reminder: null });
+      if (path === "/api/state")
+        return json({ active: null, reminder: null, switch_requested: false });
       if (path === "/api/track/classify") return json({ action: "start" });
       if (path === "/api/timer/start")
         return json({ active: { ...bootstrap.recent[0] } });
       if (path === "/api/timer/edit")
         return json({ active: bootstrapResponse.active });
       if (path === "/api/timer/stop") return json({ completed: {} });
+      if (path === "/api/reminder/action") return json({ accepted: true });
       if (path === "/api/review/query") return json(reviewResponse);
       if (path === "/api/review/correct" || path === "/api/review/create")
         return json({ entry: {} });
@@ -90,6 +99,59 @@ describe("App", () => {
     expect(localStorage.getItem("time-tracker-appearance")).toBe("dark");
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows all active checkpoint actions and submits the opaque identifier", async () => {
+    bootstrapResponse = {
+      ...bootstrap,
+      active: {
+        entry_id: 7,
+        project: "Client",
+        activity: "Build",
+        started_at: "2026-10-18T08:00:00+00:00",
+        note: null,
+      },
+      reminder: {
+        kind: "active",
+        project: "Client",
+        activity: "Build",
+        reason: "lunch",
+        idle_threshold_minutes: null,
+        checkpoint_id: "opaque-token",
+        active_entry_id: 7,
+        switch_requested: false,
+      },
+    };
+    render(<App />);
+
+    const checkpoint = await screen.findByRole("region", {
+      name: "Lunch checkpoint",
+    });
+    expect(
+      within(checkpoint).getByRole("button", { name: "Snooze" }),
+    ).toBeTruthy();
+    expect(
+      within(checkpoint).getByRole("button", { name: "Stop" }),
+    ).toBeTruthy();
+    expect(
+      within(checkpoint).getByRole("button", { name: "Switch activity" }),
+    ).toBeTruthy();
+    fireEvent.click(
+      within(checkpoint).getByRole("button", { name: "Continue" }),
+    );
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/reminder/action",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            action: "continue",
+            checkpoint_id: "opaque-token",
+          }),
+        }),
+      ),
+    );
   });
 
   it("previews selected work, tabs to its note, and confirms with Enter", async () => {

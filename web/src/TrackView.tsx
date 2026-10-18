@@ -312,6 +312,45 @@ export function TrackView({ data, connected, announce, refresh }: Props) {
     }
   };
 
+  const checkpointAction = async (
+    action: "continue" | "snooze" | "stop" | "switch",
+  ) => {
+    const checkpointId = data.reminder?.checkpoint_id;
+    if (!checkpointId) return;
+    setBusy(true);
+    try {
+      const result = await post<{ accepted: boolean }>("/api/reminder/action", {
+        action,
+        checkpoint_id: checkpointId,
+      });
+      if (!result.accepted) {
+        announce("That checkpoint is no longer current.");
+        await refresh();
+        return;
+      }
+      if (action === "switch") {
+        window.requestAnimationFrame(() =>
+          document
+            .querySelector<HTMLButtonElement>(".recent-deck button")
+            ?.focus(),
+        );
+      }
+      const messages = {
+        continue: "Active work confirmed.",
+        snooze: "Checkpoint snoozed.",
+        stop: "Timer stopped and saved.",
+        switch: "Choose the work you are switching to.",
+      };
+      await refresh(messages[action]);
+    } catch (error) {
+      announce(
+        error instanceof Error ? error.message : "Checkpoint action failed",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div class="track-grid">
       <section class="panel deck-panel">
@@ -547,11 +586,15 @@ export function TrackView({ data, connected, announce, refresh }: Props) {
 
       {data.reminder && (
         <section class="panel reminder-panel" aria-labelledby="reminder-title">
-          <span class="eyebrow">REMINDER</span>
+          <span class="eyebrow">CHECKPOINT</span>
           <h2 id="reminder-title">
-            {data.reminder.kind === "active"
-              ? "Still active?"
-              : "Ready to track?"}
+            {data.reminder.reason === "lunch"
+              ? "Lunch checkpoint"
+              : data.reminder.reason === "end_of_day"
+                ? "End-of-day checkpoint"
+                : data.reminder.kind === "active"
+                  ? "Is this still the right work?"
+                  : "Ready to track?"}
           </h2>
           <p>
             {data.reminder.reason === "idle"
@@ -561,21 +604,54 @@ export function TrackView({ data, connected, announce, refresh }: Props) {
               `${data.reminder.project} / ${data.reminder.activity ?? ""}`}
           </p>
           <div class="button-row">
-            {data.reminder.kind === "active" && (
-              <button
-                class="primary"
-                disabled={disabled}
-                onClick={() => void reminderAction("confirm")}
-              >
-                Still active
-              </button>
+            {data.reminder.kind === "active" && data.reminder.checkpoint_id ? (
+              <>
+                <button
+                  class="primary"
+                  disabled={disabled}
+                  onClick={() => void checkpointAction("continue")}
+                >
+                  Continue
+                </button>
+                <button
+                  disabled={disabled}
+                  onClick={() => void checkpointAction("snooze")}
+                >
+                  Snooze
+                </button>
+                <button
+                  class="danger"
+                  disabled={disabled}
+                  onClick={() => void checkpointAction("stop")}
+                >
+                  Stop
+                </button>
+                <button
+                  disabled={disabled}
+                  onClick={() => void checkpointAction("switch")}
+                >
+                  Switch activity
+                </button>
+              </>
+            ) : (
+              <>
+                {data.reminder.kind === "active" && (
+                  <button
+                    class="primary"
+                    disabled={disabled}
+                    onClick={() => void reminderAction("confirm")}
+                  >
+                    Continue
+                  </button>
+                )}
+                <button
+                  disabled={disabled}
+                  onClick={() => void reminderAction("snooze")}
+                >
+                  Snooze
+                </button>
+              </>
             )}
-            <button
-              disabled={disabled}
-              onClick={() => void reminderAction("snooze")}
-            >
-              Snooze
-            </button>
           </div>
         </section>
       )}

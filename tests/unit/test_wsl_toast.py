@@ -8,11 +8,14 @@ from time_tracker.infrastructure import wsl_toast
 from time_tracker.infrastructure.wsl_toast import (
     APPLICATION_DISPLAY_NAME,
     APPLICATION_ID,
+    CHECKPOINT_VARIABLE,
     MESSAGE_VARIABLE,
+    PROTOCOL_COMMAND_VARIABLE,
     TITLE_VARIABLE,
     WindowsToastDispatcher,
     interpreter_command,
     is_wsl_host,
+    protocol_handler_command,
     resolve_interpreter,
     toast_environment,
 )
@@ -180,6 +183,8 @@ def test_environment_shares_text_and_preserves_inherited_wslenv() -> None:
         "WT_PROFILE_ID",
         TITLE_VARIABLE,
         MESSAGE_VARIABLE,
+        CHECKPOINT_VARIABLE,
+        PROTOCOL_COMMAND_VARIABLE,
     ]
 
 
@@ -190,7 +195,51 @@ def test_environment_does_not_duplicate_shared_names() -> None:
         base={"WSLENV": f"{TITLE_VARIABLE}:{MESSAGE_VARIABLE}"},
     )
 
-    assert environment["WSLENV"].split(":") == [TITLE_VARIABLE, MESSAGE_VARIABLE]
+    assert environment["WSLENV"].split(":") == [
+        TITLE_VARIABLE,
+        MESSAGE_VARIABLE,
+        CHECKPOINT_VARIABLE,
+        PROTOCOL_COMMAND_VARIABLE,
+    ]
+
+
+def test_protocol_handler_reenters_the_originating_wsl_distribution() -> None:
+    command = protocol_handler_command(
+        ("/opt/time tracker/python", "-m", "time_tracker.cli"),
+        distro_name="Ubuntu-24.04",
+    )
+
+    assert command is not None
+    assert command.startswith(
+        r"C:\Windows\System32\wsl.exe --distribution Ubuntu-24.04"
+    )
+    assert '"/opt/time tracker/python" -m time_tracker.cli' in command
+    assert command.endswith('--notification-action "%1"')
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_toast_contains_four_protocol_actions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("WSLENV", "")
+    runner = FakeRunner([(0, "existing", "")])
+    service = WindowsToastDispatcher(
+        runner=runner,
+        interpreter_factory=lambda: INTERPRETER,
+        action_command=("/usr/bin/time-tracker",),
+        distro_name="Ubuntu",
+    )
+
+    await service.send("Checkpoint", "Choose an action", checkpoint_id="token-123")
+
+    toast = runner.environments[-1]
+    assert toast[CHECKPOINT_VARIABLE] == "token-123"
+    assert toast[PROTOCOL_COMMAND_VARIABLE]
+    script = runner.scripts()[-1]
+    assert "@('Continue','continue')" in script
+    assert "@('Snooze','snooze')" in script
+    assert "@('Stop','stop')" in script
+    assert "@('Switch activity','switch')" in script
 
 
 @pytest.mark.asyncio
@@ -286,6 +335,25 @@ async def test_failed_registration_still_attempts_delivery(
     await dispatcher(runner).send("Still tracking time?", "running")
 
     assert runner.environments[-1][TITLE_VARIABLE] == "Still tracking time?"
+
+
+@pytest.mark.asyncio
+async def test_failed_protocol_registration_omits_unusable_action_buttons(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("WSLENV", "")
+    runner = FakeRunner([(1, "", "registry denied"), (0, "", "")])
+    service = WindowsToastDispatcher(
+        runner=runner,
+        interpreter_factory=lambda: INTERPRETER,
+        action_command=("/usr/bin/time-tracker",),
+        distro_name="Ubuntu",
+    )
+
+    await service.send("Checkpoint", "Choose", checkpoint_id="token")
+
+    assert runner.environments[-1][CHECKPOINT_VARIABLE] == "token"
+    assert runner.environments[-1][PROTOCOL_COMMAND_VARIABLE] == ""
 
 
 @pytest.mark.asyncio

@@ -97,6 +97,12 @@ def test_configuration_store_atomically_replaces_complete_toml(tmp_path: Path) -
         snooze_minutes=7.5,
         idle_enabled=True,
         idle_threshold_minutes=22.5,
+        safeguard_weekdays=(1, 3, 5),
+        lunch_checkpoint_enabled=True,
+        lunch_checkpoint_time="11:45",
+        end_of_day_checkpoint_enabled=True,
+        end_of_day_checkpoint_time="18:30",
+        auto_stop_after_unanswered_enabled=True,
     )
 
     config = ApplicationConfig(
@@ -120,6 +126,12 @@ def test_configuration_store_atomically_replaces_complete_toml(tmp_path: Path) -
         "snooze_minutes = 7.5\n"
         "idle_enabled = true\n"
         "idle_threshold_minutes = 22.5\n"
+        "safeguard_weekdays = [1, 3, 5]\n"
+        "lunch_checkpoint_enabled = true\n"
+        'lunch_checkpoint_time = "11:45"\n'
+        "end_of_day_checkpoint_enabled = true\n"
+        'end_of_day_checkpoint_time = "18:30"\n'
+        "auto_stop_after_unanswered_enabled = true\n"
         "\n[ui]\n"
         'theme = "nord"\n'
         "\n[export]\n"
@@ -181,6 +193,18 @@ def test_reminder_settings_reject_non_positive_or_non_finite_values(
         ({"window_end": "09:00", "window_start": "09:00"}, "differ"),
         ({"snooze_minutes": 0}, "positive finite"),
         ({"idle_threshold_minutes": 0}, "positive finite"),
+        ({"safeguard_weekdays": ()}, "checkpoint weekdays"),
+        ({"safeguard_weekdays": (0, 0)}, "checkpoint weekdays"),
+        ({"safeguard_weekdays": (7,)}, "checkpoint weekdays"),
+        ({"lunch_checkpoint_time": "noon"}, "HH:MM"),
+        (
+            {
+                "lunch_checkpoint_enabled": True,
+                "end_of_day_checkpoint_enabled": True,
+                "lunch_checkpoint_time": "17:00",
+            },
+            "must differ",
+        ),
     ],
 )
 def test_reminder_settings_reject_invalid_window_or_snooze(

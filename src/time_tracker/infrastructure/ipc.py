@@ -17,7 +17,12 @@ from typing import cast
 from time_tracker.application.configuration import ReminderSettings
 from time_tracker.application.exporting import ExportDestinationExistsError
 from time_tracker.application.idle import IdleDetectionStatus
-from time_tracker.application.reminders import Reminder, ReminderKind, ReminderReason
+from time_tracker.application.reminders import (
+    CheckpointAction,
+    Reminder,
+    ReminderKind,
+    ReminderReason,
+)
 from time_tracker.application.reporting import ReviewFilter
 from time_tracker.application.tracking import (
     ArchivedActivity,
@@ -27,8 +32,9 @@ from time_tracker.application.tracking import (
 from time_tracker.domain.models import ActiveTimer, CompletedTimer
 from time_tracker.infrastructure.paths import AgentPaths
 
-PROTOCOL_VERSION = 6
+PROTOCOL_VERSION = 7
 _WINDOWS_DETACHED_PROCESS_FLAGS = 0x00000208
+ACTION_COMMAND_VARIABLE = "TIME_TRACKER_ACTION_COMMAND"
 
 
 class AgentUnavailableError(RuntimeError):
@@ -79,6 +85,16 @@ class AgentClient:
                 "snooze_minutes": settings.snooze_minutes,
                 "idle_enabled": settings.idle_enabled,
                 "idle_threshold_minutes": settings.idle_threshold_minutes,
+                "safeguard_weekdays": list(settings.safeguard_weekdays),
+                "lunch_checkpoint_enabled": settings.lunch_checkpoint_enabled,
+                "lunch_checkpoint_time": settings.lunch_checkpoint_time,
+                "end_of_day_checkpoint_enabled": (
+                    settings.end_of_day_checkpoint_enabled
+                ),
+                "end_of_day_checkpoint_time": settings.end_of_day_checkpoint_time,
+                "auto_stop_after_unanswered_enabled": (
+                    settings.auto_stop_after_unanswered_enabled
+                ),
             },
         )
         return _settings_from_object(result)
@@ -128,6 +144,27 @@ class AgentClient:
         result = self._request("snooze_reminder", {})
         if not isinstance(result, bool):
             raise AgentRequestError("the agent returned malformed snooze data")
+        return result
+
+    def perform_checkpoint_action(
+        self,
+        action: CheckpointAction,
+        checkpoint_id: str,
+    ) -> bool:
+        """Apply one opaque native or foreground checkpoint action."""
+        result = self._request(
+            "checkpoint_action",
+            {"action": action.value, "checkpoint_id": checkpoint_id},
+        )
+        if not isinstance(result, bool):
+            raise AgentRequestError("the agent returned malformed checkpoint data")
+        return result
+
+    def consume_switch_request(self) -> bool:
+        """Consume a native request to focus the foreground recent-work deck."""
+        result = self._request("consume_switch_request", {})
+        if not isinstance(result, bool):
+            raise AgentRequestError("the agent returned malformed switch data")
         return result
 
     def list_projects(self) -> list[str]:
@@ -507,6 +544,8 @@ def ensure_agent_running(
 
     paths.prepare()
     command = _agent_command(paths)
+    environment = dict(os.environ)
+    environment[ACTION_COMMAND_VARIABLE] = json.dumps(_notification_action_command())
     if os.name == "nt":
         subprocess.Popen(  # noqa: S603
             command,
@@ -515,6 +554,7 @@ def ensure_agent_running(
             stderr=subprocess.DEVNULL,
             close_fds=True,
             creationflags=_WINDOWS_DETACHED_PROCESS_FLAGS,
+            env=environment,
         )
     else:
         subprocess.Popen(  # noqa: S603
@@ -524,6 +564,7 @@ def ensure_agent_running(
             stderr=subprocess.DEVNULL,
             close_fds=True,
             start_new_session=True,
+            env=environment,
         )
 
     deadline = time.monotonic() + timeout_seconds
@@ -583,6 +624,14 @@ def _agent_command(paths: AgentPaths, *, frozen: bool | None = None) -> list[str
     return command
 
 
+def _notification_action_command(*, frozen: bool | None = None) -> list[str]:
+    """Build the foreground CLI prefix used by native activation handlers."""
+    is_frozen = bool(getattr(sys, "frozen", False)) if frozen is None else frozen
+    if is_frozen:
+        return [sys.executable]
+    return [sys.executable, "-m", "time_tracker.cli"]
+
+
 def _active_from_object(value: object) -> ActiveTimer:
     data = _object_dict(value)
     return ActiveTimer(
@@ -610,6 +659,9 @@ def _reminder_from_object(value: object) -> Reminder:
             activity=_optional_str(data.get("activity")),
             reason=reason,
             idle_threshold_minutes=_optional_number(data.get("idle_threshold_minutes")),
+            checkpoint_id=_optional_str(data.get("checkpoint_id")),
+            active_entry_id=_optional_int(data.get("active_entry_id")),
+            switch_requested=_object_bool(data.get("switch_requested")),
         )
     except ValueError as error:
         raise AgentRequestError("the agent returned malformed reminder data") from error
@@ -633,6 +685,16 @@ def _settings_from_object(value: object) -> ReminderSettings:
         snooze_minutes=_object_number(data.get("snooze_minutes")),
         idle_enabled=_object_bool(data.get("idle_enabled")),
         idle_threshold_minutes=_object_number(data.get("idle_threshold_minutes")),
+        safeguard_weekdays=tuple(_object_int_list(data.get("safeguard_weekdays"))),
+        lunch_checkpoint_enabled=_object_bool(data.get("lunch_checkpoint_enabled")),
+        lunch_checkpoint_time=_object_str(data.get("lunch_checkpoint_time")),
+        end_of_day_checkpoint_enabled=_object_bool(
+            data.get("end_of_day_checkpoint_enabled")
+        ),
+        end_of_day_checkpoint_time=_object_str(data.get("end_of_day_checkpoint_time")),
+        auto_stop_after_unanswered_enabled=_object_bool(
+            data.get("auto_stop_after_unanswered_enabled")
+        ),
     )
 
 
@@ -716,6 +778,12 @@ def _optional_number(value: object) -> float | None:
     if value is None:
         return None
     return _object_number(value)
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    return _object_int(value)
 
 
 def _object_bool(value: object) -> bool:

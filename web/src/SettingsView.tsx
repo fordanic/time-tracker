@@ -160,6 +160,105 @@ export function SettingsView({ data, connected, announce, refresh }: Props) {
           />
         </label>
         <hr />
+        <h3>Lunch and end-of-day safeguards</h3>
+        <fieldset>
+          <legend>Safeguard weekdays</legend>
+          <div class="weekday-row">
+            {weekdays.map((day, index) => (
+              <label key={day} class="weekday">
+                <input
+                  type="checkbox"
+                  checked={settings.safeguard_weekdays.includes(index)}
+                  onChange={(event) =>
+                    setSettings({
+                      ...settings,
+                      safeguard_weekdays: event.currentTarget.checked
+                        ? [...settings.safeguard_weekdays, index].sort()
+                        : settings.safeguard_weekdays.filter(
+                            (item) => item !== index,
+                          ),
+                    })
+                  }
+                />
+                {day}
+              </label>
+            ))}
+          </div>
+          <div class="setting-row">
+            <label class="check">
+              <input
+                type="checkbox"
+                checked={settings.lunch_checkpoint_enabled}
+                onChange={(event) =>
+                  setSettings({
+                    ...settings,
+                    lunch_checkpoint_enabled: event.currentTarget.checked,
+                  })
+                }
+              />
+              Lunch checkpoint
+            </label>
+            <label>
+              Lunch time
+              <input
+                type="time"
+                value={settings.lunch_checkpoint_time}
+                onInput={(event) =>
+                  setSettings({
+                    ...settings,
+                    lunch_checkpoint_time: event.currentTarget.value,
+                  })
+                }
+              />
+            </label>
+          </div>
+          <div class="setting-row">
+            <label class="check">
+              <input
+                type="checkbox"
+                checked={settings.end_of_day_checkpoint_enabled}
+                onChange={(event) =>
+                  setSettings({
+                    ...settings,
+                    end_of_day_checkpoint_enabled: event.currentTarget.checked,
+                  })
+                }
+              />
+              End-of-day checkpoint
+            </label>
+            <label>
+              End-of-day time
+              <input
+                type="time"
+                value={settings.end_of_day_checkpoint_time}
+                onInput={(event) =>
+                  setSettings({
+                    ...settings,
+                    end_of_day_checkpoint_time: event.currentTarget.value,
+                  })
+                }
+              />
+            </label>
+          </div>
+        </fieldset>
+        <label class="check">
+          <input
+            type="checkbox"
+            checked={settings.auto_stop_after_unanswered_enabled}
+            onChange={(event) =>
+              setSettings({
+                ...settings,
+                auto_stop_after_unanswered_enabled: event.currentTarget.checked,
+              })
+            }
+          />
+          Stop the timer after two delivered checkpoints go unanswered
+        </label>
+        <p class="hint">
+          An unanswered checkpoint is counted after five minutes. This safeguard
+          is off by default.
+        </p>
+        <hr />
         <label class="check">
           <input
             type="checkbox"

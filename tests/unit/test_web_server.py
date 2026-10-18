@@ -45,6 +45,9 @@ class FakeAgent:
     def get_reminder(self) -> None:
         return None
 
+    def consume_switch_request(self) -> bool:
+        return False
+
     def stop(self) -> CompletedTimer | None:
         self.stop_calls += 1
         active = self.active

@@ -22,6 +22,7 @@ export function ProjectActivityFields({
       <label>
         Project
         <input
+          id={`${idPrefix}-project`}
           list={`${idPrefix}-project-options`}
           value={project}
           onInput={(event) => onProjectChange(event.currentTarget.value)}
@@ -35,6 +36,7 @@ export function ProjectActivityFields({
       <label>
         Activity
         <input
+          id={`${idPrefix}-activity`}
           list={`${idPrefix}-activity-options`}
           value={activity}
           onInput={(event) => onActivityChange(event.currentTarget.value)}

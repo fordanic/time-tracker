@@ -21,6 +21,8 @@ or web server leaves the background process, active timer, and reminders running
 - Export detailed entries and summaries as comma- or pipe-delimited UTF-8 text.
 - Configure desktop reminders, delivery windows, snooze, and optional local
   input-idle detection.
+- Use actionable active-timer checkpoints, optional lunch/end-of-day safeguards,
+  and an opt-in stop after two unanswered checkpoints.
 - Choose a color palette in Settings that is applied immediately and restored on
   the next launch.
 - Use Track, Review, Manage, and Settings workflows entirely from the keyboard.
@@ -294,6 +296,9 @@ are implemented:
 - preparing new projects and activities from Manage without starting a timer;
 - persistent reminder, color-palette, and export settings with live reload;
 - reminder windows, snooze, and optional content-free input-idle detection;
+- actionable active-timer checkpoints in the TUI, web interface, and WSL Windows
+  notifications, configurable lunch/end-of-day safeguards, and an opt-in stop
+  after two unanswered delivered checkpoints;
 - native reminder delivery to the Windows desktop from WSL;
 - responsive Track, Review, Manage, and Settings views with keyboard shortcuts;
   and
@@ -323,11 +328,19 @@ tag, and final-release state. Reminder delivery to the Windows desktop from WSL
 was validated interactively on July 27, 2026, on Ubuntu-24.04 under Windows 11
 25H2, including delivery from the background process with no TUI open.
 
+On October 18, 2026, actionable checkpoints and scheduled safeguards passed the
+complete 252-test Python suite and frontend format, lint, type, 18-test unit, and
+production-build checks. Windows protocol activation, action routing, stale-token
+rejection, and registration failures are covered without launching Windows; the
+interactive Windows action smoke remains outstanding below.
+
 Known outstanding validation:
 
 - run the native-notification smoke on interactive Linux and Windows desktops;
 - validate idle-duration detection on supported interactive Linux X11 and
   Windows desktop sessions;
+- validate all four actionable notification buttons and the automatic-stop
+  follow-up notification interactively from WSL on Windows;
 - validate the local web UI interactively in Safari, Firefox, and WSL;
 - run the extended packaged TUI-and-web lifecycle on Linux and Windows release
   artifacts;

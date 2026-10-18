@@ -585,9 +585,34 @@ async def test_user_snoozes_and_confirms_an_active_reminder_from_the_tui(
                 ),
                 "confirmation was not reported in the interface",
             )
-
             assert app.pending_reminder is None
             assert client.get_active() == started
+
+            _wait_for_pending_reminder(client, ReminderKind.ACTIVE)
+            await app._refresh_reminder()
+            await pilot.pause()
+            assert await pilot.click("#switch-reminder-button")
+            await _wait_for_ui(
+                pilot,
+                lambda: (
+                    "Choose recent work"
+                    in str(app.query_one("#message", Static).render())
+                ),
+                "switch action did not focus the recent-work flow",
+            )
+            assert app.pending_reminder is None
+            assert client.get_active() == started
+
+            _wait_for_pending_reminder(client, ReminderKind.ACTIVE)
+            await app._refresh_reminder()
+            await pilot.pause()
+            assert await pilot.click("#stop-reminder-button")
+            await _wait_for_ui(
+                pilot,
+                lambda: client.get_active() is None,
+                "checkpoint stop did not persist",
+            )
+            assert client.list_completed()[-1].entry_id == started.entry_id
     finally:
         client.shutdown()
         thread.join(timeout=2)
@@ -1696,6 +1721,12 @@ async def test_user_edits_and_live_applies_reminder_settings(tmp_path: Path) -> 
             app.query_one("#reminder-snooze-minutes", Input).value = "7.5"
             app.query_one("#idle-reminders-enabled", Switch).value = True
             app.query_one("#idle-reminder-minutes", Input).value = "22.5"
+            app.query_one("#safeguard-weekdays", Input).value = "Tue,Thu"
+            app.query_one("#lunch-checkpoint-enabled", Switch).value = True
+            app.query_one("#lunch-checkpoint-time", Input).value = "11:45"
+            app.query_one("#end-of-day-checkpoint-enabled", Switch).value = True
+            app.query_one("#end-of-day-checkpoint-time", Input).value = "18:30"
+            app.query_one("#auto-stop-unanswered-enabled", Switch).value = True
             app.query_one("#export-delimiter", Select).value = "|"
             app.query_one("#save-settings-button", Button).press()
             await _wait_for_ui(
@@ -1719,6 +1750,12 @@ async def test_user_edits_and_live_applies_reminder_settings(tmp_path: Path) -> 
                 snooze_minutes=7.5,
                 idle_enabled=True,
                 idle_threshold_minutes=22.5,
+                safeguard_weekdays=(1, 3),
+                lunch_checkpoint_enabled=True,
+                lunch_checkpoint_time="11:45",
+                end_of_day_checkpoint_enabled=True,
+                end_of_day_checkpoint_time="18:30",
+                auto_stop_after_unanswered_enabled=True,
             )
             assert client.get_configuration() == expected
             assert load_config(paths.config).reminder_settings == expected
@@ -1763,6 +1800,21 @@ async def test_user_edits_and_live_applies_reminder_settings(tmp_path: Path) -> 
             assert reopened.query_one("#reminder-snooze-minutes", Input).value == "7.5"
             assert reopened.query_one("#idle-reminders-enabled", Switch).value is True
             assert reopened.query_one("#idle-reminder-minutes", Input).value == "22.5"
+            assert reopened.query_one("#safeguard-weekdays", Input).value == "Tue,Thu"
+            assert reopened.query_one("#lunch-checkpoint-enabled", Switch).value is True
+            assert reopened.query_one("#lunch-checkpoint-time", Input).value == "11:45"
+            assert (
+                reopened.query_one("#end-of-day-checkpoint-enabled", Switch).value
+                is True
+            )
+            assert (
+                reopened.query_one("#end-of-day-checkpoint-time", Input).value
+                == "18:30"
+            )
+            assert (
+                reopened.query_one("#auto-stop-unanswered-enabled", Switch).value
+                is True
+            )
             assert reopened.query_one("#export-delimiter", Select).value == "|"
             assert "Idle detection:" in str(
                 reopened.query_one("#idle-status", Static).render()

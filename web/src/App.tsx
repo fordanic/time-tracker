@@ -9,6 +9,14 @@ import { elapsed } from "./utils.ts";
 
 type View = "track" | "review" | "manage" | "settings";
 
+function focusSwitchTarget() {
+  window.requestAnimationFrame(() =>
+    window.requestAnimationFrame(() =>
+      document.querySelector<HTMLButtonElement>(".recent-deck button")?.focus(),
+    ),
+  );
+}
+
 export function App() {
   const [view, setView] = useState<View>("track");
   const [data, setData] = useState<Bootstrap | null>(null);
@@ -28,6 +36,10 @@ export function App() {
       setData(next);
       setActive(next.active);
       setReminder(next.reminder);
+      if (next.switch_requested) {
+        setView("track");
+        focusSwitchTarget();
+      }
       setConnected(true);
       setStatus(message ?? "Local data is up to date.");
     } catch (error) {
@@ -133,10 +145,15 @@ export function App() {
         const next = await get<{
           active: Timer | null;
           reminder: Reminder | null;
+          switch_requested: boolean;
         }>("/api/state");
         if (cancelled) return;
         setActive(next.active);
         setReminder(next.reminder);
+        if (next.switch_requested) {
+          setView("track");
+          focusSwitchTarget();
+        }
         setConnected(true);
         failures = 0;
       } catch {

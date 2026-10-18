@@ -1,6 +1,6 @@
 # Actionable checkpoints and scheduled safeguards
 
-**Status:** Approved
+**Status:** Implemented
 
 ## Purpose
 

@@ -6,9 +6,11 @@ import argparse
 import asyncio
 from collections.abc import Sequence
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 from time_tracker import __version__
 from time_tracker.agent.server import serve
+from time_tracker.application.reminders import CheckpointAction
 from time_tracker.infrastructure.configuration import ConfigurationError, load_config
 from time_tracker.infrastructure.instance_lock import (
     ForegroundAlreadyRunningError,
@@ -65,6 +67,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         help=argparse.SUPPRESS,
     )
+    parser.add_argument("--notification-action", help=argparse.SUPPRESS)
     parser.add_argument("--database", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--config", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--address", help=argparse.SUPPRESS)
@@ -84,6 +87,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         or arguments.config_path
         or arguments.packaged_smoke is not None
         or arguments.notification_smoke is not None
+        or arguments.notification_action is not None
         or arguments.agent
     ):
         parser.error("--web cannot be combined with another launch mode")
@@ -113,6 +117,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         )
         return 0
+    if arguments.notification_action is not None:
+        try:
+            action, checkpoint_id = _parse_notification_action(
+                arguments.notification_action
+            )
+        except ValueError as error:
+            parser.error(str(error))
+        try:
+            accepted = AgentClient(AgentPaths.defaults()).perform_checkpoint_action(
+                action,
+                checkpoint_id,
+            )
+        except AgentUnavailableError:
+            return 1
+        return 0 if accepted else 1
     if arguments.config_path:
         print(AgentPaths.defaults().config)
         return 0
@@ -173,6 +192,35 @@ async def _send_notification_smoke(directory: Path) -> None:
 def run() -> None:
     """Run the console entry point."""
     raise SystemExit(main())
+
+
+def _parse_notification_action(value: str) -> tuple[CheckpointAction, str]:
+    parsed = urlparse(value)
+    parts = [unquote(part) for part in parsed.path.split("/") if part]
+    if (
+        parsed.scheme != "time-tracker"
+        or parsed.netloc != "checkpoint"
+        or len(parts) != 2
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("invalid Time Tracker notification action")
+    try:
+        action = CheckpointAction(parts[0])
+    except ValueError as error:
+        raise ValueError("invalid Time Tracker notification action") from error
+    checkpoint_id = parts[1]
+    if not checkpoint_id or any(
+        character not in _TOKEN_CHARACTERS for character in checkpoint_id
+    ):
+        raise ValueError("invalid Time Tracker notification action")
+    return action, checkpoint_id
+
+
+_TOKEN_CHARACTERS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+)
 
 
 if __name__ == "__main__":
