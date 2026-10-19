@@ -609,9 +609,13 @@ async def test_user_snoozes_and_confirms_an_active_reminder_from_the_tui(
             assert await pilot.click("#stop-reminder-button")
             await _wait_for_ui(
                 pilot,
-                lambda: client.get_active() is None,
-                "checkpoint stop did not persist",
+                lambda: (
+                    "Timer stopped from checkpoint."
+                    in str(app.query_one("#message", Static).render())
+                ),
+                "checkpoint stop did not finish updating the interface",
             )
+            assert client.get_active() is None
             assert client.list_completed()[-1].entry_id == started.entry_id
     finally:
         client.shutdown()
