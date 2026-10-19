@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 import threading
 import time
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -11,6 +12,7 @@ import pytest
 from time_tracker.agent.server import serve
 from time_tracker.application.configuration import ReminderSettings
 from time_tracker.application.reminders import (
+    AutoStoppedNotification,
     CheckpointAction,
     Reminder,
     ReminderIntervals,
@@ -437,6 +439,31 @@ class FailingNotifier:
         raise RuntimeError(f"simulated {reminder.kind.value} delivery failure")
 
 
+class ActingNotifier:
+    def __init__(self, action: CheckpointAction) -> None:
+        self.action = action
+        self.reminders: list[Reminder | AutoStoppedNotification] = []
+        self.accepted: bool | None = None
+        self._handler: Callable[[CheckpointAction, str], Awaitable[bool]] | None = None
+
+    def set_checkpoint_action_handler(
+        self,
+        handler: Callable[[CheckpointAction, str], Awaitable[bool]],
+    ) -> None:
+        self._handler = handler
+
+    async def send(self, reminder: Reminder | AutoStoppedNotification) -> None:
+        self.reminders.append(reminder)
+        if (
+            self.accepted is None
+            and isinstance(reminder, Reminder)
+            and reminder.kind is ReminderKind.ACTIVE
+            and reminder.checkpoint_id is not None
+        ):
+            assert self._handler is not None
+            self.accepted = await self._handler(self.action, reminder.checkpoint_id)
+
+
 class MonotonicIdleDetector:
     def __init__(self) -> None:
         self.reset()
@@ -475,6 +502,41 @@ def test_agent_sends_reminders_after_the_tui_disconnects(tmp_path: Path) -> None
         started = client.start("Background", "Notifications")
         _wait_for_reminder(notifier, ReminderKind.ACTIVE)
         assert AgentClient(paths).get_active() == started
+    finally:
+        client.shutdown()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+
+
+def test_native_notification_action_uses_the_agent_checkpoint_operation(
+    tmp_path: Path,
+) -> None:
+    paths = AgentPaths.in_directory(tmp_path)
+    notifier = ActingNotifier(CheckpointAction.STOP)
+    thread = threading.Thread(
+        target=serve,
+        args=(paths,),
+        kwargs={
+            "notifier": notifier,
+            "reminder_intervals": ReminderIntervals(inactive=None, active=0.05),
+        },
+        daemon=True,
+    )
+    thread.start()
+    client = AgentClient(paths)
+    _wait_until_ready(client)
+
+    try:
+        started = client.start("Native", "Action")
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline and notifier.accepted is None:
+            time.sleep(0.01)
+
+        assert notifier.accepted is True
+        assert client.get_active() is None
+        assert client.list_completed()[-1].entry_id == started.entry_id
+        assert client.get_reminder() is None
     finally:
         client.shutdown()
         thread.join(timeout=2)

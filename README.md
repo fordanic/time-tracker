@@ -296,9 +296,10 @@ are implemented:
 - preparing new projects and activities from Manage without starting a timer;
 - persistent reminder, color-palette, and export settings with live reload;
 - reminder windows, snooze, and optional content-free input-idle detection;
-- actionable active-timer checkpoints in the TUI, web interface, and WSL Windows
-  notifications, configurable lunch/end-of-day safeguards, and an opt-in stop
-  after two unanswered delivered checkpoints;
+- actionable active-timer checkpoints in the TUI, web interface, and native
+  Linux, direct-Windows, packaged-macOS, and WSL-to-Windows notifications,
+  configurable lunch/end-of-day safeguards, and an opt-in stop after two
+  unanswered actionable checkpoints;
 - native reminder delivery to the Windows desktop from WSL;
 - responsive Track, Review, Manage, and Settings views with keyboard shortcuts;
   and
@@ -334,13 +335,21 @@ production-build checks. Windows protocol activation, action routing, stale-toke
 rejection, and registration failures are covered without launching Windows; the
 interactive Windows action smoke remains outstanding below.
 
+On October 19, 2026, native Linux, direct-Windows, and packaged-macOS checkpoint
+buttons were added through the shared agent-owned action path. Adapter tests cover
+button construction, capability fallback, callback routing, stale actions, and a
+durable callback-triggered stop. The macOS arm64 bundle build, packaged lifecycle,
+and Notification Center dispatch passed locally; interactive button selection on
+each native desktop remains outstanding below.
+
 Known outstanding validation:
 
 - run the native-notification smoke on interactive Linux and Windows desktops;
 - validate idle-duration detection on supported interactive Linux X11 and
   Windows desktop sessions;
 - validate all four actionable notification buttons and the automatic-stop
-  follow-up notification interactively from WSL on Windows;
+  follow-up notification interactively on Linux, direct Windows, packaged macOS,
+  and WSL-to-Windows;
 - validate the local web UI interactively in Safari, Firefox, and WSL;
 - run the extended packaged TUI-and-web lifecycle on Linux and Windows release
   artifacts;
