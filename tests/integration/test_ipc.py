@@ -530,7 +530,7 @@ def test_native_notification_action_uses_the_agent_checkpoint_operation(
     try:
         started = client.start("Native", "Action")
         deadline = time.monotonic() + 2
-        while time.monotonic() < deadline and client.get_active() is not None:
+        while time.monotonic() < deadline and notifier.accepted is None:
             time.sleep(0.01)
 
         assert notifier.accepted is True
