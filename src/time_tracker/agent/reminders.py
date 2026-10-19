@@ -16,6 +16,7 @@ from time_tracker.application.idle import (
 )
 from time_tracker.application.reminders import (
     AutoStoppedNotification,
+    CheckpointAction,
     Reminder,
     ReminderIntervals,
     ReminderKind,
@@ -212,6 +213,30 @@ class ReminderCoordinator:
         self._clear_checkpoint(reset_unanswered=True)
         return True
 
+    async def perform_checkpoint_action(
+        self,
+        action: CheckpointAction,
+        checkpoint_id: str,
+    ) -> bool:
+        """Apply one conditional foreground or native-notification action."""
+        if action is CheckpointAction.CONTINUE:
+            return self.confirm_active(checkpoint_id)
+        if action is CheckpointAction.SNOOZE:
+            return self.snooze(checkpoint_id)
+        if action is CheckpointAction.SWITCH:
+            return self.request_switch(checkpoint_id)
+        if not self.checkpoint_matches(checkpoint_id):
+            return False
+        pending = self._pending
+        expected_entry_id = pending.active_entry_id if pending is not None else None
+        if expected_entry_id is None:
+            return False
+        stopped = await self._stop_active(expected_entry_id)
+        if stopped is None:
+            return False
+        self.timer_changed()
+        return True
+
     def stop(self) -> None:
         """Wake and stop the scheduler without modifying timer state."""
         self._stopping = True
@@ -292,7 +317,7 @@ class ReminderCoordinator:
             logger.exception("native reminder delivery failed")
         self._response_deadline = (
             self._monotonic() + self._response_grace_seconds
-            if delivered and self._auto_stop_enabled
+            if delivered and self._auto_stop_enabled and self._pending == checkpoint
             else None
         )
 

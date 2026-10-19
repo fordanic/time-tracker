@@ -5,6 +5,7 @@ import pytest
 from time_tracker.agent.reminders import ReminderCoordinator
 from time_tracker.application.reminders import (
     AutoStoppedNotification,
+    CheckpointAction,
     Reminder,
     ReminderIntervals,
     ReminderReason,
@@ -161,3 +162,40 @@ async def test_checkpoint_actions_are_bound_to_current_entry_and_identifier() ->
     assert pending is not None and pending.switch_requested is True
     assert coordinator.consume_switch_request() is True
     assert coordinator.pending_reminder() is None
+
+
+@pytest.mark.asyncio
+async def test_shared_checkpoint_action_stops_only_the_matching_timer() -> None:
+    active = active_timer()
+    stopped = active.stop(active.started_at + timedelta(minutes=30))
+    stop_calls: list[int] = []
+
+    async def stop_matching(entry_id: int) -> CompletedTimer | None:
+        stop_calls.append(entry_id)
+        return stopped
+
+    coordinator = ReminderCoordinator(
+        UnusedTrackingService(),  # type: ignore[arg-type]
+        RecordingNotifier(),
+        ReminderIntervals(inactive=None, active=None),
+        stop_active=stop_matching,
+        checkpoint_id_factory=lambda: "current",
+    )
+    coordinator._active = active  # noqa: SLF001
+    await coordinator._present_active_checkpoint(ReminderReason.LUNCH)  # noqa: SLF001
+
+    assert not await coordinator.perform_checkpoint_action(
+        CheckpointAction.STOP,
+        "stale",
+    )
+    assert await coordinator.perform_checkpoint_action(
+        CheckpointAction.STOP,
+        "current",
+    )
+
+    assert stop_calls == [active.entry_id]
+    assert coordinator.pending_reminder() is None
+    assert not await coordinator.perform_checkpoint_action(
+        CheckpointAction.STOP,
+        "current",
+    )

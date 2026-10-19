@@ -1,8 +1,15 @@
-from collections.abc import Callable
+import asyncio
+from collections.abc import Callable, Sequence
 
 import pytest
+from desktop_notifier import Button, Capability
 
-from time_tracker.application.reminders import Reminder, ReminderKind, ReminderReason
+from time_tracker.application.reminders import (
+    CheckpointAction,
+    Reminder,
+    ReminderKind,
+    ReminderReason,
+)
 from time_tracker.infrastructure import notifications
 from time_tracker.infrastructure.notifications import (
     NativeNotificationService,
@@ -23,24 +30,38 @@ def test_macos_notification_text_is_passed_as_data_not_script() -> None:
 
 
 class FakeDesktopNotifier:
-    def __init__(self, *, dispatch: bool) -> None:
+    def __init__(
+        self,
+        *,
+        dispatch: bool,
+        capabilities: frozenset[Capability] = frozenset({Capability.BUTTONS}),
+    ) -> None:
         self._backend = object()
         self.dispatch = dispatch
+        self.capabilities = capabilities
         self.title = ""
         self.message = ""
+        self.buttons: tuple[Button, ...] = ()
+        self.dispatch_count = 0
 
     async def request_authorisation(self) -> bool:
         return True
+
+    async def get_capabilities(self) -> frozenset[Capability]:
+        return self.capabilities
 
     async def send(
         self,
         *,
         title: str,
         message: str,
+        buttons: Sequence[Button] = (),
         on_dispatched: Callable[[], None],
     ) -> str:
         self.title = title
         self.message = message
+        self.buttons = tuple(buttons)
+        self.dispatch_count += 1
         if self.dispatch:
             on_dispatched()
         return f"{title}: {message}"
@@ -98,6 +119,144 @@ async def test_idle_triggered_notification_identifies_threshold(
 
     assert fake.title == "Still tracking Website / Planning?"
     assert "idle for at least 15 minutes" in fake.message
+
+
+@pytest.mark.asyncio
+async def test_active_checkpoint_exposes_all_native_actions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeDesktopNotifier(dispatch=True)
+    monkeypatch.setattr(
+        "time_tracker.infrastructure.notifications.sys.platform", "linux"
+    )
+    monkeypatch.setattr(notifications, "DesktopNotifier", lambda **_: fake)
+    service = NativeNotificationService()
+    actions: list[tuple[CheckpointAction, str]] = []
+
+    async def handle(action: CheckpointAction, checkpoint_id: str) -> bool:
+        actions.append((action, checkpoint_id))
+        return True
+
+    service.set_checkpoint_action_handler(handle)
+    await service.send(
+        Reminder(
+            ReminderKind.ACTIVE,
+            project="Website",
+            activity="Planning",
+            checkpoint_id="opaque-token",
+            active_entry_id=42,
+        )
+    )
+
+    assert [button.title for button in fake.buttons] == [
+        "Continue",
+        "Snooze",
+        "Stop",
+        "Switch activity",
+    ]
+    for button in fake.buttons:
+        assert button.on_pressed is not None
+        button.on_pressed()
+    await asyncio.sleep(0)
+
+    assert actions == [
+        (CheckpointAction.CONTINUE, "opaque-token"),
+        (CheckpointAction.SNOOZE, "opaque-token"),
+        (CheckpointAction.STOP, "opaque-token"),
+        (CheckpointAction.SWITCH, "opaque-token"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_delivery_without_native_actions_is_not_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeDesktopNotifier(dispatch=True, capabilities=frozenset())
+    monkeypatch.setattr(
+        "time_tracker.infrastructure.notifications.sys.platform", "linux"
+    )
+    monkeypatch.setattr(notifications, "DesktopNotifier", lambda **_: fake)
+    service = NativeNotificationService()
+
+    async def handle(_action: CheckpointAction, _checkpoint_id: str) -> bool:
+        return True
+
+    service.set_checkpoint_action_handler(handle)
+
+    with pytest.raises(RuntimeError, match="actions are unavailable"):
+        await service.send(
+            Reminder(
+                ReminderKind.ACTIVE,
+                checkpoint_id="opaque-token",
+                active_entry_id=42,
+            )
+        )
+
+    assert fake.dispatch_count == 1
+    assert fake.buttons == ()
+
+
+@pytest.mark.asyncio
+async def test_macos_passive_fallback_does_not_accept_an_actionless_checkpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeDesktopNotifier(dispatch=False)
+    fallback: list[tuple[str, str]] = []
+
+    async def send_fallback(title: str, message: str) -> None:
+        fallback.append((title, message))
+
+    monkeypatch.setattr(
+        "time_tracker.infrastructure.notifications.sys.platform", "darwin"
+    )
+    monkeypatch.setattr(notifications, "DesktopNotifier", lambda **_: fake)
+    monkeypatch.setattr(notifications, "_send_macos_notification", send_fallback)
+    service = NativeNotificationService()
+
+    async def handle(_action: CheckpointAction, _checkpoint_id: str) -> bool:
+        return True
+
+    service.set_checkpoint_action_handler(handle)
+
+    with pytest.raises(RuntimeError, match="rejected delivery"):
+        await service.send(
+            Reminder(
+                ReminderKind.ACTIVE,
+                checkpoint_id="opaque-token",
+                active_entry_id=42,
+            )
+        )
+
+    assert fallback == [
+        (
+            "Still tracking time?",
+            "Continue, snooze, stop, or switch activity.",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_macos_passive_fallback_accepts_an_inactive_reminder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeDesktopNotifier(dispatch=False)
+    fallback: list[tuple[str, str]] = []
+
+    async def send_fallback(title: str, message: str) -> None:
+        fallback.append((title, message))
+
+    monkeypatch.setattr(
+        "time_tracker.infrastructure.notifications.sys.platform", "darwin"
+    )
+    monkeypatch.setattr(notifications, "DesktopNotifier", lambda **_: fake)
+    monkeypatch.setattr(notifications, "_send_macos_notification", send_fallback)
+    service = NativeNotificationService()
+
+    await service.send(Reminder(ReminderKind.INACTIVE))
+
+    assert fallback == [
+        ("No timer is running", "Start a timer when you begin working.")
+    ]
 
 
 @pytest.fixture(autouse=True)

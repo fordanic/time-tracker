@@ -5,12 +5,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
-from typing import Protocol
+from collections.abc import Awaitable, Callable
+from typing import Protocol, runtime_checkable
 
-from desktop_notifier import DesktopNotifier
+from desktop_notifier import Button, Capability, DesktopNotifier
 
 from time_tracker.application.reminders import (
     AutoStoppedNotification,
+    CheckpointAction,
     Reminder,
     ReminderKind,
     ReminderReason,
@@ -18,6 +20,8 @@ from time_tracker.application.reminders import (
 from time_tracker.infrastructure.wsl_toast import WindowsToastDispatcher, is_wsl_host
 
 logger = logging.getLogger(__name__)
+
+CheckpointActionHandler = Callable[[CheckpointAction, str], Awaitable[bool]]
 
 
 class NotificationService(Protocol):
@@ -28,23 +32,37 @@ class NotificationService(Protocol):
         ...
 
 
+@runtime_checkable
+class CheckpointActionNotificationService(Protocol):
+    """Notification adapter that can route native checkpoint actions."""
+
+    def set_checkpoint_action_handler(
+        self,
+        handler: CheckpointActionHandler,
+    ) -> None:
+        """Bind actions to the agent-owned checkpoint operation."""
+        ...
+
+
 class NativeNotificationService:
-    """Deliver simple notifications through the host desktop service."""
+    """Deliver native notifications and route supported checkpoint actions."""
 
     def __init__(self) -> None:
-        self._notifier = (
-            None
-            if sys.platform == "darwin"
-            else DesktopNotifier(app_name="Time Tracker", app_icon=None)
-        )
+        self._notifier = DesktopNotifier(app_name="Time Tracker", app_icon=None)
         self._toast = WindowsToastDispatcher() if is_wsl_host() else None
+        self._checkpoint_action_handler: CheckpointActionHandler | None = None
+        self._action_tasks: set[asyncio.Future[bool]] = set()
+
+    def set_checkpoint_action_handler(
+        self,
+        handler: CheckpointActionHandler,
+    ) -> None:
+        """Bind notification buttons to the authoritative agent operation."""
+        self._checkpoint_action_handler = handler
 
     async def send(self, reminder: Reminder | AutoStoppedNotification) -> None:
         """Deliver an active or inactive timer reminder."""
         title, message = _reminder_text(reminder)
-        if sys.platform == "darwin":
-            await _send_macos_notification(title, message)
-            return
         if self._toast is not None:
             # A WSL distribution provides no notification daemon, so the Windows
             # desktop is the target. Keep the desktop service as a fallback for a
@@ -63,21 +81,65 @@ class NativeNotificationService:
                 logger.warning("Windows toast delivery failed: %s", error)
                 toast_error = error
             try:
-                await self._send_desktop_service(title, message)
+                await self._send_desktop_service(
+                    title,
+                    message,
+                    reminder=reminder,
+                )
             except Exception:
                 raise toast_error from None
             return
-        await self._send_desktop_service(title, message)
+        try:
+            await self._send_desktop_service(title, message, reminder=reminder)
+        except Exception as native_error:
+            if sys.platform != "darwin":
+                raise
+            logger.warning(
+                "macOS native notification delivery failed; using passive fallback: %s",
+                native_error,
+            )
+            try:
+                await _send_macos_notification(title, message)
+            except Exception as fallback_error:
+                raise fallback_error from native_error
+            if _is_active_checkpoint(reminder):
+                raise native_error
 
-    async def _send_desktop_service(self, title: str, message: str) -> None:
+    async def _send_desktop_service(
+        self,
+        title: str,
+        message: str,
+        *,
+        reminder: Reminder | AutoStoppedNotification,
+    ) -> None:
         """Deliver through the host's desktop notification service."""
-        if self._notifier is None:
-            raise RuntimeError("native notification service was not initialized")
         backend = self._notifier._backend  # noqa: SLF001
         if type(backend).__module__ == "desktop_notifier.backends.dummy":
             raise RuntimeError("native notifications are unavailable on this platform")
         if not await self._notifier.request_authorisation():
             raise RuntimeError("native notification permission was not granted")
+        buttons = self._checkpoint_buttons(reminder)
+        if buttons:
+            capabilities = await self._notifier.get_capabilities()
+            if Capability.BUTTONS not in capabilities:
+                await self._dispatch_desktop_notification(title, message)
+                raise RuntimeError(
+                    "native notification actions are unavailable on this platform"
+                )
+        await self._dispatch_desktop_notification(
+            title,
+            message,
+            buttons=buttons,
+        )
+
+    async def _dispatch_desktop_notification(
+        self,
+        title: str,
+        message: str,
+        *,
+        buttons: tuple[Button, ...] = (),
+    ) -> None:
+        """Dispatch once and verify that the backend accepted the request."""
         dispatched = False
 
         def mark_dispatched() -> None:
@@ -87,10 +149,64 @@ class NativeNotificationService:
         await self._notifier.send(
             title=title,
             message=message,
+            buttons=buttons,
             on_dispatched=mark_dispatched,
         )
         if not dispatched:
             raise RuntimeError("the desktop notification service rejected delivery")
+
+    def _checkpoint_buttons(
+        self,
+        reminder: Reminder | AutoStoppedNotification,
+    ) -> tuple[Button, ...]:
+        if not _is_active_checkpoint(reminder):
+            return ()
+        handler = self._checkpoint_action_handler
+        if handler is None:
+            raise RuntimeError("native checkpoint action handling is unavailable")
+        assert isinstance(reminder, Reminder)
+        assert reminder.checkpoint_id is not None
+        return tuple(
+            Button(
+                title=title,
+                identifier=f"time-tracker-{action.value}",
+                on_pressed=self._button_callback(action, reminder.checkpoint_id),
+            )
+            for title, action in (
+                ("Continue", CheckpointAction.CONTINUE),
+                ("Snooze", CheckpointAction.SNOOZE),
+                ("Stop", CheckpointAction.STOP),
+                ("Switch activity", CheckpointAction.SWITCH),
+            )
+        )
+
+    def _button_callback(
+        self,
+        action: CheckpointAction,
+        checkpoint_id: str,
+    ) -> Callable[[], None]:
+        def invoke() -> None:
+            handler = self._checkpoint_action_handler
+            if handler is None:
+                logger.warning("native checkpoint action handler is unavailable")
+                return
+            task: asyncio.Future[bool] = asyncio.ensure_future(
+                handler(action, checkpoint_id)
+            )
+            self._action_tasks.add(task)
+            task.add_done_callback(self._checkpoint_action_finished)
+
+        return invoke
+
+    def _checkpoint_action_finished(self, task: asyncio.Future[bool]) -> None:
+        self._action_tasks.discard(task)
+        try:
+            accepted = task.result()
+        except Exception:
+            logger.exception("native checkpoint action failed")
+            return
+        if not accepted:
+            logger.info("ignored stale native checkpoint action")
 
 
 def _reminder_text(
@@ -122,6 +238,16 @@ def _reminder_text(
     else:
         message = "Continue, snooze, stop, or switch activity."
     return (title, message)
+
+
+def _is_active_checkpoint(
+    reminder: Reminder | AutoStoppedNotification,
+) -> bool:
+    return (
+        isinstance(reminder, Reminder)
+        and reminder.kind is ReminderKind.ACTIVE
+        and reminder.checkpoint_id is not None
+    )
 
 
 def _format_minutes(value: float) -> str:

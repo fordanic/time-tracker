@@ -6,6 +6,8 @@ import asyncio
 import json
 import logging
 import sqlite3
+import sys
+import threading
 from dataclasses import asdict, replace
 from datetime import date, datetime
 from multiprocessing import AuthenticationError
@@ -45,6 +47,7 @@ from time_tracker.infrastructure.idle_detection import create_idle_detector
 from time_tracker.infrastructure.instance_lock import instance_lock
 from time_tracker.infrastructure.ipc import PROTOCOL_VERSION
 from time_tracker.infrastructure.notifications import (
+    CheckpointActionNotificationService,
     NativeNotificationService,
     NotificationService,
 )
@@ -113,6 +116,7 @@ def _serve_locked(
         range_writer=CsvRangeSummaryWriter(),
         delimiter=configuration_service.get_export_delimiter,
     )
+    uses_native_notification_service = notifier is None
     notification_service = notifier or NativeNotificationService()
     listener = Listener(
         paths.address,
@@ -120,18 +124,28 @@ def _serve_locked(
         authkey=paths.authkey(),
     )
     try:
-        asyncio.run(
-            _serve_connections(
-                listener,
-                service,
-                export_service,
-                configuration_service,
-                notification_service,
-                settings,
-                idle_detector,
-                idle_poll_seconds,
-            )
+        server = _serve_connections(
+            listener,
+            service,
+            export_service,
+            configuration_service,
+            notification_service,
+            settings,
+            idle_detector,
+            idle_poll_seconds,
         )
+        if (
+            uses_native_notification_service
+            and sys.platform == "darwin"
+            and threading.current_thread() is threading.main_thread()
+        ):
+            from time_tracker.infrastructure.macos_event_loop import (
+                create_macos_event_loop,
+            )
+
+            asyncio.run(server, loop_factory=create_macos_event_loop)
+        else:
+            asyncio.run(server)
     finally:
         listener.close()
         application_logger.removeHandler(log_handler)
@@ -180,6 +194,8 @@ async def _serve_connections(
         ),
         stop_active=stop_matching_active,
     )
+    if isinstance(notifier, CheckpointActionNotificationService):
+        notifier.set_checkpoint_action_handler(coordinator.perform_checkpoint_action)
     reminder_task = asyncio.create_task(coordinator.run())
     running = True
     try:
@@ -242,27 +258,10 @@ async def _serve_connections(
                         }
                 if checkpoint_action is not None:
                     action, checkpoint_id = checkpoint_action
-                    accepted = False
-                    if action is CheckpointAction.CONTINUE:
-                        accepted = coordinator.confirm_active(checkpoint_id)
-                    elif action is CheckpointAction.SNOOZE:
-                        accepted = coordinator.snooze(checkpoint_id)
-                    elif action is CheckpointAction.SWITCH:
-                        accepted = coordinator.request_switch(checkpoint_id)
-                    elif (
-                        action is CheckpointAction.STOP
-                        and coordinator.checkpoint_matches(checkpoint_id)
-                    ):
-                        pending = coordinator.pending_reminder()
-                        expected_entry_id = (
-                            pending.active_entry_id if pending is not None else None
-                        )
-                        if expected_entry_id is not None:
-                            stopped = await stop_matching_active(expected_entry_id)
-                            accepted = stopped is not None
-                            if accepted:
-                                coordinator.timer_changed()
-                    response["result"] = accepted
+                    response["result"] = await coordinator.perform_checkpoint_action(
+                        action,
+                        checkpoint_id,
+                    )
                 if consume_switch_request:
                     response["result"] = coordinator.consume_switch_request()
                 await asyncio.to_thread(
