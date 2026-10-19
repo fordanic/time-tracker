@@ -143,9 +143,11 @@ web interface served only to the same computer. The TUI remains the default.
   their grace periods stop the still-matching timer and notify the user; inactive
   reminders never stop a timer.
 - Active checkpoints provide Continue, Snooze, Stop, and Switch activity actions
-  through a connected foreground interface and supported native notifications.
-  Actions are conditional on the pending checkpoint and cannot mutate a newer
-  timer.
+  through a connected foreground interface and native notifications on Linux,
+  Windows, macOS, and the Windows desktop reached from WSL. Native actions are
+  conditional on the pending checkpoint and cannot mutate a newer timer. A host
+  notification service that cannot present actions may receive a passive fallback,
+  but that delivery cannot arm the automatic-stop safeguard.
 - Allow optional local-time Lunch and End-of-day checkpoints on configured
   weekdays. These safeguards are independent of the shared reminder delivery
   window and never produce catch-up notifications.

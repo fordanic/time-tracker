@@ -47,7 +47,7 @@ protocol guarantee.
 | Persistence | Standard-library `sqlite3` and numbered SQL migrations |
 | Configuration | TOML via `tomllib` |
 | Platform paths | `platformdirs` |
-| Notifications | Narrow native adapter: `desktop-notifier` on Linux/Windows, `osascript` on macOS, WinRT toasts on WSL |
+| Notifications | Narrow native adapter: actionable `desktop-notifier` backends on Linux, Windows, and bundled macOS; passive `osascript` macOS fallback; WinRT toasts on WSL |
 | Local binaries | PyInstaller, run separately on each target OS |
 | Release publication | GitHub Actions, Git tags, and GitHub CLI |
 | Quality tools | pytest, pytest-asyncio, Ruff, and mypy |
@@ -285,13 +285,20 @@ delivery fails or the TUI disconnects.
   succeeds. Checkpoint identifiers, deadlines, counters, delivery results, and
   foreground switch requests are deliberately not durable and reset on agent or
   settings restart.
-- `desktop-notifier` uses desktop services on Linux and WinRT on Windows. macOS
-  uses its built-in `osascript` notification command: on the current macOS 26
-  validation host, `UNUserNotificationCenter` rejected an otherwise valid
-  ad-hoc-signed local bundle. Reminder text is passed as command arguments rather
-  than interpolated into AppleScript source. Delivery failures do not affect
-  authoritative timer state and are written to the platform-appropriate agent
-  log. Surfacing native delivery failures in the TUI is not currently required.
+- `desktop-notifier` uses D-Bus desktop services on Linux, WinRT on Windows, and
+  `UNUserNotificationCenter` from the packaged macOS app bundle. Active
+  checkpoints attach Continue, Snooze, Stop, and Switch activity callbacks that
+  enqueue the same agent-owned conditional action used by IPC. Linux requires a
+  notification server advertising action capability. The macOS agent runs asyncio
+  on Rubicon's Core Foundation event loop so Notification Center completion and
+  action callbacks execute on the main process thread. An unbundled macOS source
+  process or an unavailable native action service falls back to a passive
+  `osascript` alert; its reminder text is passed as command arguments rather than
+  interpolated into AppleScript source. A passive fallback does not count as a
+  successfully delivered checkpoint for automatic stop. Delivery and callback
+  failures do not affect authoritative timer state and are written to the
+  platform-appropriate agent log. Surfacing native delivery failures in the TUI
+  is not currently required.
 - A WSL host reports Linux, so `desktop-notifier` selects its D-Bus backend, but a
   WSL distribution provides no notification daemon and delivery always fails.
   Detect WSL from the kernel release and registered Windows interop, then deliver
@@ -310,10 +317,13 @@ delivery fails or the TUI disconnects.
   loop cannot stall, and an unavailable interpreter falls back to desktop-service
   delivery for a user running their own daemon inside WSL. WSLg provides no X11
   screen-saver extension, so idle detection reports itself unavailable there.
-- A native activation command is a transient authenticated protocol caller, not
-  a second foreground interface. The listener serializes its one request with TUI
-  or web polling requests and closes the connection after the response; it cannot
-  hold the foreground-instance lock or maintain a parallel agent session.
+- A WSL native activation command is a transient authenticated protocol caller,
+  not a second foreground interface. The listener serializes its one request with
+  TUI or web polling requests and closes the connection after the response; it
+  cannot hold the foreground-instance lock or maintain a parallel agent session.
+  Native Linux, Windows, and macOS callbacks already execute in the agent process
+  and enqueue the same coordinator operation without opening IPC or accessing
+  SQLite directly.
 - Reminder deadlines use a monotonic schedule. A persisted start, switch, or stop
   resets the relevant deadline, as does explicit confirmation of an active
   reminder; closing a foreground interface does not affect it. The default

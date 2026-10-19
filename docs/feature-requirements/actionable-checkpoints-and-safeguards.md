@@ -1,15 +1,15 @@
 # Actionable checkpoints and scheduled safeguards
 
-**Status:** Implemented
+**Status:** Approved
 
 ## Purpose
 
 Help a user who keeps the TUI running but changes work elsewhere notice and act
 on project, activity, and stopping transitions. Replace passive active-timer
-reminders with checkpoints that can be answered from the TUI or, when running in
-WSL, from the Windows native notification. Add configurable lunch and end-of-day
-checkpoints, and optionally stop a timer after two consecutive checkpoints are
-left unanswered.
+reminders with checkpoints that can be answered from the TUI, local web
+interface, or native notification on Linux, Windows, macOS, and the Windows
+desktop reached from WSL. Add configurable lunch and end-of-day checkpoints, and
+optionally stop a timer after two consecutive checkpoints are left unanswered.
 
 The repository maintainer approved this feature, including the change to the
 existing ignored-reminder rule, in the October 18, 2026 feature request that
@@ -31,16 +31,26 @@ selected implementation.
 - Keep the same checkpoint and actions visible in the TUI and local web
   interface. An action from any surface applies to the one authoritative pending
   checkpoint.
-- On Windows notifications delivered from WSL, show actionable Continue,
-  Snooze, Stop, and Switch activity buttons. Register a current-user custom
-  protocol handler that starts the same WSL distribution and Time Tracker command
-  with an opaque checkpoint action URI. The command connects through the existing
-  authenticated agent IPC; it never accesses SQLite directly.
+- On native Linux and Windows, show actionable Continue, Snooze, Stop, and Switch
+  activity buttons through the platform backend. A button callback is handled on
+  the running agent loop and invokes the same conditional checkpoint operation as
+  foreground IPC.
+- In the packaged macOS application, show the same four actions through
+  `UNUserNotificationCenter` and keep its callback run loop integrated with the
+  agent's asyncio loop. A source checkout that is not running as a signed app
+  bundle may use the existing passive AppleScript fallback.
+- On Windows notifications delivered from WSL, show the same four buttons.
+  Register a current-user custom protocol handler that starts the same WSL
+  distribution and Time Tracker command with an opaque checkpoint action URI.
+  The command connects through the existing authenticated agent IPC; it never
+  accesses SQLite directly.
 - Give every active checkpoint an unguessable in-memory identifier. Native action
-  URIs contain only the action and identifier, never project names, activity
-  names, notes, database paths, IPC secrets, or other tracked content. Reject a
-  missing, malformed, expired, already-used, or nonmatching identifier without
-  changing timer or reminder state.
+  URIs used by WSL contain only the action and identifier. In-process native
+  button identifiers contain only a fixed action name and keep the checkpoint
+  identifier in the agent-owned callback. Neither route exposes project names,
+  activity names, notes, database paths, IPC secrets, or other tracked content.
+  Reject a missing, malformed, expired, already-used, or nonmatching identifier
+  without changing timer or reminder state.
 - Add optional Lunch and End-of-day checkpoints. Settings provides one enabled
   control and local `HH:MM` time for each plus one shared non-empty set of local
   weekdays. They are disabled by default. A configured checkpoint is emitted
@@ -93,6 +103,12 @@ selected implementation.
 - Native delivery success means the operating system accepted the notification;
   it does not assert that the user saw it. Automatic stop therefore remains
   explicitly opt-in and is described that way in Settings.
+- An active native delivery is eligible for the unanswered-checkpoint safeguard
+  only when its four actions were accepted by the platform notification service.
+  A Linux notification server without action capability, an unbundled macOS
+  source process, or another passive fallback may still alert the user, but the
+  adapter reports the actionable delivery as unavailable and the checkpoint does
+  not increment the unanswered count.
 - Use monotonic time for response-grace, periodic, and snooze deadlines. Use an
   aware local wall clock only to find the next scheduled lunch or end-of-day
   occurrence and to render the automatic-stop time.
@@ -106,11 +122,12 @@ selected implementation.
   arbitrary label to one simultaneous occurrence. Local-time safeguards follow
   the process's current local clock; the existing open product decision for DST,
   system-clock, and time-zone changes remains unchanged.
-- Protocol registration is current-user only, idempotent, timeout-bounded, and
-  contains one fixed command template. User-controlled reminder text never enters
-  registry command source, PowerShell source, action URIs, or shell interpolation.
-  Registration or activation failure leaves timer and checkpoint state unchanged
-  and is logged through the existing notification-failure path.
+- WSL protocol registration is current-user only, idempotent, timeout-bounded,
+  and contains one fixed command template. User-controlled reminder text never
+  enters registry command source, PowerShell source, action URIs, native button
+  identifiers, or shell interpolation. Registration, capability, or activation
+  failure leaves timer and checkpoint state unchanged and is logged through the
+  existing notification-failure path.
 - If an automatic stop fails, clear the expired miss sequence and leave the timer
   active. Do not retry in a loop; a later pair of successfully delivered,
   unanswered checkpoints may try again.
@@ -123,10 +140,12 @@ selected implementation.
 1. A periodic, lunch, end-of-day, or idle-triggered active checkpoint appears in
    the TUI and web interface with Continue, Snooze, Stop, and Switch activity;
    each accepted action has the specified timer and scheduling effect.
-2. A WSL-delivered Windows notification presents the four actions. Its
-   current-user protocol registration invokes the originating distribution and
-   Time Tracker command, and a valid opaque action reaches the agent without
-   exposing tracked content or the IPC secret.
+2. Native Linux, direct-Windows, and packaged-macOS notifications present the
+   four actions and route a selected action to the agent-owned checkpoint
+   operation. A WSL-delivered Windows notification presents the same actions;
+   its current-user protocol registration invokes the originating distribution
+   and Time Tracker command. Every route rejects stale actions without exposing
+   tracked content or the IPC secret.
 3. A valid Stop action stops only the active entry named by the pending
    checkpoint. Expired, replayed, malformed, and stale actions are rejected and
    cannot affect a later entry.
@@ -149,23 +168,26 @@ selected implementation.
    an automatic stop of the wrong timer.
 9. Unit tests cover checkpoint identifiers, grace and consecutive-miss policy,
    scheduled local-time calculation and deduplication, reset behavior, and action
-   validation. Integration tests cover IPC actions, live configuration, durable
-   stop, and failure behavior. TUI and web tests cover the four controls and
-   switch focus. WSL adapter tests cover protocol registration, action URIs,
-   text-as-data handling, timeout, and failure mapping without starting Windows.
-10. An interactive WSL smoke verifies all four Windows actions against a running
-    TUI and verifies the post-auto-stop notification. Until recorded in README
-    Status, that native interaction remains an outstanding validation item.
+   validation. Notification adapter tests cover button construction, callback
+   routing, platform capability failure, and passive fallback. Integration tests
+   cover IPC and native-callback actions, live configuration, durable stop, and
+   failure behavior. TUI and web tests cover the four controls and switch focus.
+   WSL adapter tests cover protocol registration, action URIs, text-as-data
+   handling, timeout, and failure mapping without starting Windows.
+10. Interactive native smokes verify all four actions against a running agent on
+    Linux, Windows, macOS, and WSL-to-Windows and verify the post-auto-stop
+    notification. Until each result is recorded in README Status, that platform's
+    native interaction remains an outstanding validation item.
 
 ## Documentation impact
 
 - Top-level requirements change the ignored-active-reminder rule to authorize an
   opt-in, two-unanswered-checkpoint automatic stop and add scheduled safeguards
   and active checkpoint actions.
-- Architecture replaces the deferred-native-action choice with an authenticated
-  current-user activation adapter, records in-memory checkpoint ownership and
-  conditional actions, and adds local-wall-clock safeguard scheduling around the
-  monotonic reminder scheduler.
+- Architecture uses in-process callbacks for native Linux, Windows, and packaged
+  macOS actions, retains the authenticated current-user activation adapter for
+  WSL, records in-memory checkpoint ownership and conditional actions, and adds
+  local-wall-clock safeguard scheduling around the monotonic reminder scheduler.
 - No database migration is required. Pending identifiers, response deadlines,
   unanswered counts, scheduled-date deduplication, and switch requests are
   agent-owned in-memory state; only the completed time entry created by an
